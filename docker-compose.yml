@@ -1,0 +1,83 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_DB: vector_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  chat-service:
+    build:
+      context: ./chat-service
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/chatbot_db
+      - VECTOR_DATABASE_URL=postgresql://user:password@postgres:5432/vector_db
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./chat-service:/app
+
+  onboarding-service:
+    build:
+      context: ./onboarding-service
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@postgres:5432/onboard_db
+      - VECTOR_DATABASE_URL=postgresql://user:password@postgres:5432/vector_db
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./onboarding-service:/app
+
+  gateway-service:
+    build:
+      context: ./gateway-service
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - CHAT_SERVICE_URL=http://chat-service:8000
+      - ONBOARDING_SERVICE_URL=http://onboarding-service:8000
+    depends_on:
+      - chat-service
+      - onboarding-service
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  minio_data:

@@ -1,0 +1,105 @@
+server:
+  port: 8080
+
+logging:
+  pattern:
+    console: "%green(%d{HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
+  level:
+    org.springframework.web: INFO
+    org.springframework.cloud.gateway: INFO
+    reactor.netty: INFO
+
+spring:
+  banner:
+    location: classpath:banner.txt
+  application:
+    name: gateway-service
+  threads:
+    virtual:
+      enabled: true
+  cloud:
+    gateway:
+      # Reactive Spring Cloud Gateway configuration
+      server:
+        webflux:
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOriginPatterns: "http://localhost:4200"
+                allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                allowedHeaders: "*"
+                exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
+                allowCredentials: true
+            add-to-simple-url-handler-mapping: true
+          routes:
+            # Onboarding Service Routes
+            - id: onboarding-documents
+              uri: http://onboarding:8001
+              predicates:
+                - Path=/api/v1/documents/**
+
+            - id: onboarding-tenants
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/tenants/**
+
+            - id: onboarding-websites
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/websites/**
+
+            - id: onboarding-ingestions
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/ingestions/**
+
+            - id: onboarding-auth
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/auth/**
+
+            - id: onboarding-plans
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/plans/**
+
+            - id: onboarding-subscriptions
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/subscriptions/**
+
+            - id: onboarding-payments
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/payments/**
+
+            - id: onboarding-widgets
+              uri: http://localhost:8001
+              predicates:
+                - Path=/api/v1/widgets/**
+
+              # Chat Service Routes
+            - id: chat-api
+              uri: http://localhost:8000
+              predicates:
+                - Path=/api/v1/chat/**
+
+            - id: chat-vectors
+              uri: http://localhost:8000
+              predicates:
+                - Path=/api/v1/vectors/**
+
+              # Health Check Routes
+            - id: onboarding-health
+              uri: http://localhost:8001
+              predicates:
+                - Path=/health/onboarding
+              filters:
+                - RewritePath=/health/onboarding,/health
+
+            - id: chat-health
+              uri: http://localhost:8000
+              predicates:
+                - Path=/health/chat
+              filters:
+                - RewritePath=/health/chat,/health

@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FactorialBot - Plan Management</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            padding: 40px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            color: #5D3EC1;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .current-plan {
+            background: linear-gradient(135deg, #5D3EC1, #C15D3E);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 40px;
+            text-align: center;
+        }
+
+        .current-plan h2 {
+            margin-bottom: 10px;
+            font-size: 1.8em;
+        }
+
+        .current-plan .plan-name {
+            font-size: 2.2em;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+
+        .current-plan .plan-cost {
+            font-size: 1.5em;
+            opacity: 0.9;
+        }
+
+        .billing-toggle {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .toggle-container {
+            display: inline-flex;
+            background: #f0f0f0;
+            border-radius: 30px;
+            padding: 5px;
+            position: relative;
+        }
+
+        .toggle-option {
+            padding: 10px 25px;
+            cursor: pointer;
+            border-radius: 25px;
+            transition: all 0.3s ease;
+            font-weight: 500;
+        }
+
+        .toggle-option.active {
+            background: #5D3EC1;
+            color: white;
+        }
+
+        .plans-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .plan-card {
+            background: #fff;
+            border: 2px solid #e0e0e0;
+            border-radius: 15px;
+            padding: 30px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .plan-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .plan-card.current {
+            border-color: #5D3EC1;
+            background: linear-gradient(135deg, #5D3EC1, #764ba2);
+            color: white;
+        }
+
+        .plan-card.recommended {
+            border-color: #3EC15D;
+            position: relative;
+        }
+
+        .plan-card.recommended::before {
+            content: "Recommended";
+            position: absolute;
+            top: 15px;
+            right: -30px;
+            background: #3EC15D;
+            color: white;
+            padding: 5px 40px;
+            transform: rotate(45deg);
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+
+        .plan-card h3 {
+            font-size: 1.8em;
+            margin-bottom: 10px;
+            color: #5D3EC1;
+        }
+
+        .plan-card.current h3 {
+            color: white;
+        }
+
+        .plan-price {
+            font-size: 2.5em;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+
+        .plan-price .currency {
+            font-size: 0.6em;
+            vertical-align: top;
+        }
+
+        .plan-price .period {
+            font-size: 0.4em;
+            opacity: 0.8;
+        }
+
+        .plan-features {
+            list-style: none;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .plan-features li {
+            padding: 8px 0;
+            padding-left: 25px;
+            position: relative;
+        }
+
+        .plan-features li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #3EC15D;
+            font-weight: bold;
+        }
+
+        .plan-card.current .plan-features li::before {
+            color: #fff;
+        }
+
+        .plan-button {
+            background: #5D3EC1;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 30px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        .plan-button:hover {
+            background: #4A2C9A;
+            transform: scale(1.05);
+        }
+
+        .plan-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .plan-card.current .plan-button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 2px solid white;
+        }
+
+        .plan-card.current .plan-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #5D3EC1;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #ff6b6b;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .success {
+            background: #3EC15D;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        .modal h3 {
+            color: #5D3EC1;
+            margin-bottom: 20px;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+
+        .modal-button {
+            padding: 12px 25px;
+            border-radius: 25px;
+            border: none;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-button.primary {
+            background: #5D3EC1;
+            color: white;
+        }
+
+        .modal-button.secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+                margin: 10px;
+                border-radius: 15px;
+            }
+
+            .plans-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+
+            .header h1 {
+                font-size: 2em;
+            }
+
+            .plan-card {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 FactorialBot Plan Management</h1>
+            <p>Choose the perfect plan for your AI-powered chat needs</p>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Loading your current plan...</p>
+        </div>
+
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="success" class="success" style="display: none;"></div>
+
+        <div id="content" style="display: none;">
+            <div id="current-plan" class="current-plan"></div>
+
+            <div class="billing-toggle">
+                <div class="toggle-container">
+                    <div class="toggle-option active" data-cycle="monthly">Monthly</div>
+                    <div class="toggle-option" data-cycle="yearly">Yearly (Save 20%)</div>
+                </div>
+            </div>
+
+            <div id="plans-grid" class="plans-grid"></div>
+        </div>
+    </div>
+
+    <!-- Plan Switch Confirmation Modal -->
+    <div id="switchModal" class="modal">
+        <div class="modal-content">
+            <h3>Confirm Plan Switch</h3>
+            <div id="switchDetails"></div>
+            <div class="modal-buttons">
+                <button class="modal-button secondary" onclick="closeSwitchModal()">Cancel</button>
+                <button class="modal-button primary" onclick="confirmPlanSwitch()">Confirm Switch</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTenantData = null;
+        let selectedBillingCycle = 'monthly';
+        let pendingPlanSwitch = null;
+
+        // Configuration - Update these with your actual API endpoints
+        const API_BASE_URL = 'http://localhost:8001/api/v1';
+        
+        // Get tenant ID from URL parameters or prompt user
+        function getTenantId() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const tenantId = urlParams.get('tenant_id');
+            
+            if (!tenantId) {
+                const input = prompt('Please enter your Tenant ID:');
+                if (input) {
+                    const url = new URL(window.location);
+                    url.searchParams.set('tenant_id', input);
+                    window.location.href = url.toString();
+                    return null;
+                }
+                throw new Error('Tenant ID is required');
+            }
+            
+            return tenantId;
+        }
+
+        // Get auth token - in a real app, this would come from login
+        function getAuthToken() {
+            const token = localStorage.getItem('authToken');
+            if (!token) {
+                const input = prompt('Please enter your authentication token:');
+                if (input) {
+                    localStorage.setItem('authToken', input);
+                    return input;
+                }
+                throw new Error('Authentication token is required');
+            }
+            return token;
+        }
+
+        // API call helper
+        async function apiCall(endpoint, options = {}) {
+            const token = getAuthToken();
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'API call failed');
+            }
+
+            return response.json();
+        }
+
+        // Load current plan data
+        async function loadCurrentPlan() {
+            try {
+                const tenantId = getTenantId();
+                currentTenantData = await apiCall(`/tenants/${tenantId}/current-plan`);
+                renderCurrentPlan();
+                renderAvailablePlans();
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            } catch (error) {
+                showError(error.message);
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // Render current plan section
+        function renderCurrentPlan() {
+            const currentPlanDiv = document.getElementById('current-plan');
+            const plan = currentTenantData.current_plan;
+            const cost = selectedBillingCycle === 'yearly' ? plan.yearly_plan_cost : plan.monthly_plan_cost;
+            
+            currentPlanDiv.innerHTML = `
+                <h2>Your Current Plan</h2>
+                <div class="plan-name">${plan.name}</div>
+                <div class="plan-cost">$${cost} / ${selectedBillingCycle === 'yearly' ? 'year' : 'month'}</div>
+                <p>${plan.description}</p>
+            `;
+        }
+
+        // Render available plans
+        function renderAvailablePlans() {
+            const plansGrid = document.getElementById('plans-grid');
+            const plans = currentTenantData.available_plans;
+            
+            plansGrid.innerHTML = plans.map(plan => {
+                const cost = selectedBillingCycle === 'yearly' ? plan.yearly_plan_cost : plan.monthly_plan_cost;
+                const isCurrent = plan.is_current;
+                const isRecommended = plan.name === 'Pro'; // You can customize this logic
+                
+                const features = Object.entries(plan.features || {}).map(([key, value]) => {
+                    if (typeof value === 'boolean' && value) {
+                        return key.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
+                    }
+                    return null;
+                }).filter(Boolean);
+
+                // Add plan limits as features
+                const planFeatures = [
+                    `${plan.document_limit} documents`,
+                    `${plan.website_limit} websites`,
+                    `${plan.daily_chat_limit} chats/day`,
+                    `${plan.monthly_chat_limit} chats/month`,
+                    ...features
+                ];
+
+                return `
+                    <div class="plan-card ${isCurrent ? 'current' : ''} ${isRecommended ? 'recommended' : ''}">
+                        <h3>${plan.name}</h3>
+                        <div class="plan-price">
+                            <span class="currency">$</span>${cost}
+                            <span class="period">/${selectedBillingCycle === 'yearly' ? 'year' : 'month'}</span>
+                        </div>
+                        <ul class="plan-features">
+                            ${planFeatures.map(feature => `<li>${feature}</li>`).join('')}
+                        </ul>
+                        <button class="plan-button" 
+                                onclick="initiatePlanSwitch('${plan.id}', '${plan.name}', ${cost})"
+                                ${isCurrent ? 'disabled' : ''}>
+                            ${isCurrent ? 'Current Plan' : 'Switch to ' + plan.name}
+                        </button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Handle billing cycle toggle
+        function setupBillingToggle() {
+            document.querySelectorAll('.toggle-option').forEach(option => {
+                option.addEventListener('click', function() {
+                    // Remove active class from all options
+                    document.querySelectorAll('.toggle-option').forEach(opt => 
+                        opt.classList.remove('active'));
+                    
+                    // Add active class to clicked option
+                    this.classList.add('active');
+                    
+                    // Update billing cycle
+                    selectedBillingCycle = this.dataset.cycle;
+                    
+                    // Re-render plans with new pricing
+                    renderCurrentPlan();
+                    renderAvailablePlans();
+                });
+            });
+        }
+
+        // Initiate plan switch
+        function initiatePlanSwitch(planId, planName, cost) {
+            const currentCost = selectedBillingCycle === 'yearly' 
+                ? currentTenantData.current_plan.yearly_plan_cost 
+                : currentTenantData.current_plan.monthly_plan_cost;
+            
+            const costDifference = cost - currentCost;
+            
+            pendingPlanSwitch = {
+                planId,
+                planName,
+                cost,
+                billingCycle: selectedBillingCycle
+            };
+            
+            let changeType = '';
+            let changeColor = '';
+            
+            if (costDifference > 0) {
+                changeType = `Upgrade (+$${Math.abs(costDifference)})`;
+                changeColor = '#3EC15D';
+            } else if (costDifference < 0) {
+                changeType = `Downgrade (-$${Math.abs(costDifference)})`;
+                changeColor = '#C15D3E';
+            } else {
+                changeType = 'Same price';
+                changeColor = '#666';
+            }
+            
+            document.getElementById('switchDetails').innerHTML = `
+                <p>You're about to switch from <strong>${currentTenantData.current_plan.name}</strong> to <strong>${planName}</strong></p>
+                <p style="color: ${changeColor}; font-weight: bold; margin: 15px 0;">${changeType}</p>
+                <p>New cost: <strong>$${cost} / ${selectedBillingCycle === 'yearly' ? 'year' : 'month'}</strong></p>
+                <p style="font-size: 0.9em; color: #666;">This change will take effect immediately.</p>
+            `;
+            
+            document.getElementById('switchModal').style.display = 'block';
+        }
+
+        // Close switch modal
+        function closeSwitchModal() {
+            document.getElementById('switchModal').style.display = 'none';
+            pendingPlanSwitch = null;
+        }
+
+        // Confirm plan switch
+        async function confirmPlanSwitch() {
+            if (!pendingPlanSwitch) return;
+            
+            try {
+                document.querySelector('.modal-button.primary').disabled = true;
+                document.querySelector('.modal-button.primary').textContent = 'Processing...';
+                
+                const tenantId = getTenantId();
+                const response = await apiCall(`/tenants/${tenantId}/switch-plan`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        new_plan_id: pendingPlanSwitch.planId,
+                        billing_cycle: pendingPlanSwitch.billingCycle
+                    })
+                });
+                
+                closeSwitchModal();
+                showSuccess(`Successfully switched to ${pendingPlanSwitch.planName}!`);
+                
+                // Reload the page to show updated plan
+                setTimeout(() => {
+                    window.location.reload();
+                }, 2000);
+                
+            } catch (error) {
+                showError(error.message);
+                document.querySelector('.modal-button.primary').disabled = false;
+                document.querySelector('.modal-button.primary').textContent = 'Confirm Switch';
+            }
+        }
+
+        // Show error message
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        // Show success message
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            setTimeout(() => {
+                successDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        // Initialize the page
+        async function init() {
+            setupBillingToggle();
+            await loadCurrentPlan();
+        }
+
+        // Handle clicks outside modal to close
+        window.onclick = function(event) {
+            const modal = document.getElementById('switchModal');
+            if (event.target === modal) {
+                closeSwitchModal();
+            }
+        }
+
+        // Start the application
+        init().catch(error => {
+            console.error('Initialization failed:', error);
+            showError('Failed to initialize plan management: ' + error.message);
+        });
+    </script>
+</body>
+</html>

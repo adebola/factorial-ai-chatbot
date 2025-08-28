@@ -1,0 +1,39 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """
+    Application settings - Non-sensitive configuration only
+    All sensitive values (API keys, secrets, URLs) must be loaded from environment variables
+    """
+    
+    # API Configuration (non-sensitive)
+    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: str = "Onboarding Service"
+    
+    # Scraping Defaults (non-sensitive)
+    MAX_PAGES_PER_SITE: int = 100
+    SCRAPING_DELAY: float = 1.0
+    
+    # Password Policy (non-sensitive)
+    PASSWORD_MIN_LENGTH: int = 8
+    
+    # Billing Defaults (non-sensitive)
+    DEFAULT_CURRENCY: str = "NGN"
+    SUBSCRIPTION_GRACE_PERIOD_DAYS: int = 3
+    TRIAL_PERIOD_DAYS: int = 14
+
+    # Database Pool Defaults (non-sensitive)
+    POOL_SIZE: int = 10
+    POOL_MAX_OVERFLOW: int = 20
+    POOL_RECYCLE_SECONDS: int = 3600
+    
+    # AWS Region Default (non-sensitive)
+    AWS_REGION: str = "us-east-1"
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore"  # Ignore extra environment variables
+
+
+settings = Settings()
