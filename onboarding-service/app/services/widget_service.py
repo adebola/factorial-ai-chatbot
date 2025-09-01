@@ -25,8 +25,14 @@ class WidgetService:
     def generate_widget_files(self, tenant: Tenant) -> Dict[str, str]:
         """Generate all widget files for a tenant"""
         
-        # Get the logo as base64
-        logo_base64 = self._get_logo_base64()
+        # Get tenant settings for customization
+        tenant_settings = self._get_tenant_settings(tenant.id)
+        
+        # Get the logo (either custom or default)
+        logo_base64 = self._get_logo_base64(tenant_settings)
+        
+        # Use settings values or defaults
+        colors = self._get_colors(tenant_settings)
         
         from datetime import datetime
         
@@ -35,11 +41,16 @@ class WidgetService:
             "tenant_name": tenant.name,
             "api_key": tenant.api_key,
             "logo_base64": logo_base64,
-            "colors": self.colors,
+            "colors": colors,
             "widget_id": f"factorial-chat-{tenant.id}",
             "backend_url": os.getenv("BACKEND_URL", "http://localhost:8001"),
             "chat_service_url": os.getenv("CHAT_SERVICE_URL", "http://localhost:8000"),
-            "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+            # Settings-based customization
+            "hover_text": tenant_settings.get("hover_text", "Chat with us!"),
+            "welcome_message": tenant_settings.get("welcome_message", "Hello! How can I help you today?"),
+            "chat_window_title": tenant_settings.get("chat_window_title", "Chat Support"),
+            "has_custom_logo": tenant_settings.get("company_logo_url") is not None
         }
         
         return {
@@ -49,8 +60,53 @@ class WidgetService:
             "integration-guide.html": self._generate_integration_guide(context)
         }
     
-    def _get_logo_base64(self) -> str:
-        """Get the FactorialBot logo as base64"""
+    def _get_tenant_settings(self, tenant_id: str) -> Dict[str, Any]:
+        """Get tenant settings for widget customization"""
+        try:
+            from .settings_service import SettingsService
+            settings_service = SettingsService(self.db)
+            settings = settings_service.get_tenant_settings(tenant_id)
+            
+            if settings:
+                return {
+                    "primary_color": settings.primary_color,
+                    "secondary_color": settings.secondary_color,
+                    "company_logo_url": settings.company_logo_url,
+                    "hover_text": settings.hover_text,
+                    "welcome_message": settings.welcome_message,
+                    "chat_window_title": settings.chat_window_title,
+                }
+            return {}
+        except Exception as e:
+            print(f"Warning: Could not load tenant settings for {tenant_id}: {str(e)}")
+            return {}
+    
+    def _get_colors(self, tenant_settings: Dict[str, Any]) -> Dict[str, str]:
+        """Get colors with tenant customization applied"""
+        colors = self.colors.copy()
+        
+        # Override with tenant settings if available
+        if tenant_settings.get("primary_color"):
+            colors["primary"] = tenant_settings["primary_color"]
+        if tenant_settings.get("secondary_color"):
+            colors["secondary"] = tenant_settings["secondary_color"]
+            
+        return colors
+    
+    def _get_logo_base64(self, tenant_settings: Dict[str, Any] = None) -> str:
+        """Get the logo as base64 (custom tenant logo or default FactorialBot logo)"""
+        # Try to get custom company logo first
+        if tenant_settings and tenant_settings.get("company_logo_url"):
+            try:
+                from .storage_service import StorageService
+                storage_service = StorageService()
+                logo_data = storage_service.download_file(tenant_settings["company_logo_url"])
+                return base64.b64encode(logo_data).decode()
+            except Exception as e:
+                print(f"Warning: Could not load custom logo: {str(e)}")
+                # Fall through to default logo
+        
+        # Use default FactorialBot logo
         try:
             logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "static", "factorialbot_logo.svg")
             with open(logo_path, "r") as f:
@@ -82,7 +138,11 @@ class WidgetService:
             gray: '{{ colors.gray }}',
             darkGray: '{{ colors.dark_gray }}',
             lightGray: '{{ colors.light_gray }}'
-        }
+        },
+        // Customizable text
+        hoverText: '{{ hover_text }}',
+        welcomeMessage: '{{ welcome_message }}',
+        chatWindowTitle: '{{ chat_window_title }}'
     };
     
     // Chat Widget Class
@@ -380,7 +440,7 @@ class WidgetService:
             widgetContainer.id = CONFIG.widgetId;
             
             widgetContainer.innerHTML = `
-                <button class="factorial-chat-button" id="factorial-chat-toggle">
+                <button class="factorial-chat-button" id="factorial-chat-toggle" title="${CONFIG.hoverText}">
                     <svg viewBox="0 0 24 24">
                         <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
                     </svg>
@@ -390,14 +450,14 @@ class WidgetService:
                 <div class="factorial-chat-window" id="factorial-chat-window">
                     <div class="factorial-chat-header">
                         <button class="factorial-chat-close" id="factorial-chat-close">&times;</button>
-                        <h3 class="factorial-chat-title">${CONFIG.tenantName}</h3>
-                        <p class="factorial-chat-subtitle">How can we help you today?</p>
+                        <h3 class="factorial-chat-title">${CONFIG.chatWindowTitle}</h3>
+                        <p class="factorial-chat-subtitle">${CONFIG.tenantName}</p>
                     </div>
                     
                     <div class="factorial-chat-messages" id="factorial-chat-messages">
                         <div class="factorial-chat-message bot">
                             <div class="factorial-chat-message-content">
-                                👋 Hello! I'm here to help you. What can I assist you with today?
+                                ${CONFIG.welcomeMessage}
                             </div>
                         </div>
                     </div>

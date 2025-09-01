@@ -16,6 +16,7 @@ from .api.widgets import router as widgets_router
 from .api.auth import router as auth_router
 from .api.payments import router as payments_router
 from .api.subscriptions import router as subscriptions_router
+from .api.settings import router as settings_router
 from .core.config import settings
 from .core.logging_config import (
     setup_logging, 
@@ -141,6 +142,7 @@ app.include_router(widgets_router, prefix=settings.API_V1_STR, tags=["chat-widge
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["authentication"])
 app.include_router(payments_router, prefix=settings.API_V1_STR, tags=["payments"])
 app.include_router(subscriptions_router, prefix=settings.API_V1_STR, tags=["subscriptions"])
+app.include_router(settings_router, prefix=settings.API_V1_STR, tags=["tenant-settings"])
 
 
 @app.get("/")

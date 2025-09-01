@@ -1,4 +1,4 @@
-# Use OpenJDK 21 as the base image
+# Use OpenJDK 21 as the base image (Intel/AMD64 platform specified in build command)
 FROM openjdk:21-jdk-slim
 
 # Set working directory

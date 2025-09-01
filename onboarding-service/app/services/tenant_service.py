@@ -140,6 +140,15 @@ class TenantService:
         self.db.commit()
         self.db.refresh(tenant)
         
+        # Initialize default settings for the new tenant
+        try:
+            from .settings_service import SettingsService
+            settings_service = SettingsService(self.db)
+            settings_service.create_default_settings(tenant.id)
+        except Exception as e:
+            # Log the error but don't fail tenant creation
+            print(f"Warning: Failed to create default settings for tenant {tenant.id}: {str(e)}")
+        
         return tenant
     
     def get_tenant_by_id(self, tenant_id: str) -> Optional[Tenant]:

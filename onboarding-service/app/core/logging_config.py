@@ -134,8 +134,11 @@ def generate_request_id() -> str:
 # Helper functions for common logging patterns
 def log_api_request(method: str, path: str, tenant_id: str = None, **kwargs):
     """Log an API request."""
-    logger = get_logger("api")
-    logger.info(
+
+    if path == "/health":
+        return
+
+    get_logger("api").info(
         "API request",
         method=method,
         path=path,
@@ -146,8 +149,11 @@ def log_api_request(method: str, path: str, tenant_id: str = None, **kwargs):
 
 def log_api_response(method: str, path: str, status_code: int, duration_ms: float, **kwargs):
     """Log an API response."""
-    logger = get_logger("api")
-    logger.info(
+
+    if path == "/health":
+        return
+
+    get_logger("api").info(
         "API response",
         method=method,
         path=path,
@@ -159,8 +165,7 @@ def log_api_response(method: str, path: str, status_code: int, duration_ms: floa
 
 def log_tenant_operation(operation: str, tenant_id: str, **kwargs):
     """Log a tenant-specific operation."""
-    logger = get_logger("tenant")
-    logger.info(
+    get_logger("tenant").info(
         "Tenant operation",
         operation=operation,
         tenant_id=tenant_id,
@@ -170,8 +175,7 @@ def log_tenant_operation(operation: str, tenant_id: str, **kwargs):
 
 def log_document_processing(action: str, document_id: str, tenant_id: str, **kwargs):
     """Log document processing events."""
-    logger = get_logger("documents")
-    logger.info(
+    get_logger("documents").info(
         "Document processing",
         action=action,
         document_id=document_id,
@@ -182,8 +186,7 @@ def log_document_processing(action: str, document_id: str, tenant_id: str, **kwa
 
 def log_vector_operation(operation: str, tenant_id: str, collection_name: str = None, **kwargs):
     """Log vector store operations."""
-    logger = get_logger("vectors")
-    logger.info(
+    get_logger("vectors").info(
         "Vector operation",
         operation=operation,
         tenant_id=tenant_id,

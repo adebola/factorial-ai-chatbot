@@ -248,8 +248,7 @@ def generate_request_id() -> str:
 # Helper functions for common logging patterns
 def log_websocket_connection(action: str, tenant_id: str = None, session_id: str = None, **kwargs):
     """Log WebSocket connection events."""
-    logger = get_logger("websocket")
-    logger.info(
+    get_logger("websocket").info(
         "WebSocket connection",
         action=action,
         tenant_id=tenant_id,
@@ -260,8 +259,7 @@ def log_websocket_connection(action: str, tenant_id: str = None, session_id: str
 
 def log_chat_message(direction: str, tenant_id: str, session_id: str, message_length: int = None, **kwargs):
     """Log chat message events."""
-    logger = get_logger("chat")
-    logger.info(
+    get_logger("chat").info(
         "Chat message",
         direction=direction,  # "incoming" or "outgoing"
         tenant_id=tenant_id,
@@ -273,8 +271,7 @@ def log_chat_message(direction: str, tenant_id: str, session_id: str, message_le
 
 def log_ai_generation(tenant_id: str, session_id: str, duration_ms: float, token_count: int = None, **kwargs):
     """Log AI response generation."""
-    logger = get_logger("ai")
-    logger.info(
+    get_logger("ai").info(
         "AI generation",
         tenant_id=tenant_id,
         session_id=session_id,
@@ -286,8 +283,7 @@ def log_ai_generation(tenant_id: str, session_id: str, duration_ms: float, token
 
 def log_vector_search(tenant_id: str, query_length: int, results_count: int, duration_ms: float, **kwargs):
     """Log vector search operations."""
-    logger = get_logger("vectors")
-    logger.info(
+    get_logger("vectors").info(
         "Vector search",
         tenant_id=tenant_id,
         query_length=query_length,
@@ -299,8 +295,7 @@ def log_vector_search(tenant_id: str, query_length: int, results_count: int, dur
 
 def log_tenant_operation(operation: str, tenant_id: str, **kwargs):
     """Log a tenant-specific operation."""
-    logger = get_logger("tenant")
-    logger.info(
+    get_logger("tenant").info(
         "Tenant operation",
         operation=operation,
         tenant_id=tenant_id,
@@ -310,8 +305,11 @@ def log_tenant_operation(operation: str, tenant_id: str, **kwargs):
 
 def log_api_request(method: str, path: str, tenant_id: str = None, user_agent: str = None, client_ip: str = None, **kwargs):
     """Log API request events."""
-    logger = get_logger("api")
-    logger.info(
+
+    if path == "/health":
+        return
+
+    get_logger("api").info(
         "API request",
         method=method,
         path=path,

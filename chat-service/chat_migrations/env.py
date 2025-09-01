@@ -12,14 +12,15 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Import models to register them with Base.metadata
 from app.models.chat_models import Base
-from app.core.config import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override database URL with the one from settings
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Get DATABASE_URL directly from environment (for Docker/production compatibility)
+database_url = os.environ.get("DATABASE_URL")
+if database_url:
+    config.set_main_option("sqlalchemy.url", database_url)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

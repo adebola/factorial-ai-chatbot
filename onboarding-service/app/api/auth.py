@@ -1,18 +1,19 @@
+import os
+from datetime import timedelta
+from typing import Dict, Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, Any
-from datetime import timedelta
 
 from ..core.database import get_db
-from ..core.config import settings
+from ..core.logging_config import get_logger
+from ..services.auth import AuthService
 from ..services.tenant_service import (
-    TenantService, 
-    TenantLogin, 
-    ForgotPasswordRequest, 
+    TenantService,
+    TenantLogin,
+    ForgotPasswordRequest,
     ResetPasswordRequest
 )
-from ..services.auth import AuthService
-from ..core.logging_config import get_logger
 
 router = APIRouter()
 
@@ -40,7 +41,7 @@ async def login_tenant(
         )
     
     # Create JWT tokens with enhanced claims
-    access_token_expires = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token_expires = timedelta(minutes=float(os.environ['JWT_ACCESS_TOKEN_EXPIRE_MINUTES']))
     access_token = AuthService.create_access_token(
         data={
             "sub": tenant.id,
@@ -64,7 +65,7 @@ async def login_tenant(
         "access_token": access_token,
         "refresh_token": refresh_token,
         "token_type": "bearer",
-        "expires_in": settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "expires_in": os.environ['JWT_ACCESS_TOKEN_EXPIRE_MINUTES'] * 60,
         "tenant_id": tenant.id,
         "username": tenant.username
     }

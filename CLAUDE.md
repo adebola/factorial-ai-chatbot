@@ -8,7 +8,7 @@ FactorialBot is a multi-tenant AI chat platform built with FastAPI and LangChain
 
 ## Architecture
 
-The system consists of two main microservices:
+The system consists of three main microservices:
 
 ### Chat Service (Port 8000)
 - **Location**: `./chat-service/`
@@ -30,6 +30,17 @@ The system consists of two main microservices:
   - File storage with MinIO/S3
   - Vector store population for RAG
 
+### Authorization Server (Port 9000)
+- **Location**: `./authorization-server/`
+- **Purpose**: OAuth 2.0 authentication and authorization using Spring Authorization Server
+- **Key Components**:
+  - OAuth 2.0 authorization flows (Authorization Code, Client Credentials)
+  - JWT token issuance and validation
+  - Client registration and management
+  - User authentication and consent management
+  - PKCE (Proof Key for Code Exchange) support
+- **Migration Plan**: Will eventually replace custom JWT authentication in onboarding service
+
 ## Development Commands
 
 ### Setup and Installation
@@ -40,10 +51,12 @@ docker-compose up -d postgres redis minio
 # Install dependencies
 cd chat-service && pip install -r requirements.txt && cd ..
 cd onboarding-service && pip install -r requirements.txt && cd ..
+cd authorization-server && mvn clean install && cd ..
 
 # Copy environment files
 cp chat-service/.env.example chat-service/.env
 cp onboarding-service/.env.example onboarding-service/.env
+cp authorization-server/.env.example authorization-server/.env
 ```
 
 ### Running Services
@@ -58,6 +71,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 cd onboarding-service  
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+
+cd authorization-server
+mvn spring-boot:run
 ```
 
 ### Testing
@@ -67,9 +83,14 @@ cd chat-service && python -m pytest tests/
 
 # Run tests for onboarding service
 cd onboarding-service && python -m pytest tests/
+
+# Run tests for authorization server
+cd authorization-server && mvn test
 ```
 
 ### Database Management
+
+#### Alembic Migrations (Application Models)
 ```bash
 # Create migration
 alembic revision --autogenerate -m "description"
@@ -77,6 +98,23 @@ alembic revision --autogenerate -m "description"
 # Run migrations
 alembic upgrade head
 ```
+
+#### Vector Database Schema Changes
+**IMPORTANT**: Vector database schema changes are NOT managed by Alembic. When making changes to vector database schemas or any DDL that affects the vector database:
+
+1. Create DDL files in `docker-build/db-init/` directory
+2. Follow naming convention: `{ordered-number}-{relevant-narrative}.sql`
+3. Examples:
+   - `001-create-vector-tables.sql`
+   - `002-add-vector-indexes.sql` 
+   - `003-update-vector-constraints.sql`
+
+```bash
+# Example: Creating a new vector schema file
+# docker-build/db-init/004-add-tenant-vector-partitions.sql
+```
+
+These files are executed during database initialization and should contain all necessary DDL for vector database functionality.
 
 ## Multi-Tenancy Architecture
 
@@ -119,8 +157,9 @@ The platform implements strict tenant isolation:
 
 ## Service Communication
 
-- **Inter-service**: HTTP APIs between chat and onboarding services
-- **Client Communication**: WebSocket for chat, REST for onboarding
+- **Inter-service**: HTTP APIs between chat, onboarding, and authorization services
+- **Client Communication**: WebSocket for chat, REST for onboarding/auth
+- **Authentication Flow**: OAuth 2.0 via authorization server (future migration)
 - **Data Flow**: Documents/websites → processing → vector store → chat responses
 
 ## External Dependencies
@@ -328,7 +367,7 @@ logger.info("Operation completed",
 ### Service Testing Protocol
 **CRITICAL**: Only clean up processes that Claude Code starts during testing:
 
-1. **Before Testing**: Note any running services on target ports (8000, 8001) - these belong to the user
+1. **Before Testing**: Note any running services on target ports (8000, 8001, 9000) - these belong to the user
 2. **During Testing**: 
    - If you need to kill user processes to run tests, that's acceptable
    - Keep track of which processes YOU start during testing
@@ -340,7 +379,7 @@ logger.info("Operation completed",
 # Example: Only kill processes YOU started
 # If you started a service with uvicorn, kill it
 # If you started a background bash process, kill it
-# Do NOT blindly kill all processes on ports 8000/8001
+# Do NOT blindly kill all processes on ports 8000/8001/9000
 ```
 
 **Process Ownership Rules**:

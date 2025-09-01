@@ -16,4 +16,28 @@ target/
 .idea/**/uiDesigner.xml
 .idea/**/gradle.xml
 .idea/**/libraries
-/docker-build/docker-compose.yml
+# Docker Compose Files (may contain sensitive information)
+docker-build/docker-compose*.yml
+docker-build/docker-compose*.yaml
+**/docker-compose*.yml
+**/docker-compose*.yaml
+
+# Python Cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.pytest_cache/
+
+# Logs
+*.log
+logs/
+
+# Environment and secrets
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem

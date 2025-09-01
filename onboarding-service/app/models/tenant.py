@@ -89,8 +89,9 @@ class Tenant(Base):
     # Configuration for this tenant
     config = Column(JSON, default={})
     
-    # Relationship
+    # Relationships
     plan = relationship("Plan", back_populates="tenants")
+    settings = relationship("TenantSettings", back_populates="tenant", uselist=False)
 
 
 class Document(Base):
