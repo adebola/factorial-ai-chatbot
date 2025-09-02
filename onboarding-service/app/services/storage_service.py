@@ -2,7 +2,8 @@ from minio import Minio
 from minio.error import S3Error
 from typing import BinaryIO, Optional
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import urljoin
 from ..core.config import settings
 
 
@@ -93,3 +94,77 @@ class StorageService:
         except S3Error as e:
             print(f"Error listing files: {e}")
             return []
+    
+    def get_public_url(self, object_name: str, expires: timedelta = timedelta(days=7)) -> str:
+        """Generate a presigned URL for public access to the file"""
+        try:
+            # For MinIO, generate presigned URL for GET operation
+            url = self.client.presigned_get_object(
+                self.bucket_name,
+                object_name,
+                expires=expires
+            )
+            return url
+        except S3Error as e:
+            print(f"Error generating public URL: {e}")
+            return ""
+    
+    def get_permanent_public_url(self, object_name: str) -> str:
+        """
+        Generate a permanent public URL (only works if bucket/object is set to public)
+        For production, you should configure MinIO bucket policy for public read access
+        """
+        try:
+            # Construct public URL manually
+            minio_endpoint = os.environ.get("MINIO_ENDPOINT")
+            secure = os.environ.get("MINIO_SECURE", "false").lower() == "true"
+            protocol = "https" if secure else "http"
+            
+            # For direct access (requires public bucket policy)
+            return f"{protocol}://{minio_endpoint}/{self.bucket_name}/{object_name}"
+        except Exception as e:
+            print(f"Error generating permanent public URL: {e}")
+            return ""
+    
+    def upload_logo_file(
+        self, 
+        tenant_id: str, 
+        file_data: BinaryIO, 
+        filename: str,
+        content_type: str
+    ) -> tuple[str, str]:
+        """
+        Upload logo file and return both object name and public URL
+        Returns: (object_name, public_url)
+        """
+        # Generate unique filename specifically for logos
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_extension = os.path.splitext(filename)[1]
+        unique_filename = f"logo{file_extension}"
+        
+        # Store in a logos subdirectory for better organization
+        object_name = f"tenant_{tenant_id}/logos/{unique_filename}"
+        
+        try:
+            # Upload file with cache control headers for logos
+            self.client.put_object(
+                self.bucket_name,
+                object_name,
+                file_data,
+                length=-1,
+                content_type=content_type,
+                part_size=10*1024*1024,
+                metadata={
+                    'uploaded_at': timestamp,
+                    'file_type': 'logo',
+                    'tenant_id': tenant_id
+                }
+            )
+            
+            # Generate public URL (7 days expiry for presigned URLs)
+            public_url = self.get_public_url(object_name, timedelta(days=7))
+            
+            return object_name, public_url
+            
+        except S3Error as e:
+            raise Exception(f"Failed to upload logo file: {str(e)}")

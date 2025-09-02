@@ -28,8 +28,8 @@ class WidgetService:
         # Get tenant settings for customization
         tenant_settings = self._get_tenant_settings(tenant.id)
         
-        # Get the logo (either custom or default)
-        logo_base64 = self._get_logo_base64(tenant_settings)
+        # Get logo information (URL or base64)
+        logo_info = self._get_logo_info(tenant_settings)
         
         # Use settings values or defaults
         colors = self._get_colors(tenant_settings)
@@ -40,7 +40,7 @@ class WidgetService:
             "tenant_id": tenant.id,
             "tenant_name": tenant.name,
             "api_key": tenant.api_key,
-            "logo_base64": logo_base64,
+            "logo_info": logo_info,
             "colors": colors,
             "widget_id": f"factorial-chat-{tenant.id}",
             "backend_url": os.getenv("BACKEND_URL", "http://localhost:8001"),
@@ -50,7 +50,7 @@ class WidgetService:
             "hover_text": tenant_settings.get("hover_text", "Chat with us!"),
             "welcome_message": tenant_settings.get("welcome_message", "Hello! How can I help you today?"),
             "chat_window_title": tenant_settings.get("chat_window_title", "Chat Support"),
-            "has_custom_logo": tenant_settings.get("company_logo_url") is not None
+            "has_custom_logo": logo_info["is_custom"]
         }
         
         return {
@@ -93,28 +93,34 @@ class WidgetService:
             
         return colors
     
-    def _get_logo_base64(self, tenant_settings: Dict[str, Any] = None) -> str:
-        """Get the logo as base64 (custom tenant logo or default FactorialBot logo)"""
-        # Try to get custom company logo first
+    def _get_logo_info(self, tenant_settings: Dict[str, Any] = None) -> Dict[str, str]:
+        """Get logo information (URL or base64 for default)"""
+        # Try to get custom company logo URL first
         if tenant_settings and tenant_settings.get("company_logo_url"):
-            try:
-                from .storage_service import StorageService
-                storage_service = StorageService()
-                logo_data = storage_service.download_file(tenant_settings["company_logo_url"])
-                return base64.b64encode(logo_data).decode()
-            except Exception as e:
-                print(f"Warning: Could not load custom logo: {str(e)}")
-                # Fall through to default logo
+            return {
+                "type": "url",
+                "source": tenant_settings["company_logo_url"],
+                "is_custom": True
+            }
         
-        # Use default FactorialBot logo
+        # Use default FactorialBot logo as base64 fallback
         try:
             logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "static", "factorialbot_logo.svg")
             with open(logo_path, "r") as f:
                 svg_content = f.read()
-            return base64.b64encode(svg_content.encode()).decode()
+            base64_logo = base64.b64encode(svg_content.encode()).decode()
+            return {
+                "type": "base64",
+                "source": f"data:image/svg+xml;base64,{base64_logo}",
+                "is_custom": False
+            }
         except Exception:
             # Fallback if logo not found
-            return ""
+            return {
+                "type": "none",
+                "source": "",
+                "is_custom": False
+            }
     
     def _generate_javascript(self, context: Dict[str, Any]) -> str:
         """Generate the main chat widget JavaScript"""
@@ -138,6 +144,12 @@ class WidgetService:
             gray: '{{ colors.gray }}',
             darkGray: '{{ colors.dark_gray }}',
             lightGray: '{{ colors.light_gray }}'
+        },
+        // Logo configuration
+        logo: {
+            type: '{{ logo_info.type }}',
+            source: '{{ logo_info.source }}',
+            isCustom: {{ 'true' if logo_info.is_custom else 'false' }}
         },
         // Customizable text
         hoverText: '{{ hover_text }}',
@@ -204,10 +216,18 @@ class WidgetService:
                     box-shadow: 0 6px 20px rgba(93, 62, 193, 0.4);
                 }
                 
-                .factorial-chat-button svg {
+                .factorial-chat-button-icon {
                     width: 24px;
                     height: 24px;
                     fill: ${CONFIG.colors.white};
+                }
+                
+                .factorial-chat-button-logo {
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 50%;
+                    object-fit: cover;
+                    object-position: center;
                 }
                 
                 .factorial-chat-window {
@@ -266,11 +286,6 @@ class WidgetService:
                     margin: 0;
                 }
                 
-                .factorial-chat-subtitle {
-                    font-size: 12px;
-                    opacity: 0.9;
-                    margin: 5px 0 0 0;
-                }
                 
                 .factorial-chat-messages {
                     flex: 1;
@@ -441,9 +456,13 @@ class WidgetService:
             
             widgetContainer.innerHTML = `
                 <button class="factorial-chat-button" id="factorial-chat-toggle" title="${CONFIG.hoverText}">
-                    <svg viewBox="0 0 24 24">
+                    {% if logo_info.source and logo_info.is_custom %}
+                    <img src="{{ logo_info.source }}" alt="Chat" class="factorial-chat-button-logo">
+                    {% else %}
+                    <svg viewBox="0 0 24 24" class="factorial-chat-button-icon">
                         <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
                     </svg>
+                    {% endif %}
                     <div class="factorial-status-indicator" id="factorial-status"></div>
                 </button>
                 
@@ -451,7 +470,6 @@ class WidgetService:
                     <div class="factorial-chat-header">
                         <button class="factorial-chat-close" id="factorial-chat-close">&times;</button>
                         <h3 class="factorial-chat-title">${CONFIG.chatWindowTitle}</h3>
-                        <p class="factorial-chat-subtitle">${CONFIG.tenantName}</p>
                     </div>
                     
                     <div class="factorial-chat-messages" id="factorial-chat-messages">
@@ -473,7 +491,9 @@ class WidgetService:
                     
                     <div class="factorial-chat-footer">
                         <span>Powered by</span>
-                        <img src="data:image/svg+xml;base64,{{ logo_base64 }}" alt="FactorialBot" class="factorial-chat-logo">
+                        {% if logo_info.source %}
+                        <img src="{{ logo_info.source }}" alt="{% if logo_info.is_custom %}Company Logo{% else %}FactorialBot{% endif %}" class="factorial-chat-logo">
+                        {% endif %}
                     </div>
                 </div>
             `;
