@@ -1,0 +1,123 @@
+# Production Spring configuration for Gateway Service
+# This file should be copied to gateway-service/src/main/resources/ before building
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when_authorized
+
+logging:
+  level:
+    org.springframework.web: INFO
+    org.springframework.cloud.gateway: INFO
+    reactor.netty: WARN
+    root: INFO
+  pattern:
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+
+spring:
+  banner:
+    location: classpath:banner.txt
+  application:
+    name: gateway-service
+  threads:
+    virtual:
+      enabled: true
+  cloud:
+    gateway:
+      server:
+        webflux:
+          globalcors:
+            cors-configurations:
+              '[/**]':
+                allowedOriginPatterns: "*"  # Configure this for your specific frontend domains
+                allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                allowedHeaders: "*"
+                exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
+                allowCredentials: true
+          add-to-simple-url-handler-mapping: true
+          routes:
+            # Onboarding Service Routes
+            - id: onboarding-documents
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/documents/**
+
+            - id: onboarding-tenants
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/tenants/**
+
+            - id: onboarding-websites
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/websites/**
+
+            - id: onboarding-ingestions
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/ingestions/**
+
+            - id: onboarding-auth
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/auth/**
+
+            - id: onboarding-plans
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/plans/**
+
+            - id: onboarding-subscriptions
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/subscriptions/**
+
+            - id: onboarding-payments
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/payments/**
+
+            - id: onboarding-widgets
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/api/v1/widgets/**
+
+            # Chat Service Routes
+            - id: chat-api
+              uri: ${CHAT_SERVICE_URL:http://chat-service:8000}
+              predicates:
+                - Path=/api/v1/chat/**
+
+            - id: chat-vectors
+              uri: ${CHAT_SERVICE_URL:http://chat-service:8000}
+              predicates:
+                - Path=/api/v1/vectors/**
+
+            # WebSocket routes (direct proxy)
+            - id: chat-websocket
+              uri: ${CHAT_SERVICE_URL:http://chat-service:8000}
+              predicates:
+                - Path=/ws/**
+
+            # Health Check Routes
+            - id: onboarding-health
+              uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
+              predicates:
+                - Path=/health/onboarding
+              filters:
+                - RewritePath=/health/onboarding,/health
+
+            - id: chat-health
+              uri: ${CHAT_SERVICE_URL:http://chat-service:8000}
+              predicates:
+                - Path=/health/chat
+              filters:
+                - RewritePath=/health/chat,/health
