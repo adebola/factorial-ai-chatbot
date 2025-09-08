@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registration Successful - ChatCraft Auth</title>
+    <link rel="stylesheet" th:href="@{/css/auth.css}">
+    <link rel="icon" type="image/x-icon" th:href="@{/favicon.ico}">
+</head>
+<body>
+    <!-- Header -->
+    <header class="auth-header">
+        <div class="container">
+            <nav class="d-flex justify-content-between align-items-center">
+                <a class="navbar-brand" th:href="@{/}">
+                    <img th:src="@{/image/chatcraft-logo2.png}" alt="ChatCraft">
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="auth-main">
+        <div class="container">
+            <div class="auth-card auth-card-wide">
+                <!-- Success Icon -->
+                <div class="success-icon">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                </div>
+
+                <div class="auth-card-header">
+                    <h1 class="text-success">Registration Successful!</h1>
+                    <p>Your organization has been successfully registered with ChatCraft.</p>
+                </div>
+
+                <!-- Success Message -->
+                <div th:if="${successMessage}" class="alert alert-success" role="alert">
+                    <span th:text="${successMessage}">Success message</span>
+                </div>
+
+                <!-- Tenant Information -->
+                <div th:if="${tenant}" class="tenant-info">
+                    <h3>Organization Details</h3>
+                    <div class="detail-row">
+                        <span class="detail-label">Name:</span>
+                        <span class="detail-value" th:text="${tenant.name}">Organization Name</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Domain:</span>
+                        <span class="detail-value" th:text="${tenant.domain}">organization-domain</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Created:</span>
+                        <span class="detail-value" th:text="${#temporals.format(tenant.createdAt, 'MMM dd, yyyy HH:mm')}">Created Date</span>
+                    </div>
+                </div>
+
+                <!-- Next Steps -->
+                <div class="mt-4">
+                    <h4 class="text-primary">Next Steps</h4>
+                    <ol>
+                        <li class="mb-2">
+                            <strong>Check your email</strong> - 
+                            <span th:if="${tenant}">
+                                A confirmation email has been sent to your account, please follow instructions in the mail to activate your account
+                            </span>
+                            <span th:unless="${tenant}">
+                                You should receive a confirmation email shortly.
+                            </span>
+                        </li>
+                        <li class="mb-2">
+                            <strong>Explore features</strong>
+                            Set up document management and chat functionality for your team.
+                        </li>
+                    </ol>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="d-flex justify-content-between mt-4">
+                    <a th:href="@{/login}" class="btn btn-primary">
+                        Continue to Sign In
+                    </a>
+                    
+                    <a href="https://docs.chatcraft.cc" target="_blank" class="btn btn-secondary">
+                        View Documentation
+                    </a>
+                </div>
+
+                <!-- Support Info -->
+                <div class="text-center mt-4">
+                    <p class="text-muted">
+                        Need help? Contact our support team at 
+                        <a href="mailto:support@chatcraft.cc" class="text-primary">
+                            support@chatcraft.cc
+                        </a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="auth-footer">
+        <div class="container">
+            <p>&copy; 2024 ChatCraft Authorization Server</p>
+        </div>
+    </footer>
+
+    <script th:src="@{/js/auth.js}"></script>
+    <script>
+        // Copy to clipboard functionality
+        document.querySelectorAll('.credential-value').forEach(element => {
+            element.style.cursor = 'pointer';
+            element.title = 'Click to copy';
+            
+            element.addEventListener('click', function() {
+                const text = this.textContent.trim();
+                if (text) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        // Show a temporary success indicator
+                        const originalBg = this.style.backgroundColor;
+                        this.style.backgroundColor = '#d4edda';
+                        this.title = 'Copied!';
+                        
+                        setTimeout(() => {
+                            this.style.backgroundColor = originalBg;
+                            this.title = 'Click to copy';
+                        }, 1000);
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>
