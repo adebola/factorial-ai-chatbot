@@ -18,8 +18,13 @@ class CacheService:
         self.cache_ttl = 300  # 5 minutes cache TTL
         
     def _get_cache_key(self, key_type: str, value: str) -> str:
-        """Generate Redis cache key"""
-        return f"tenant:{key_type}:{value}"
+        """Generate Redis cache key (compatible with OAuth server format)"""
+        if key_type == 'id':
+            return f"tenant:{value}"
+        elif key_type == 'api_key':
+            return f"tenant:api:{value}"
+        else:
+            return f"tenant:{key_type}:{value}"
     
     def cache_tenant(self, tenant_data: Dict[str, Any]) -> None:
         """Cache tenant data by ID and API key"""

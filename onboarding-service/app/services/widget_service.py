@@ -3,8 +3,9 @@ import base64
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from jinja2 import Template
+from ..services.dependencies import get_full_tenant_details, get_tenant_settings
 
-from ..models.tenant import Tenant
+# Note: Tenant model removed - tenant management now in OAuth2 server
 
 
 class WidgetService:
@@ -22,14 +23,26 @@ class WidgetService:
             "light_gray": "#E0E0E0"
         }
     
-    def generate_widget_files(self, tenant: Tenant) -> Dict[str, str]:
-        """Generate all widget files for a tenant"""
+    async def generate_widget_files(self, tenant_id: str, access_token: Optional[str] = None) -> Dict[str, str]:
+        """
+        Generate all widget files for a tenant
+        
+        Args:
+            tenant_id: tenant id information from OAuth2 server
+        """
+        
+        # Store tenant_id for use in logo lookup
+        self._tenant_id = tenant_id
+
+        # Get tenant details if needed
+        tenant_details = await get_full_tenant_details(tenant_id, access_token)
+        tenant_name = tenant_details.get("name", "Unknown")
         
         # Get tenant settings for customization
-        tenant_settings = self._get_tenant_settings(tenant.id)
+        tenant_settings = get_tenant_settings(tenant_id, access_token)
         
-        # Get logo information (URL or base64)
-        logo_info = self._get_logo_info(tenant_settings)
+        # Get logo information with chat logo data (URL or initials)
+        logo_info = self._get_logo_info(tenant_settings, tenant_name)
         
         # Use settings values or defaults
         colors = self._get_colors(tenant_settings)
@@ -37,12 +50,12 @@ class WidgetService:
         from datetime import datetime
         
         context = {
-            "tenant_id": tenant.id,
-            "tenant_name": tenant.name,
-            "api_key": tenant.api_key,
+            "tenant_id": tenant_id,
+            "tenant_name": tenant_name,
+            "api_key": tenant_details.get("api_key", ""),
             "logo_info": logo_info,
             "colors": colors,
-            "widget_id": f"factorial-chat-{tenant.id}",
+            "widget_id": f"factorial-chat-{tenant_id}",
             "backend_url": os.getenv("BACKEND_URL", "http://localhost:8001"),
             "chat_service_url": os.getenv("CHAT_SERVICE_URL", "http://localhost:8000"),
             "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
@@ -50,7 +63,7 @@ class WidgetService:
             "hover_text": tenant_settings.get("hover_text", "Chat with us!"),
             "welcome_message": tenant_settings.get("welcome_message", "Hello! How can I help you today?"),
             "chat_window_title": tenant_settings.get("chat_window_title", "Chat Support"),
-            "has_custom_logo": logo_info["is_custom"]
+            "has_custom_logo": logo_info.get("is_custom", False)
         }
         
         return {
@@ -60,27 +73,7 @@ class WidgetService:
             "integration-guide.html": self._generate_integration_guide(context)
         }
     
-    def _get_tenant_settings(self, tenant_id: str) -> Dict[str, Any]:
-        """Get tenant settings for widget customization"""
-        try:
-            from .settings_service import SettingsService
-            settings_service = SettingsService(self.db)
-            settings = settings_service.get_tenant_settings(tenant_id)
-            
-            if settings:
-                return {
-                    "primary_color": settings.primary_color,
-                    "secondary_color": settings.secondary_color,
-                    "company_logo_url": settings.company_logo_url,
-                    "hover_text": settings.hover_text,
-                    "welcome_message": settings.welcome_message,
-                    "chat_window_title": settings.chat_window_title,
-                }
-            return {}
-        except Exception as e:
-            print(f"Warning: Could not load tenant settings for {tenant_id}: {str(e)}")
-            return {}
-    
+
     def _get_colors(self, tenant_settings: Dict[str, Any]) -> Dict[str, str]:
         """Get colors with tenant customization applied"""
         colors = self.colors.copy()
@@ -93,34 +86,78 @@ class WidgetService:
             
         return colors
     
-    def _get_logo_info(self, tenant_settings: Dict[str, Any] = None) -> Dict[str, str]:
-        """Get logo information (URL or base64 for default)"""
-        # Try to get custom company logo URL first
-        if tenant_settings and tenant_settings.get("company_logo_url"):
-            return {
-                "type": "url",
-                "source": tenant_settings["company_logo_url"],
-                "is_custom": True
-            }
+    def _generate_chat_initials(self, company_name: str) -> str:
+        """Generate 1-2 character initials from company name"""
+        if not company_name or company_name.strip() == "" or company_name == "Unknown":
+            return "CB"  # ChatBot fallback
         
-        # Use default FactorialBot logo as base64 fallback
-        try:
-            logo_path = os.path.join(os.path.dirname(__file__), "..", "..", "static", "factorialbot_logo.svg")
-            with open(logo_path, "r") as f:
-                svg_content = f.read()
-            base64_logo = base64.b64encode(svg_content.encode()).decode()
-            return {
-                "type": "base64",
-                "source": f"data:image/svg+xml;base64,{base64_logo}",
-                "is_custom": False
-            }
-        except Exception:
-            # Fallback if logo not found
-            return {
-                "type": "none",
-                "source": "",
-                "is_custom": False
-            }
+        words = company_name.strip().split()
+        initials = ""
+        
+        # Take first letter of first word (always)
+        initials += words[0][0] if words and words[0] else "C"
+        
+        # If there are multiple words, take first letter of second word
+        if len(words) > 1 and words[1]:
+            initials += words[1][0]
+        # If single word and long enough, take second character
+        elif len(words) == 1 and len(words[0]) > 1:
+            initials += words[0][1]
+        else:
+            initials += "B"  # Default second character
+            
+        return initials.upper()[:2]  # Ensure max 2 characters and uppercase
+    
+    def _get_logo_info(self, tenant_settings: Dict[str, Any] = None, tenant_name: str = "Unknown") -> Dict[str, Any]:
+        """Get logo information from OAuth2 server settings or generate initials"""
+        # Check if chatLogo info is provided in settings from OAuth2 server
+        if tenant_settings and "chatLogo" in tenant_settings:
+            chat_logo = tenant_settings["chatLogo"]
+            if chat_logo.get("type") == "url" and chat_logo.get("url"):
+                return {
+                    "type": "url",
+                    "source": chat_logo["url"],
+                    "is_custom": True,
+                    "initials": None
+                }
+            elif chat_logo.get("type") == "initials":
+                return {
+                    "type": "initials",
+                    "source": None,
+                    "is_custom": False,
+                    "initials": chat_logo.get("initials", self._generate_chat_initials(tenant_name))
+                }
+        
+        # Try to get custom company logo from OAuth2 server public endpoint
+        if hasattr(self, '_tenant_id'):
+            try:
+                oauth2_server_url = os.getenv("AUTHORIZATION_SERVER_URL", "http://localhost:9000")
+                public_logo_url = f"{oauth2_server_url}/api/v1/tenants/public/logos/{self._tenant_id}"
+                
+                # Check if the logo exists by making a HEAD request
+                import requests
+                try:
+                    response = requests.head(public_logo_url, timeout=3)
+                    if response.status_code == 200:
+                        return {
+                            "type": "url",
+                            "source": public_logo_url,
+                            "is_custom": True,
+                            "initials": None
+                        }
+                except requests.exceptions.RequestException:
+                    pass  # Fall through to initials
+            except Exception:
+                pass  # Fall through to initials
+        
+        # Use initials as fallback
+        initials = self._generate_chat_initials(tenant_name)
+        return {
+            "type": "initials",
+            "source": None,
+            "is_custom": False,
+            "initials": initials
+        }
     
     def _generate_javascript(self, context: Dict[str, Any]) -> str:
         """Generate the main chat widget JavaScript"""
@@ -148,7 +185,8 @@ class WidgetService:
         // Logo configuration
         logo: {
             type: '{{ logo_info.type }}',
-            source: '{{ logo_info.source }}',
+            source: {% if logo_info.source %}'{{ logo_info.source }}'{% else %}null{% endif %},
+            initials: {% if logo_info.initials %}'{{ logo_info.initials }}'{% else %}null{% endif %},
             isCustom: {{ 'true' if logo_info.is_custom else 'false' }}
         },
         // Customizable text
@@ -228,6 +266,25 @@ class WidgetService:
                     border-radius: 50%;
                     object-fit: cover;
                     object-position: center;
+                }
+                
+                .factorial-chat-button-initials {
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 50%;
+                    background: linear-gradient(135deg, ${CONFIG.colors.primary}, ${CONFIG.colors.secondary});
+                    color: ${CONFIG.colors.white};
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                    font-size: 14px;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    transition: transform 0.3s ease;
+                }
+                
+                .factorial-chat-button:hover .factorial-chat-button-initials {
+                    transform: scale(1.1);
                 }
                 
                 .factorial-chat-window {
@@ -386,6 +443,12 @@ class WidgetService:
                     width: auto;
                 }
                 
+                .factorial-chat-logo-text {
+                    font-weight: bold;
+                    color: ${CONFIG.colors.primary};
+                    margin-left: 4px;
+                }
+                
                 .factorial-status-indicator {
                     position: absolute;
                     top: -2px;
@@ -456,8 +519,10 @@ class WidgetService:
             
             widgetContainer.innerHTML = `
                 <button class="factorial-chat-button" id="factorial-chat-toggle" title="${CONFIG.hoverText}">
-                    {% if logo_info.source and logo_info.is_custom %}
+                    {% if logo_info.type == 'url' and logo_info.source %}
                     <img src="{{ logo_info.source }}" alt="Chat" class="factorial-chat-button-logo">
+                    {% elif logo_info.type == 'initials' and logo_info.initials %}
+                    <div class="factorial-chat-button-initials">{{ logo_info.initials }}</div>
                     {% else %}
                     <svg viewBox="0 0 24 24" class="factorial-chat-button-icon">
                         <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/>
@@ -491,8 +556,12 @@ class WidgetService:
                     
                     <div class="factorial-chat-footer">
                         <span>Powered by</span>
-                        {% if logo_info.source %}
-                        <img src="{{ logo_info.source }}" alt="{% if logo_info.is_custom %}Company Logo{% else %}FactorialBot{% endif %}" class="factorial-chat-logo">
+                        {% if logo_info.type == 'url' and logo_info.source %}
+                        <img src="{{ logo_info.source }}" alt="Company Logo" class="factorial-chat-logo">
+                        {% elif logo_info.type == 'initials' and logo_info.initials %}
+                        <span class="factorial-chat-logo-text">{{ tenant_name }}</span>
+                        {% else %}
+                        <span class="factorial-chat-logo-text">FactorialBot</span>
                         {% endif %}
                     </div>
                 </div>
@@ -996,13 +1065,13 @@ class WidgetService:
                 <h3>Download the Widget Files</h3>
                 <p>Download the generated widget files for your organization:</p>
                 <div class="download-section">
-                    <a href="/api/v1/tenants/{{ tenant_id }}/widget/chat-widget.js" class="download-button" download>
+                    <a href="/api/v1/widget/chat-widget.js" class="download-button" download>
                         📄 chat-widget.js
                     </a>
-                    <a href="/api/v1/tenants/{{ tenant_id }}/widget/chat-widget.css" class="download-button" download>
+                    <a href="/api/v1/widget/chat-widget.css" class="download-button" download>
                         🎨 chat-widget.css
                     </a>
-                    <a href="/api/v1/tenants/{{ tenant_id }}/widget/chat-widget.html" class="download-button" download>
+                    <a href="/api/v1/widget/chat-widget.html" class="download-button" download>
                         📋 demo.html
                     </a>
                 </div>

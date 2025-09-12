@@ -8,9 +8,9 @@ logging:
     console: "%green(%d{HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
   level:
     org.springframework.web: DEBUG
-    org.springframework.security: TRACE
-    org.springframework.security.oauth2.server.authorization: TRACE
-    org.springframework.cloud.gateway: TRACE
+    org.springframework.security: DEBUG
+    org.springframework.security.oauth2.server.authorization: DEBUG
+    org.springframework.cloud.gateway: DEBUG
     reactor.netty: DEBUG
 
 spring:
@@ -30,6 +30,12 @@ spring:
     redis:
       time-to-live: 60000
 
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: user
+    password: password
+
   threads:
     virtual:
       enabled: true
@@ -43,6 +49,12 @@ spring:
 authorization:
   config:
     rabbitmq:
+      key:
+        widget: widget-key
+        logo-update: logo.update
+      queue:
+        widget: widget-queue
+        logo-update: logo-update-queue
       exchange:
         name: topic-exchange
     security:
@@ -50,3 +62,8 @@ authorization:
         - http://localhost:4200
         - http://localhost:8080
       location: http://localhost:9002/auth
+
+# External service URLs
+onboarding:
+  service:
+    url: http://localhost:8001

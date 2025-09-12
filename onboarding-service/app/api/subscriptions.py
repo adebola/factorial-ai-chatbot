@@ -1,18 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from ..core.database import get_db
-from ..services.dependencies import get_current_tenant, get_admin_tenant
-from ..services.subscription_service import SubscriptionService
-from ..services.plan_service import PlanService
-from ..models.tenant import Tenant
 from ..models.subscription import (
     Subscription, SubscriptionStatus, BillingCycle, UsageTracking,
-    SubscriptionChange, PaymentMethodRecord
+    SubscriptionChange, Payment
 )
+from ..services.dependencies import TokenClaims, validate_token
+from ..services.plan_service import PlanService
+from ..services.subscription_service import SubscriptionService
+from ..services.rabbitmq_service import rabbitmq_service
 
 router = APIRouter()
 
@@ -43,9 +44,28 @@ class SubscriptionAnalyticsResponse(BaseModel):
     growth_rate: float
 
 
-@router.get("/usage/current", response_model=Dict[str, Any])
+# Additional models for subscription management
+class SubscriptionCreateRequest(BaseModel):
+    plan_id: str = Field(..., description="ID of the plan to subscribe to")
+    billing_cycle: BillingCycle = Field(default=BillingCycle.MONTHLY, description="Billing cycle")
+    start_trial: bool = Field(default=False, description="Start with trial period")
+    metadata: Optional[Dict[str, Any]] = Field(default={}, description="Additional metadata")
+
+
+class PlanSwitchRequest(BaseModel):
+    new_plan_id: str = Field(..., description="ID of the new plan")
+    billing_cycle: Optional[BillingCycle] = Field(None, description="New billing cycle")
+    prorate: bool = Field(default=True, description="Apply prorated billing")
+
+
+class SubscriptionCancelRequest(BaseModel):
+    cancel_at_period_end: bool = Field(default=True, description="Cancel at end of billing period")
+    reason: Optional[str] = Field(None, description="Cancellation reason")
+
+
+@router.get("/subscriptions/usage/current", response_model=Dict[str, Any])
 async def get_current_usage(
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get current usage statistics for the tenant"""
@@ -54,33 +74,59 @@ async def get_current_usage(
         subscription_service = SubscriptionService(db)
         plan_service = PlanService(db)
         
-        # Get current subscription
-        subscription = subscription_service.get_subscription_by_tenant(current_tenant.id)
-        if not subscription:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No active subscription found"
-            )
+        # Get the current subscription (fallback to the Free plan if none exists)
+        subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
         
-        # Get plan limits
-        plan = plan_service.get_plan_by_id(subscription.plan_id)
+        if subscription:
+            # Get plan limits from subscription
+            plan = plan_service.get_plan_by_id(subscription.plan_id)
+            if not plan:
+                # Fallback to Free plan if subscription plan not found
+                plan = plan_service.get_plan_by_name("Free")
+        else:
+            # No subscription - use Free plan limits
+            plan = plan_service.get_plan_by_name("Free")
+        
         if not plan:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Subscription plan not found"
-            )
+            # Create default plan limits if the Free plan doesn't exist
+            class DefaultPlan:
+                document_limit = 5
+                website_limit = 1
+                daily_chat_limit = 10
+                monthly_chat_limit = 300
+                name = "Free"
+                id = "default"
+            plan = DefaultPlan()
         
-        # Get current usage tracking
-        usage = db.query(UsageTracking).filter(
-            UsageTracking.subscription_id == subscription.id
-        ).first()
-        
-        if not usage:
-            # Initialize usage tracking if not exists
-            subscription_service._initialize_usage_tracking(subscription)
+        # Get current usage tracking (only if a subscription exists)
+        usage = None
+        if subscription:
             usage = db.query(UsageTracking).filter(
                 UsageTracking.subscription_id == subscription.id
             ).first()
+            
+            if not usage:
+                # Initialize usage tracking if not exists
+                subscription_service._initialize_usage_tracking(subscription)
+                usage = db.query(UsageTracking).filter(
+                    UsageTracking.subscription_id == subscription.id
+                ).first()
+        
+        # If no subscription or usage tracking, use zero values
+        if not usage:
+            from datetime import datetime, timedelta
+            now = datetime.utcnow()
+            class DefaultUsage:
+                documents_used = 0
+                websites_used = 0
+                daily_chats_used = 0
+                monthly_chats_used = 0
+                api_calls_made = 0
+                daily_reset_at = None
+                monthly_reset_at = None
+                period_start = now
+                period_end = now + timedelta(days=30)  # Default 30-day period
+            usage = DefaultUsage()
         
         # Calculate usage percentages
         doc_percentage = (usage.documents_used / plan.document_limit * 100) if plan.document_limit > 0 else 0
@@ -127,10 +173,11 @@ async def get_current_usage(
                 "days_remaining": (usage.period_end - datetime.utcnow()).days
             },
             "subscription": {
-                "id": subscription.id,
-                "plan_id": subscription.plan_id,
-                "status": subscription.status.value,
-                "billing_cycle": subscription.billing_cycle.value
+                "id": subscription.id if subscription else None,
+                "plan_id": subscription.plan_id if subscription else plan.id,
+                "plan_name": plan.name,
+                "status": subscription.status.value if subscription else "none",
+                "billing_cycle": subscription.billing_cycle.value if subscription else "none"
             }
         }
         
@@ -147,7 +194,7 @@ async def get_current_usage(
 async def increment_usage(
     usage_type: str,
     amount: int = 1,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Increment usage counter for a specific metric"""
@@ -156,7 +203,7 @@ async def increment_usage(
         subscription_service = SubscriptionService(db)
         
         # Get current subscription
-        subscription = subscription_service.get_subscription_by_tenant(current_tenant.id)
+        subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
         if not subscription:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -214,7 +261,7 @@ async def increment_usage(
 @router.get("/usage/check-limit/{usage_type}", response_model=Dict[str, Any])
 async def check_usage_limit(
     usage_type: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Check if tenant can perform an action based on usage limits"""
@@ -224,7 +271,7 @@ async def check_usage_limit(
         plan_service = PlanService(db)
         
         # Get current subscription and plan
-        subscription = subscription_service.get_subscription_by_tenant(current_tenant.id)
+        subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
         if not subscription:
             return {
                 "allowed": False,
@@ -298,14 +345,14 @@ async def check_usage_limit(
 
 @router.get("/changes/history", response_model=Dict[str, Any])
 async def get_subscription_changes(
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get subscription change history for the tenant"""
     
     try:
         changes = db.query(SubscriptionChange).filter(
-            SubscriptionChange.tenant_id == current_tenant.id
+            SubscriptionChange.tenant_id == claims.tenant_id,
         ).order_by(SubscriptionChange.created_at.desc()).limit(20).all()
         
         return {
@@ -335,87 +382,288 @@ async def get_subscription_changes(
         )
 
 
-@router.get("/payment-methods", response_model=Dict[str, Any])
-async def get_payment_methods(
-    current_tenant: Tenant = Depends(get_current_tenant),
+@router.post("/create", response_model=Dict[str, Any])
+async def create_subscription(
+    subscription_data: SubscriptionCreateRequest,
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Get saved payment methods for the tenant"""
+    """Create a new subscription for the current tenant"""
     
     try:
-        payment_methods = db.query(PaymentMethodRecord).filter(
-            PaymentMethodRecord.tenant_id == current_tenant.id,
-            PaymentMethodRecord.is_active == True
-        ).order_by(PaymentMethodRecord.created_at.desc()).all()
+        subscription_service = SubscriptionService(db)
+        
+        # Check if tenant already has an active subscription
+        existing_subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
+        if existing_subscription:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant already has an active subscription"
+            )
+        
+        # Create subscription
+        subscription = subscription_service.create_subscription(
+            tenant_id=claims.tenant_id,
+            plan_id=subscription_data.plan_id,
+            billing_cycle=subscription_data.billing_cycle,
+            start_trial=subscription_data.start_trial,
+            metadata=subscription_data.metadata
+        )
+        
+        # Send message to auth server to update tenant's plan_id
+        try:
+            rabbitmq_service.publish_plan_update(
+                tenant_id=claims.tenant_id,
+                plan_id=subscription_data.plan_id,
+                action="subscription_created"
+            )
+        except Exception as e:
+            # Log error but don't fail the subscription creation
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to publish plan update message: {e}")
         
         return {
-            "payment_methods": [
+            "success": True,
+            "message": "Subscription created successfully",
+            "subscription": {
+                "id": subscription.id,
+                "plan_id": subscription.plan_id,
+                "status": subscription.status.value,
+                "billing_cycle": subscription.billing_cycle.value,
+                "amount": str(subscription.amount),
+                "currency": subscription.currency,
+                "starts_at": subscription.starts_at.isoformat(),
+                "ends_at": subscription.ends_at.isoformat(),
+                "trial_starts_at": subscription.trial_starts_at.isoformat() if subscription.trial_starts_at else None,
+                "trial_ends_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None,
+                "auto_renew": subscription.auto_renew,
+                "created_at": subscription.created_at.isoformat()
+            }
+        }
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create subscription: {str(e)}"
+        )
+
+
+@router.get("/current", response_model=Dict[str, Any])
+async def get_current_subscription(
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Get the current tenant's active subscription"""
+    
+    try:
+        subscription_service = SubscriptionService(db)
+        subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
+        
+        if not subscription:
+            return {
+                "subscription": None,
+                "has_subscription": False,
+                "message": "No active subscription found"
+            }
+        
+        # Get payment history
+        payments = db.query(Payment).filter(
+            Payment.subscription_id == subscription.id
+        ).order_by(Payment.created_at.desc()).limit(5).all()
+        
+        return {
+            "subscription": {
+                "id": subscription.id,
+                "plan_id": subscription.plan_id,
+                "status": subscription.status.value,
+                "billing_cycle": subscription.billing_cycle.value,
+                "amount": str(subscription.amount),
+                "currency": subscription.currency,
+                "starts_at": subscription.starts_at.isoformat(),
+                "ends_at": subscription.ends_at.isoformat(),
+                "current_period_start": subscription.current_period_start.isoformat(),
+                "current_period_end": subscription.current_period_end.isoformat(),
+                "trial_starts_at": subscription.trial_starts_at.isoformat() if subscription.trial_starts_at else None,
+                "trial_ends_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None,
+                "cancelled_at": subscription.cancelled_at.isoformat() if subscription.cancelled_at else None,
+                "cancel_at_period_end": subscription.cancel_at_period_end,
+                "auto_renew": subscription.auto_renew,
+                "created_at": subscription.created_at.isoformat()
+            },
+            "recent_payments": [
                 {
-                    "id": pm.id,
-                    "type": pm.type.value,
-                    "is_default": pm.is_default,
-                    "card_last_four": pm.card_last_four,
-                    "card_brand": pm.card_brand,
-                    "card_exp_month": pm.card_exp_month,
-                    "card_exp_year": pm.card_exp_year,
-                    "bank_name": pm.bank_name,
-                    "created_at": pm.created_at.isoformat()
+                    "id": payment.id,
+                    "amount": str(payment.amount),
+                    "status": payment.status.value,
+                    "transaction_type": payment.transaction_type.value,
+                    "created_at": payment.created_at.isoformat(),
+                    "processed_at": payment.processed_at.isoformat() if payment.processed_at else None
                 }
-                for pm in payment_methods
+                for payment in payments
             ],
-            "total_methods": len(payment_methods)
+            "has_subscription": True
         }
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve payment methods: {str(e)}"
+            detail=f"Failed to retrieve subscription: {str(e)}"
         )
 
 
-@router.delete("/payment-methods/{method_id}", response_model=Dict[str, Any])
-async def delete_payment_method(
-    method_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+@router.post("/switch-plan", response_model=Dict[str, Any])
+async def switch_subscription_plan(
+    switch_data: PlanSwitchRequest,
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Delete a saved payment method"""
+    """Switch the current subscription to a different plan"""
     
     try:
-        payment_method = db.query(PaymentMethodRecord).filter(
-            PaymentMethodRecord.id == method_id,
-            PaymentMethodRecord.tenant_id == current_tenant.id
-        ).first()
+        subscription_service = SubscriptionService(db)
         
-        if not payment_method:
+        # Get current subscription
+        subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
+        if not subscription:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Payment method not found"
+                detail="No active subscription found"
             )
         
-        payment_method.is_active = False
-        payment_method.updated_at = datetime.utcnow()
-        db.commit()
+        # Switch plan
+        result = subscription_service.switch_subscription_plan(
+            subscription_id=subscription.id,
+            new_plan_id=switch_data.new_plan_id,
+            billing_cycle=switch_data.billing_cycle,
+            prorate=switch_data.prorate
+        )
+        
+        # Send message to auth server to update tenant's plan_id
+        try:
+            rabbitmq_service.publish_plan_switch(
+                tenant_id=claims.tenant_id,
+                old_plan_id=subscription.plan_id,
+                new_plan_id=switch_data.new_plan_id
+            )
+        except Exception as e:
+            # Log error but don't fail the plan switch
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to publish plan switch message: {e}")
         
         return {
             "success": True,
-            "message": "Payment method deleted successfully",
-            "method_id": method_id
+            "message": "Plan switched successfully",
+            "plan_switch": result
         }
         
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete payment method: {str(e)}"
+            detail=f"Failed to switch plan: {str(e)}"
+        )
+
+
+@router.post("/cancel", response_model=Dict[str, Any])
+async def cancel_subscription(
+    cancel_data: SubscriptionCancelRequest,
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Cancel the current subscription"""
+    
+    try:
+        subscription_service = SubscriptionService(db)
+        
+        # Get current subscription
+        subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No active subscription found"
+            )
+        
+        # Cancel subscription
+        result = subscription_service.cancel_subscription(
+            subscription_id=subscription.id,
+            cancel_at_period_end=cancel_data.cancel_at_period_end,
+            reason=cancel_data.reason
+        )
+        
+        return {
+            "success": True,
+            "message": "Subscription cancelled successfully",
+            "cancellation": result
+        }
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel subscription: {str(e)}"
+        )
+
+
+@router.get("/history", response_model=Dict[str, Any])
+async def get_subscription_history(
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """Get subscription history for the current tenant"""
+    
+    try:
+        subscription_service = SubscriptionService(db)
+        subscriptions = subscription_service.get_tenant_subscription_history(claims.tenant_id)
+        
+        return {
+            "subscriptions": [
+                {
+                    "id": sub.id,
+                    "plan_id": sub.plan_id,
+                    "status": sub.status.value,
+                    "billing_cycle": sub.billing_cycle.value,
+                    "amount": str(sub.amount),
+                    "currency": sub.currency,
+                    "starts_at": sub.starts_at.isoformat(),
+                    "ends_at": sub.ends_at.isoformat(),
+                    "cancelled_at": sub.cancelled_at.isoformat() if sub.cancelled_at else None,
+                    "cancellation_reason": sub.cancellation_reason,
+                    "created_at": sub.created_at.isoformat()
+                }
+                for sub in subscriptions
+            ],
+            "total_subscriptions": len(subscriptions)
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve subscription history: {str(e)}"
         )
 
 
 # Admin endpoints
 @router.get("/admin/analytics", response_model=Dict[str, Any])
 async def get_subscription_analytics(
-    admin_tenant: Tenant = Depends(get_admin_tenant),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get subscription analytics (Admin only)"""
@@ -499,7 +747,6 @@ async def list_all_subscriptions(
     status_filter: Optional[SubscriptionStatus] = None,
     limit: int = 50,
     offset: int = 0,
-    admin_tenant: Tenant = Depends(get_admin_tenant),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """List all subscriptions (Admin only)"""

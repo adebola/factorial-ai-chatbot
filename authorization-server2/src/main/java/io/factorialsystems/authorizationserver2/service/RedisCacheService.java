@@ -3,6 +3,7 @@ package io.factorialsystems.authorizationserver2.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.factorialsystems.authorizationserver2.model.Tenant;
+import io.factorialsystems.authorizationserver2.model.TenantSettings;
 import io.factorialsystems.authorizationserver2.model.User;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,7 @@ public class RedisCacheService {
     private static final String USER_EMAIL_PREFIX = "user:email:";
     private static final String USER_USERNAME_PREFIX = "user:username:";
     private static final String TENANT_USERS_PREFIX = "tenant:users:";
+    private static final String TENANT_SETTINGS_PREFIX = "tenant:settings:";
     
     private static final Duration DEFAULT_TTL = Duration.ofMinutes(30);
     private static final Duration API_KEY_TTL = Duration.ofHours(1);
@@ -106,30 +108,6 @@ public class RedisCacheService {
             
         } catch (Exception e) {
             log.error("Failed to get cached tenant by API key", e);
-            return null;
-        }
-    }
-    
-    /**
-     * Get cached tenant by domain
-     */
-    public Tenant getCachedTenantByDomain(String domain) {
-        if (domain == null) return null;
-        
-        try {
-            String domainKey = TENANT_DOMAIN_PREFIX + domain.toLowerCase();
-            String tenantId = redisTemplate.opsForValue().get(domainKey);
-            
-            if (tenantId != null) {
-                log.debug("Cache hit for tenant domain lookup: {}", domain);
-                return getCachedTenant(tenantId);
-            }
-            
-            log.debug("Cache miss for tenant domain lookup: {}", domain);
-            return null;
-            
-        } catch (Exception e) {
-            log.error("Failed to get cached tenant by domain: {}", domain, e);
             return null;
         }
     }
@@ -317,6 +295,60 @@ public class RedisCacheService {
         redisTemplate.delete(key);
         
         log.debug("Evicted tenant users cache: {}", tenantId);
+    }
+    
+    /**
+     * Cache tenant settings
+     */
+    public void cacheSettings(TenantSettings settings) {
+        if (settings == null) return;
+        
+        try {
+            String settingsJson = objectMapper.writeValueAsString(settings);
+            String key = TENANT_SETTINGS_PREFIX + settings.getTenantId();
+            
+            redisTemplate.opsForValue().set(key, settingsJson, DEFAULT_TTL);
+            log.debug("Cached tenant settings: {} with TTL: {}", settings.getTenantId(), DEFAULT_TTL);
+            
+        } catch (JsonProcessingException e) {
+            log.error("Failed to serialize tenant settings for caching: {}", settings.getTenantId(), e);
+        }
+    }
+    
+    /**
+     * Get cached tenant settings by tenant ID
+     */
+    public TenantSettings getCachedSettingsByTenantId(String tenantId) {
+        if (tenantId == null) return null;
+        
+        try {
+            String key = TENANT_SETTINGS_PREFIX + tenantId;
+            String settingsJson = redisTemplate.opsForValue().get(key);
+            
+            if (settingsJson != null) {
+                log.debug("Cache hit for tenant settings: {}", tenantId);
+                return objectMapper.readValue(settingsJson, TenantSettings.class);
+            }
+            
+            log.debug("Cache miss for tenant settings: {}", tenantId);
+            return null;
+            
+        } catch (JsonProcessingException e) {
+            log.error("Failed to deserialize cached tenant settings: {}", tenantId, e);
+            return null;
+        }
+    }
+    
+    /**
+     * Invalidate tenant settings cache
+     */
+    public void evictSettings(String tenantId) {
+        if (tenantId == null) return;
+        
+        String key = TENANT_SETTINGS_PREFIX + tenantId;
+        redisTemplate.delete(key);
+        
+        log.debug("Evicted tenant settings cache: {}", tenantId);
     }
     
     /**

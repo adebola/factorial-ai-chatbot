@@ -41,6 +41,25 @@ The system consists of three main microservices:
   - PKCE (Proof Key for Code Exchange) support
 - **Migration Plan**: Will eventually replace custom JWT authentication in onboarding service
 
+## OAuth2 Client Management
+
+**IMPORTANT ARCHITECTURAL DECISION**: The system uses a **single OAuth2 client** for all tenants, not per-tenant clients.
+
+### Key Principles
+- **Single Client Architecture**: The entire application uses only one OAuth2 registered client
+- **No Client Creation During Registration**: When tenants register, no OAuth2 clients are automatically created
+- **Manual Client Management**: OAuth2 clients are managed separately from tenant registration process
+- **Tenant Isolation**: Multi-tenancy is handled at the user/data level, not at the OAuth2 client level
+
+### Implementation Details
+- Tenant registration process only creates `Tenant` and `User` records
+- OAuth2 client credentials are managed independently and shared across all tenants
+- The single OAuth2 client handles all authorization flows for all tenants
+- User authentication resolves tenant context after login, not during OAuth2 flow
+
+### When OAuth2 Client Management is Needed
+OAuth2 client creation, modification, or additional client functionality should only be implemented when explicitly requested by the project owner. The current architecture intentionally keeps tenant registration simple and separate from OAuth2 client management.
+
 ## Development Commands
 
 ### Setup and Installation
@@ -77,6 +96,23 @@ mvn spring-boot:run
 ```
 
 ### Testing
+
+#### Test Credentials
+For testing OAuth2 authentication and API endpoints, use the following credentials:
+```
+Username: adebola
+Password: password
+Client ID: frontend-client  
+Client Secret: secret
+```
+
+These credentials can be used to:
+- Generate access tokens for testing
+- Authenticate API requests
+- Test tenant-specific functionality
+- Run integration tests with the authorization server
+
+#### Running Tests
 ```bash
 # Run tests for chat service
 cd chat-service && python -m pytest tests/
@@ -84,8 +120,31 @@ cd chat-service && python -m pytest tests/
 # Run tests for onboarding service
 cd onboarding-service && python -m pytest tests/
 
+# Run specific test file (e.g., dependencies tests)
+cd onboarding-service && python -m pytest tests/test_dependencies.py -v
+
+# Run integration tests (requires running services)
+cd onboarding-service && python -m pytest tests/ -m integration
+
 # Run tests for authorization server
 cd authorization-server && mvn test
+```
+
+#### OAuth2 Token Generation for Testing
+```bash
+# Get an access token using curl
+curl -X POST http://localhost:9000/oauth2/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password" \
+  -d "username=adebola" \
+  -d "password=password" \
+  -d "client_id=frontend-client" \
+  -d "client_secret=secret"
+
+# The response will include:
+# - access_token: JWT token for API authentication  
+# - refresh_token: Token for refreshing access
+# - tenant_id: Extracted from token claims
 ```
 
 ### Database Management
@@ -118,11 +177,19 @@ These files are executed during database initialization and should contain all n
 
 ## Multi-Tenancy Architecture
 
-The platform implements strict tenant isolation:
+The platform implements **loose-multitenant** architecture pattern:
+
+### User Authentication (Loose-Multitenant Pattern)
+- **Global user uniqueness**: Email addresses are unique across ALL tenants
+- **No tenant selection**: Users login with email + password only
+- **Automatic tenant resolution**: System determines user's tenant after authentication
+- **One user = One tenant**: Each user belongs to exactly one tenant
+- **Email conflict resolution**: Invitation system appends tenant domain suffix for conflicts
 
 ### Database Level
-- All models include `tenant_id` foreign key
-- Queries are automatically scoped to tenant
+- All models include `tenant_id` foreign key for data isolation
+- Users have global unique constraints on email and username
+- Post-authentication queries are tenant-scoped for data security
 - Shared database with logical separation
 
 ### Vector Store Level
@@ -130,10 +197,10 @@ The platform implements strict tenant isolation:
 - Separate persistence directories per tenant
 - RAG queries only access tenant-specific knowledge
 
-### API Authentication
-- Each tenant has unique API key for authentication
-- All endpoints validate tenant access
-- WebSocket connections are tenant-scoped
+### API Authentication Patterns
+- **OAuth2 flows**: Use global authentication, then tenant context is resolved
+- **WebSocket connections**: Still use tenant API keys for real-time chat
+- **REST APIs**: Support both global auth and tenant-scoped operations
 
 ## Key Models
 
@@ -264,10 +331,14 @@ The platform automatically generates embeddable chat widgets for tenants:
 - ⚡ **Lightweight**: Minimal performance impact
 
 ### API Endpoints
-- `GET /api/v1/tenants/{id}/widget/generate` - Generate widget files
-- `GET /api/v1/tenants/{id}/widget/chat-widget.js` - Download JavaScript
-- `GET /api/v1/tenants/{id}/widget/preview` - Preview widget
-- `GET /api/v1/tenants/{id}/widget/download-all` - Download ZIP package
+- `GET /api/v1/widget/generate` - Generate widget files
+- `GET /api/v1/widget/chat-widget.js` - Download JavaScript
+- `GET /api/v1/widget/chat-widget.css` - Download CSS
+- `GET /api/v1/widget/chat-widget.html` - Download demo HTML
+- `GET /api/v1/widget/integration-guide.html` - Download integration guide
+- `GET /api/v1/widget/preview` - Preview widget
+- `GET /api/v1/widget/download-all` - Download ZIP package
+- `GET /api/v1/widget/status` - Get widget status
 
 ### Integration
 ```html
@@ -388,3 +459,47 @@ logger.info("Operation completed",
 - ✅ Temporary Kill: User processes needed for testing (they can restart them)
 
 **Why this matters**: The user needs to manage their own development workflow. Only clean up what you created.
+
+## Spring Boot Development Guidelines
+
+### Lombok Usage
+**NEVER use `@Data` annotation** - it's too broad and can cause issues with JPA entities, circular references, and unwanted methods.
+
+**✅ Use specific Lombok annotations:**
+- `@Getter` - Generate getters only
+- `@Setter` - Generate setters only  
+- `@ToString` - Generate toString() method
+- `@EqualsAndHashCode` - Generate equals() and hashCode() methods
+- `@NoArgsConstructor` - Generate no-args constructor
+- `@AllArgsConstructor` - Generate constructor with all fields
+- `@RequiredArgsConstructor` - Generate constructor with required fields (final/non-null)
+- `@Builder` - Generate builder pattern
+
+**Examples:**
+```java
+// ✅ CORRECT - Specific annotations
+@Getter
+@Setter
+@ToString
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class User {
+    private String id;
+    private String name;
+}
+
+// ❌ WRONG - Avoid @Data
+@Data  // Don't use this!
+public class User {
+    private String id;
+    private String name;
+}
+```
+
+**Why this matters:**
+- `@Data` includes `@ToString`, `@EqualsAndHashCode`, `@Getter`, `@Setter`, and `@RequiredArgsConstructor`
+- This can cause issues with JPA entities (circular references, lazy loading problems)
+- Makes debugging harder when you don't control which methods are generated
+- Can expose sensitive fields in `toString()` output
+- Better to be explicit about what methods you need

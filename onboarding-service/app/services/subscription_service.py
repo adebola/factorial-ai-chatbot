@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
 from ..core.config import settings
-from ..models.tenant import Tenant, Plan
+from ..models.tenant import Plan
 from ..models.subscription import (
     Subscription, SubscriptionStatus, BillingCycle, Payment, PaymentStatus,
     PaymentMethod, TransactionType, SubscriptionChange, UsageTracking,
@@ -35,10 +35,9 @@ class SubscriptionService:
     ) -> Subscription:
         """Create a new subscription for a tenant"""
         
-        # Get tenant and plan
-        tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        if not tenant:
-            raise ValueError("Tenant not found")
+        # Validate tenant_id format (tenant data is in OAuth2 server)
+        if not tenant_id or len(tenant_id) != 36:
+            raise ValueError("Invalid tenant_id format")
         
         plan = self.plan_service.get_plan_by_id(plan_id)
         if not plan or not plan.is_active:
@@ -230,10 +229,8 @@ class SubscriptionService:
         if subscription:
             subscription.status = SubscriptionStatus.ACTIVE
             
-            # Update tenant's plan
-            tenant = self.db.query(Tenant).filter(Tenant.id == subscription.tenant_id).first()
-            if tenant:
-                tenant.plan_id = subscription.plan_id
+            # NOTE: Tenant plan updates handled by OAuth2 server
+            # tenant.plan_id would be updated via OAuth2 server API call
         
         self.db.commit()
         
@@ -294,10 +291,8 @@ class SubscriptionService:
         subscription.amount = new_amount
         subscription.billing_cycle = billing_cycle
         
-        # Update tenant's plan immediately
-        tenant = self.db.query(Tenant).filter(Tenant.id == subscription.tenant_id).first()
-        if tenant:
-            tenant.plan_id = new_plan_id
+        # NOTE: Tenant plan updates handled by OAuth2 server
+        # tenant.plan_id would be updated via OAuth2 server API call
         
         # Log the change
         self._log_subscription_change(

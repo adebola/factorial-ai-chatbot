@@ -8,15 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 load_dotenv()
 
-from .api.tenants import router as tenants_router
 from .api.documents import router as documents_router
 from .api.website_ingestions import router as website_ingestions_router
 from .api.plans import router as plans_router
 from .api.widgets import router as widgets_router
-from .api.auth import router as auth_router
 from .api.payments import router as payments_router
 from .api.subscriptions import router as subscriptions_router
-from .api.settings import router as settings_router
+from .api.logos import router as logos_router
 from .core.config import settings
 from .core.logging_config import (
     setup_logging, 
@@ -134,15 +132,13 @@ if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # Include routers
-app.include_router(tenants_router, prefix=settings.API_V1_STR, tags=["tenants"])
 app.include_router(documents_router, prefix=settings.API_V1_STR, tags=["documents"])
 app.include_router(website_ingestions_router, prefix=settings.API_V1_STR, tags=["website-ingestions"])
 app.include_router(plans_router, prefix=settings.API_V1_STR, tags=["plans"])
 app.include_router(widgets_router, prefix=settings.API_V1_STR, tags=["chat-widgets"])
-app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["authentication"])
 app.include_router(payments_router, prefix=settings.API_V1_STR, tags=["payments"])
 app.include_router(subscriptions_router, prefix=settings.API_V1_STR, tags=["subscriptions"])
-app.include_router(settings_router, prefix=settings.API_V1_STR, tags=["tenant-settings"])
+app.include_router(logos_router, prefix=settings.API_V1_STR, tags=["logos"])
 
 
 @app.get("/")
@@ -159,7 +155,7 @@ async def health_check():
 async def get_public_info():
     """Get public information about the service for dashboards"""
     return {
-        "service": "FactorialBot Onboarding API",
+        "service": "ChatCraft Onboarding API",
         "version": "1.0.0",
         "status": "operational",
         "features": [
@@ -175,21 +171,22 @@ async def get_public_info():
             "public": {
                 "plans": "/api/v1/plans/public",
                 "tenant_signup": "/api/v1/tenants/",
-                "login": "/api/v1/auth/login",
+                "login": "http://localhost:9002/auth/oauth2/authorize (OAuth2 flow)",
                 "service_info": "/api/v1/public/info",
                 "plan_management_ui": "/plan-management"
             },
             "authenticated": {
                 "documents": "/api/v1/documents/",
                 "websites": "/api/v1/websites/",
-                "chat_widgets": "/api/v1/tenants/{id}/widget/",
+                "chat_widgets": "/api/v1/widget/",
                 "plans_management": "/api/v1/plans/",
                 "plan_switching": "/api/v1/tenants/{id}/switch-plan"
             }
         },
         "authentication": {
-            "method": "Bearer Token (JWT)",
-            "required_for": "All endpoints except public ones"
+            "method": "OAuth 2.0 Bearer Token",
+            "required_for": "All endpoints except public ones",
+            "authorization_server": "http://localhost:9002/auth"
         },
         "cors": {
             "note": "CORS is handled by the API Gateway",

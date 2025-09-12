@@ -4,6 +4,8 @@ import io.factorialsystems.authorizationserver2.mapper.TenantMapper;
 import io.factorialsystems.authorizationserver2.model.Tenant;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,11 +17,19 @@ import java.util.UUID;
 @Service
 @RequiredArgsConstructor
 public class TenantService {
-    
+    private final RabbitTemplate rabbitTemplate;
     private final TenantMapper tenantMapper;
     private final RedisCacheService cacheService;
+    private final OnboardingServiceClient onboardingServiceClient;
+    private final TenantSettingsService tenantSettingsService;
     private static final SecureRandom secureRandom = new SecureRandom();
     private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+    @Value("${authorization.config.rabbitmq.key.widget}")
+    private String widgetRoutingKey;
+
+    @Value("${authorization.config.rabbitmq.exchange.name}")
+    private String exchange;
     
     public Tenant findById(String id) {
         // Check cache first
@@ -30,21 +40,6 @@ public class TenantService {
         
         // Fetch from database and cache
         Tenant tenant = tenantMapper.findById(id);
-        if (tenant != null) {
-            cacheService.cacheTenant(tenant);
-        }
-        return tenant;
-    }
-    
-    public Tenant findByDomain(String domain) {
-        // Check cache first
-        Tenant cachedTenant = cacheService.getCachedTenantByDomain(domain);
-        if (cachedTenant != null) {
-            return cachedTenant;
-        }
-        
-        // Fetch from database and cache
-        Tenant tenant = tenantMapper.findByDomain(domain);
         if (tenant != null) {
             cacheService.cacheTenant(tenant);
         }
@@ -81,7 +76,8 @@ public class TenantService {
         }
         return apiKey.toString();
     }
-              @Transactional
+
+    @Transactional
     public Tenant createTenant(String name, String domain, String description) {
         // Check if tenant already exists
         if (findByDomain(domain) != null) {
@@ -98,12 +94,23 @@ public class TenantService {
             apiKey = generateApiKey();
         }
         
+        // Get free-tier plan ID from onboarding service
+        String freePlanId = null;
+        try {
+            freePlanId = onboardingServiceClient.getFreeTierPlanId();
+            log.info("Retrieved free-tier plan ID: {} for new tenant", freePlanId);
+        } catch (Exception e) {
+            log.warn("Failed to retrieve free-tier plan ID, tenant will be created without plan: {}", e.getMessage());
+            // Continue creating tenant without plan - plan can be assigned later
+        }
+        
         // Create new tenant
         Tenant tenant = Tenant.builder()
                 .id(UUID.randomUUID().toString())
                 .name(name.trim())
                 .domain(domain.toLowerCase().trim())
                 .apiKey(apiKey)
+                .planId(freePlanId)
                 .isActive(true)
                 .createdAt(OffsetDateTime.now())
                 .updatedAt(OffsetDateTime.now())
@@ -113,6 +120,8 @@ public class TenantService {
         if (result <= 0) {
             throw new RuntimeException("Failed to create tenant");
         }
+
+        rabbitTemplate.convertAndSend(exchange, widgetRoutingKey, tenant.getId());
         
         log.info("Created new tenant: id={}, name={}, domain={}, apiKey={}", 
                 tenant.getId(), tenant.getName(), tenant.getDomain(), 
@@ -121,6 +130,15 @@ public class TenantService {
         
         // Cache the newly created tenant
         cacheService.cacheTenant(tenant);
+        
+        // Create default tenant settings
+        try {
+            tenantSettingsService.createDefaultSettings(tenant.getId());
+            log.info("Created default settings for tenant: {}", tenant.getId());
+        } catch (Exception e) {
+            log.error("Failed to create default settings for tenant: {} - {}", tenant.getId(), e.getMessage());
+            throw new RuntimeException("Failed to create default tenant settings: " + e.getMessage(), e);
+        }
         
         return tenant;
     }
@@ -148,5 +166,36 @@ public class TenantService {
     
     public boolean isNameAvailable(String name) {
         return findByName(name.trim()) == null;
+    }
+    
+    @Transactional
+    public boolean updateTenantPlan(String tenantId, String planId) {
+        try {
+            // Validate tenant exists
+            Tenant existingTenant = findById(tenantId);
+            if (existingTenant == null) {
+                log.warn("Cannot update plan for non-existent tenant: {}", tenantId);
+                return false;
+            }
+            
+            // Update plan_id in database
+            int rowsUpdated = tenantMapper.updatePlanId(tenantId, planId);
+            
+            if (rowsUpdated > 0) {
+                // Clear cache to ensure fresh data on next access
+                cacheService.evictTenant(tenantId);
+                
+                log.info("Successfully updated tenant {} plan from {} to {}", 
+                        tenantId, existingTenant.getPlanId(), planId);
+                return true;
+            } else {
+                log.warn("Failed to update tenant {} plan - no rows affected", tenantId);
+                return false;
+            }
+            
+        } catch (Exception e) {
+            log.error("Error updating tenant {} plan to {}: {}", tenantId, planId, e.getMessage(), e);
+            return false;
+        }
     }
 }

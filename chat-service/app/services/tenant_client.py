@@ -13,27 +13,28 @@ logger = logging.getLogger(__name__)
 
 class TenantClient:
     """
-    Client for fetching tenant data from onboarding service with Redis caching
+    Client for fetching tenant data from OAuth2 authorization server with Redis caching
     """
     
     def __init__(self):
         self.redis_client = redis.from_url(os.environ['REDIS_URL'], decode_responses=True)
-        self.onboarding_service_url = os.environ['ONBOARDING_SERVICE_URL']
+        # Use OAuth2 server for tenant lookups instead of onboarding service
+        self.auth_server_url = os.environ.get('AUTHORIZATION_SERVER_URL', 'http://localhost:9002/auth')
         self.cache_ttl = 300  # 5 minutes cache TTL
         
     def _get_cache_key(self, key_type: str, value: str) -> str:
         """Generate Redis cache key"""
         return f"tenant:{key_type}:{value}"
     
-    async def _fetch_tenant_from_onboarding_service(self, endpoint: str) -> Optional[Dict[str, Any]]:
-        """Fetch tenant data from the onboarding service"""
+    async def _fetch_tenant_from_auth_server(self, endpoint: str) -> Optional[Dict[str, Any]]:
+        """Fetch tenant data from the OAuth2 authorization server"""
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{self.onboarding_service_url}/api/v1{endpoint}")
+                response = await client.get(f"{self.auth_server_url}/api/v1{endpoint}")
                 response.raise_for_status()
                 return response.json()
         except httpx.RequestError as e:
-            logger.error(f"Error fetching tenant from onboarding service: {e}")
+            logger.error(f"Error fetching tenant from auth server: {e}")
             return None
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error fetching tenant: {e.response.status_code}")
@@ -75,9 +76,10 @@ class TenantClient:
             logger.debug(f"Cache hit for tenant ID: {tenant_id}")
             return cached_tenant
         
-        # Fetch from onboarding service
-        logger.debug(f"Cache miss for tenant ID: {tenant_id}, fetching from onboarding service")
-        tenant_data = await self._fetch_tenant_from_onboarding_service(f"/tenants/{tenant_id}/public")
+        # Fetch from auth server
+        logger.debug(f"Cache miss for tenant ID: {tenant_id}, fetching from auth server")
+        # OAuth2 server endpoint is just /tenants/{id}, not /tenants/{id}/public
+        tenant_data = await self._fetch_tenant_from_auth_server(f"/tenants/{tenant_id}")
         
         if tenant_data:
             self._cache_tenant(tenant_data)
@@ -100,11 +102,11 @@ class TenantClient:
             logger.debug(f"Cache hit for API key: {api_key[:20]}...")
             return cached_tenant
         
-        # Fetch from onboarding service using the API key lookup endpoint
-        logger.debug(f"Cache miss for API key: {api_key[:20]}..., fetching from onboarding service")
+        # Fetch from auth server using the API key lookup endpoint
+        logger.debug(f"Cache miss for API key: {api_key[:20]}..., fetching from auth server")
         
-        # Use the dedicated API key lookup endpoint for chat widgets
-        tenant_data = await self._fetch_tenant_from_onboarding_service(f"/tenants/lookup-by-api-key?api_key={api_key}")
+        # Use the OAuth2 server's API key lookup endpoint
+        tenant_data = await self._fetch_tenant_from_auth_server(f"/tenants/lookup-by-api-key?apiKey={api_key}")
         
         if tenant_data:
             # Cache the result by tenant_id and api_key
@@ -126,8 +128,21 @@ class TenantClient:
         # Instead, we'll let the lookup endpoint handle the caching by tenant_id
         logger.debug(f"Fetching tenant by JWT token: {access_token[:20]}...")
         
-        # Use the lookup endpoint that expects access tokens
-        tenant_data = await self._fetch_tenant_from_onboarding_service(f"/tenants/lookup?access_token={access_token}")
+        # OAuth2 server doesn't have a token lookup endpoint - decode locally or use introspection
+        # For now, we'll decode the JWT locally to get tenant_id
+        import jwt
+        try:
+            # Decode without verification to get claims (verification should be done elsewhere)
+            payload = jwt.decode(access_token, options={"verify_signature": False})
+            tenant_id = payload.get('tenant_id') or payload.get('sub')
+            if tenant_id:
+                tenant_data = await self._fetch_tenant_from_auth_server(f"/tenants/{tenant_id}")
+            else:
+                logger.error("No tenant_id found in token")
+                tenant_data = None
+        except jwt.InvalidTokenError as e:
+            logger.error(f"Invalid JWT token: {e}")
+            tenant_data = None
         
         if tenant_data:
             # Cache the result by tenant_id and api_key

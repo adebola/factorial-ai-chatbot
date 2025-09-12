@@ -1,12 +1,22 @@
-from sqlalchemy.orm import Session
-from typing import Optional, BinaryIO, Dict, Any
-import re
-import os
-from pydantic import BaseModel, validator
-from fastapi import UploadFile
+"""
+DEPRECATED: This settings service is deprecated and will be removed in a future version.
+Tenant settings functionality has been migrated to the OAuth2 Authorization Server.
 
-from ..models.settings import TenantSettings, get_default_settings
-from ..models.tenant import Tenant
+Use the new OAuth2 server API endpoints instead:
+- TenantSettingsService (OAuth2 server)
+- TenantSettingsController (OAuth2 server)
+- LogoProxyController (OAuth2 server)
+
+This service is kept for backward compatibility during migration but should not be used for new integrations.
+"""
+
+import os
+import re
+from typing import Optional, Dict, Any
+from fastapi import UploadFile
+from pydantic import BaseModel, validator
+from sqlalchemy.orm import Session
+
 from .storage_service import StorageService
 
 
@@ -84,64 +94,8 @@ class SettingsService:
         }
         self.max_logo_size = 5 * 1024 * 1024  # 5MB
 
-    def get_tenant_settings(self, tenant_id: str) -> Optional[TenantSettings]:
-        """Get tenant settings by tenant ID"""
-        return self.db.query(TenantSettings).filter(
-            TenantSettings.tenant_id == tenant_id,
-            TenantSettings.is_active == True
-        ).first()
 
-    def get_or_create_tenant_settings(self, tenant_id: str) -> TenantSettings:
-        """Get existing settings or create with defaults if they don't exist"""
-        settings = self.get_tenant_settings(tenant_id)
-        
-        if not settings:
-            # Verify tenant exists
-            tenant = self.db.query(Tenant).filter(Tenant.id == tenant_id).first()
-            if not tenant:
-                raise ValueError(f"Tenant not found: {tenant_id}")
-            
-            # Create default settings
-            settings = self.create_default_settings(tenant_id)
-        
-        return settings
-
-    def create_default_settings(self, tenant_id: str) -> TenantSettings:
-        """Create default settings for a tenant"""
-        defaults = get_default_settings()
-        
-        settings = TenantSettings(
-            tenant_id=tenant_id,
-            primary_color=defaults["primary_color"],
-            secondary_color=defaults["secondary_color"],
-            hover_text=defaults["hover_text"],
-            welcome_message=defaults["welcome_message"],
-            chat_window_title=defaults["chat_window_title"],
-            additional_settings=defaults["additional_settings"]
-        )
-        
-        self.db.add(settings)
-        self.db.commit()
-        self.db.refresh(settings)
-        
-        return settings
-
-    def update_tenant_settings(self, tenant_id: str, settings_data: SettingsUpdate) -> TenantSettings:
-        """Update tenant settings"""
-        settings = self.get_or_create_tenant_settings(tenant_id)
-        
-        # Update only provided fields
-        update_data = settings_data.dict(exclude_unset=True)
-        
-        for field, value in update_data.items():
-            if hasattr(settings, field):
-                setattr(settings, field, value)
-        
-        self.db.commit()
-        self.db.refresh(settings)
-        
-        return settings
-
+    
     def validate_logo_file(self, file: UploadFile) -> None:
         """Validate logo file type and size"""
         # Check content type
@@ -180,23 +134,41 @@ class SettingsService:
                 except:
                     continue  # Ignore if the file doesn't exist
             
-            # Upload logo using the dedicated logo upload method
-            logo_object_name, public_url = self.storage_service.upload_logo_file(
+            # Delete existing logos first (try common extensions)
+            logo_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.webp']
+            for ext in logo_extensions:
+                try:
+                    old_object_name = f"tenant_{tenant_id}/logos/logo{ext}"
+                    self.storage_service.delete_file(old_object_name)
+                except:
+                    continue  # Ignore if file doesn't exist
+            
+            # Upload new logo to storage using StorageService method
+            object_name, temporary_url = self.storage_service.upload_logo_file(
                 tenant_id=tenant_id,
                 file_data=file.file,
-                filename=logo_filename,
+                filename=file.filename,
                 content_type=file.content_type
             )
             
-            # Update settings with both object name and public URL
-            settings = self.get_or_create_tenant_settings(tenant_id)
-            settings.company_logo_object_name = logo_object_name  # Store for internal use
-            settings.company_logo_url = public_url  # Store the public URL for frontend/widget use
+            # Generate a presigned URL (expires in 30 days)
+            from datetime import timedelta
+            permanent_logo_url = self.storage_service.get_public_url(object_name, timedelta(days=7))
             
-            self.db.commit()
-            self.db.refresh(settings)
+            # Send a message to OAuth2 server to update tenant settings logo URL
+            try:
+                from .rabbitmq_service import rabbitmq_service
+                rabbitmq_service.publish_logo_uploaded(
+                    tenant_id=tenant_id,
+                    logo_url=permanent_logo_url
+                )
+            except Exception as e:
+                # Log error but don't fail the logo upload
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to publish logo update message: {e}")
             
-            return public_url  # Return the public URL instead of the object name
+            return permanent_logo_url  # Return the permanent URL
             
         except Exception as e:
             self.db.rollback()
@@ -204,53 +176,32 @@ class SettingsService:
 
     def remove_company_logo(self, tenant_id: str) -> bool:
         """Remove company logo"""
-        settings = self.get_tenant_settings(tenant_id)
-        if not settings or not settings.company_logo_url:
-            return False
-        
         try:
-            # Delete the actual logo file using the stored object name
-            if settings.company_logo_object_name:
-                self.storage_service.delete_file(settings.company_logo_object_name)
+            # Delete logo files from storage (try all common extensions)
+            logo_extensions = ['.png', '.jpg', '.jpeg', '.svg', '.webp']
+            deleted_any = False
             
-            # Remove logo from settings
-            settings.company_logo_url = None
-            settings.company_logo_object_name = None
+            for ext in logo_extensions:
+                try:
+                    object_name = f"tenant_{tenant_id}/logos/logo{ext}"
+                    if self.storage_service.delete_file(object_name):
+                        deleted_any = True
+                except:
+                    continue  # Ignore if the file doesn't exist
             
-            self.db.commit()
-            self.db.refresh(settings)
+            # Send a message to the OAuth2 server to clear the logo URL
+            try:
+                from .rabbitmq_service import rabbitmq_service
+                rabbitmq_service.publish_logo_deleted(
+                    tenant_id=tenant_id
+                )
+            except Exception as e:
+                # Log error but don't fail the logo removal
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to publish logo removal message: {e}")
             
-            return True
+            return deleted_any
             
         except Exception as e:
-            self.db.rollback()
             raise ValueError(f"Failed to remove logo: {str(e)}")
-
-    def delete_tenant_settings(self, tenant_id: str) -> bool:
-        """Soft delete tenant settings"""
-        settings = self.get_tenant_settings(tenant_id)
-        if not settings:
-            return False
-        
-        settings.is_active = False
-        self.db.commit()
-        
-        return True
-
-    def to_dict(self, settings: TenantSettings) -> SettingsResponse:
-        """Convert TenantSettings to response format"""
-        return SettingsResponse(
-            id=settings.id,
-            tenant_id=settings.tenant_id,
-            primary_color=settings.primary_color,
-            secondary_color=settings.secondary_color,
-            company_logo_url=settings.company_logo_url,
-            company_logo_object_name=settings.company_logo_object_name,
-            hover_text=settings.hover_text,
-            welcome_message=settings.welcome_message,
-            chat_window_title=settings.chat_window_title,
-            additional_settings=settings.additional_settings or {},
-            is_active=settings.is_active,
-            created_at=settings.created_at.isoformat(),
-            updated_at=settings.updated_at.isoformat() if settings.updated_at else None
-        )

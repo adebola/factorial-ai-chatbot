@@ -76,7 +76,7 @@ spring:
             - id: onboarding-widgets
               uri: http://onboarding-service:8000
               predicates:
-                - Path=/api/v1/widgets/**
+                - Path=/api/v1/widget/**
 
               # Chat Service Routes
             - id: chat-api
@@ -88,6 +88,12 @@ spring:
               uri: http://chat-service:8000
               predicates:
                 - Path=/api/v1/vectors/**
+
+            # Auth Service Routes
+            - id: auth-api
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/auth/**
 
               # Health Check Routes
             - id: onboarding-health
@@ -103,3 +109,10 @@ spring:
                 - Path=/health/chat
               filters:
                 - RewritePath=/health/chat,/health
+
+            - id: auth-health
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/health/auth
+              filters:
+                - RewritePath=/health/auth,/auth/health

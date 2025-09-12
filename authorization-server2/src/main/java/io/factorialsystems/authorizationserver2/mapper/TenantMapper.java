@@ -21,20 +21,6 @@ public interface TenantMapper {
     })
     Tenant findById(@Param("id") String id);
     
-    @Select("SELECT * FROM tenants WHERE domain = #{domain}")
-    @Results({
-        @Result(property = "id", column = "id"),
-        @Result(property = "name", column = "name"),
-        @Result(property = "domain", column = "domain"),
-        @Result(property = "apiKey", column = "api_key"),
-        @Result(property = "config", column = "config", typeHandler = io.factorialsystems.authorizationserver2.typehandler.JsonTypeHandler.class),
-        @Result(property = "planId", column = "plan_id"),
-        @Result(property = "isActive", column = "is_active"),
-        @Result(property = "createdAt", column = "created_at"),
-        @Result(property = "updatedAt", column = "updated_at")
-    })
-    Tenant findByDomain(@Param("domain") String domain);
-    
     @Select("SELECT * FROM tenants WHERE name = #{name}")
     @Results({
         @Result(property = "id", column = "id"),
@@ -74,4 +60,7 @@ public interface TenantMapper {
     
     @Delete("DELETE FROM tenants WHERE id = #{id}")
     int deleteById(@Param("id") String id);
+    
+    @Update("UPDATE tenants SET plan_id = #{planId}, updated_at = CURRENT_TIMESTAMP WHERE id = #{id}")
+    int updatePlanId(@Param("id") String tenantId, @Param("planId") String planId);
 }

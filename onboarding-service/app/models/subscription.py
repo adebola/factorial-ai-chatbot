@@ -56,7 +56,7 @@ class Subscription(Base):
     __tablename__ = "subscriptions"
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    tenant_id = Column(String(36), ForeignKey("tenant.id"), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     plan_id = Column(String(36), ForeignKey("plans.id"), nullable=False, index=True)
     
     # Subscription details
@@ -107,7 +107,7 @@ class Payment(Base):
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     subscription_id = Column(String(36), ForeignKey("subscriptions.id"), nullable=False, index=True)
-    tenant_id = Column(String(36), ForeignKey("tenant.id"), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     
     # Payment details
     amount = Column(Numeric(10, 2), nullable=False)
@@ -151,7 +151,7 @@ class PaymentMethodRecord(Base):
     __tablename__ = "payment_methods"
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    tenant_id = Column(String(36), ForeignKey("tenant.id"), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     
     # Payment method details
     type = Column(Enum(PaymentMethod), nullable=False)
@@ -186,7 +186,7 @@ class Invoice(Base):
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     subscription_id = Column(String(36), ForeignKey("subscriptions.id"), nullable=False, index=True)
-    tenant_id = Column(String(36), ForeignKey("tenant.id"), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     
     # Invoice details
     invoice_number = Column(String(50), unique=True, nullable=False, index=True)
@@ -224,7 +224,7 @@ class SubscriptionChange(Base):
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     subscription_id = Column(String(36), ForeignKey("subscriptions.id"), nullable=False, index=True)
-    tenant_id = Column(String(36), ForeignKey("tenant.id"), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     
     # Change details
     change_type = Column(String(50), nullable=False)  # upgrade, downgrade, cancel, renew
@@ -282,7 +282,7 @@ class UsageTracking(Base):
     __tablename__ = "usage_tracking"
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    tenant_id = Column(String(36), ForeignKey("tenant.id"), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     subscription_id = Column(String(36), ForeignKey("subscriptions.id"), nullable=False, index=True)
     
     # Usage metrics
@@ -313,7 +313,7 @@ class RefundRequest(Base):
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     payment_id = Column(String(36), ForeignKey("payments.id"), nullable=False, index=True)
-    tenant_id = Column(String(36), ForeignKey("tenant.id"), nullable=False, index=True)
+    tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     
     # Refund details
     requested_amount = Column(Numeric(10, 2), nullable=False)

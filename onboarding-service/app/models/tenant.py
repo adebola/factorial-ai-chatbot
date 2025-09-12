@@ -24,11 +24,6 @@ class IngestionStatus(str, enum.Enum):
     FAILED = "failed"
 
 
-class TenantRole(str, enum.Enum):
-    ADMIN = "admin"
-    USER = "user"
-
-
 class Plan(Base):
     __tablename__ = "plans"
     
@@ -58,40 +53,7 @@ class Plan(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
-    # Relationship
-    tenants = relationship("Tenant", back_populates="plan")
-
-
-class Tenant(Base):
-    __tablename__ = "tenant"
-    
-    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    name = Column(String(255), nullable=False)
-    domain = Column(String(255), unique=True, index=True)
-    website_url = Column(String(500))
-    api_key = Column(String(255), unique=True, index=True)
-    
-    # Authentication fields
-    username = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)
-    email = Column(String(255), unique=True, nullable=True, index=True)
-    role = Column(Enum(TenantRole), default=TenantRole.USER, nullable=False)
-    reset_token = Column(String(255), nullable=True)
-    reset_token_expires = Column(DateTime(timezone=True), nullable=True)
-    
-    # Plan relationship
-    plan_id = Column(String(36), ForeignKey("plans.id"), nullable=True, index=True)
-    
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Configuration for this tenant
-    config = Column(JSON, default={})
-    
-    # Relationships
-    plan = relationship("Plan", back_populates="tenants")
-    settings = relationship("TenantSettings", back_populates="tenant", uselist=False)
+    # Note: tenants relationship removed - tenant management now in OAuth2 server
 
 
 class Document(Base):

@@ -56,12 +56,12 @@ CREATE TABLE widget_customizations (
 ### Phase 2: API Endpoints
 
 **Widget Customization Management:**
-- `GET /api/v1/tenants/{id}/widget/customization` - Get current settings
-- `PUT /api/v1/tenants/{id}/widget/customization` - Update settings
-- `POST /api/v1/tenants/{id}/widget/upload-logo` - Upload company logo
-- `POST /api/v1/tenants/{id}/widget/upload-avatar` - Upload chatbot avatar
-- `POST /api/v1/tenants/{id}/widget/upload-icon` - Upload floating icon
-- `GET /api/v1/tenants/{id}/widget/preview` - Generate preview with custom settings
+- `GET /api/v1/widget/customization` - Get current settings
+- `PUT /api/v1/widget/customization` - Update settings
+- `POST /api/v1/widget/upload-logo` - Upload company logo
+- `POST /api/v1/widget/upload-avatar` - Upload chatbot avatar
+- `POST /api/v1/widget/upload-icon` - Upload floating icon
+- `GET /api/v1/widget/preview` - Generate preview with custom settings
 
 ### Phase 3: Enhanced Widget Generation
 
@@ -105,7 +105,7 @@ class FactorialBotWidget {
     }
     
     async loadCustomization() {
-        const response = await fetch(`${this.apiUrl}/tenants/${this.tenantId}/widget/customization`);
+        const response = await fetch(`${this.apiUrl}/widget/customization`);
         this.customization = await response.json();
         this.applyCustomization();
     }

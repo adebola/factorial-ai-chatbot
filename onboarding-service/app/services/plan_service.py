@@ -146,14 +146,9 @@ class PlanService:
         if not plan:
             return False
         
-        # Check if any tenants are using this plan
-        tenant_count = self.db.query(Plan).join(Plan.tenants).filter(
-            Plan.id == plan_id,
-            Plan.is_deleted == False
-        ).count()
-        
-        if tenant_count > 0:
-            raise ValueError(f"Cannot delete plan '{plan.name}' as it has {tenant_count} active tenant(s)")
+        # Note: Tenant relationship removed - plan deletion temporarily allowed
+        # TODO: Implement tenant count check via OAuth2 server API when needed
+        # For now, we'll allow plan deletion since tenant management is in OAuth2 server
         
         plan.is_deleted = True
         plan.deleted_at = datetime.utcnow()
@@ -183,15 +178,16 @@ class PlanService:
         if not plan:
             return {}
         
-        # Count active tenants using this plan
-        active_tenant_count = len([t for t in plan.tenants if t.is_active])
+        # Note: Tenant statistics temporarily unavailable
+        # TODO: Implement tenant count via OAuth2 server API calls
         
         return {
             "plan_id": plan.id,
             "plan_name": plan.name,
-            "active_tenant_count": active_tenant_count,
-            "total_tenant_count": len(plan.tenants),
-            "is_deletable": active_tenant_count == 0
+            "active_tenant_count": 0,  # Placeholder - tenant data in OAuth2 server
+            "total_tenant_count": 0,   # Placeholder - tenant data in OAuth2 server
+            "is_deletable": True,      # Temporarily allowing deletion
+            "note": "Tenant statistics unavailable - tenant management moved to OAuth2 server"
         }
     
     def create_default_plans(self) -> List[Plan]:

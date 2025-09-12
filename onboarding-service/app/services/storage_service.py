@@ -117,11 +117,11 @@ class StorageService:
         try:
             # Construct public URL manually
             minio_endpoint = os.environ.get("MINIO_ENDPOINT")
-            secure = os.environ.get("MINIO_SECURE", "false").lower() == "true"
-            protocol = "https" if secure else "http"
+            # secure = os.environ.get("MINIO_SECURE", "false").lower() == "true"
+            # protocol = "https" if secure else "http"
             
             # For direct access (requires public bucket policy)
-            return f"{protocol}://{minio_endpoint}/{self.bucket_name}/{object_name}"
+            return f"{minio_endpoint}/{self.bucket_name}/{object_name}"
         except Exception as e:
             print(f"Error generating permanent public URL: {e}")
             return ""

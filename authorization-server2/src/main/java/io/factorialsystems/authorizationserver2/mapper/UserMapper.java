@@ -27,8 +27,7 @@ public interface UserMapper {
         @Result(property = "createdAt", column = "created_at"),
         @Result(property = "updatedAt", column = "updated_at"),
         @Result(property = "apiKey", column = "api_key"),
-        @Result(property = "roles", column = "id", javaType = List.class, 
-                many = @Many(select = "findRolesByUserId"))
+        @Result(property = "roles", column = "id", javaType = List.class, many = @Many(select = "findRolesByUserId"))
     })
     User findByUsername(@Param("username") String username);
     

@@ -8,8 +8,8 @@ from datetime import datetime
 from ..core.database import get_db, get_vector_db
 from ..services.website_scraper import WebsiteScraper
 from ..services.pg_vector_ingestion import PgVectorIngestionService
-from ..services.dependencies import get_current_tenant
-from ..models.tenant import Tenant, IngestionStatus, WebsitePage
+from ..services.dependencies import get_current_tenant, TokenClaims, validate_token, get_full_tenant_details
+from ..models.tenant import IngestionStatus, WebsitePage
 
 router = APIRouter()
 
@@ -17,7 +17,7 @@ router = APIRouter()
 @router.post("/websites/ingest")
 async def ingest_website(
     website_url: str = Form(...),
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Start the website ingestion process (requires Bearer token authentication)"""
@@ -32,23 +32,26 @@ async def ingest_website(
     try:
         # Start scraping in the background
         scraper = WebsiteScraper(db)
-        ingestion = scraper.start_website_ingestion(current_tenant.id, website_url)
+        ingestion = scraper.start_website_ingestion(claims.tenant_id, website_url)
         
         # Process in the background (in a real app, use Celery)
         # Pass environment variables explicitly to a background task
         import os
         openai_key = os.environ.get("OPENAI_API_KEY")
         asyncio.create_task(
-            background_website_ingestion(current_tenant.id, website_url, ingestion.id, db, openai_key)
+            background_website_ingestion(claims.tenant_id, website_url, ingestion.id, db, openai_key)
         )
+
+        # Get tenant details if needed
+        tenant_details = await get_full_tenant_details(claims.tenant_id)
         
         return {
             "message": "Website ingestion started",
             "ingestion_id": ingestion.id,
             "website_url": website_url,
             "status": "in_progress",
-            "tenant_id": current_tenant.id,
-            "tenant_name": current_tenant.name
+            "tenant_id": claims.tenant_id,
+            "tenant_name": tenant_details.get("name")
         }
         
     except Exception as e:
@@ -61,19 +64,22 @@ async def ingest_website(
 @router.get("/ingestions/{ingestion_id}/status")
 async def get_ingestion_status(
     ingestion_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get website ingestion status (requires Bearer token authentication)"""
     
     scraper = WebsiteScraper(db)
-    ingestion = scraper.get_ingestion_status(current_tenant.id, ingestion_id)
+    ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ingestion not found or does not belong to this tenant"
         )
+
+    # Get tenant details if needed
+    tenant_details = await get_full_tenant_details(claims.tenant_id)
     
     return {
         "ingestion_id": ingestion.id,
@@ -85,20 +91,23 @@ async def get_ingestion_status(
         "started_at": ingestion.started_at.isoformat() if ingestion.started_at else None,
         "completed_at": ingestion.completed_at.isoformat() if ingestion.completed_at else None,
         "error_message": ingestion.error_message,
-        "tenant_id": current_tenant.id,
-        "tenant_name": current_tenant.name
+        "tenant_id": claims.tenant_id,
+        "tenant_name": tenant_details.get("name")
     }
 
 
 @router.get("/ingestions/")
 async def list_tenant_ingestions(
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """List all website ingestions for a tenant (requires Bearer token authentication)"""
     
     scraper = WebsiteScraper(db)
-    ingestions = scraper.get_tenant_ingestions(current_tenant.id)
+    ingestions = scraper.get_tenant_ingestions(claims.tenant_id)
+
+    # Get tenant details if needed
+    tenant_details = await get_full_tenant_details(claims.tenant_id)
     
     return {
         "ingestions": [
@@ -116,15 +125,15 @@ async def list_tenant_ingestions(
             for ing in ingestions
         ],
         "total_ingestions": len(ingestions),
-        "tenant_id": current_tenant.id,
-        "tenant_name": current_tenant.name
+        "tenant_id": claims.tenant_id,
+        "tenant_name": tenant_details.get("name")
     }
 
 
 @router.delete("/ingestions/{ingestion_id}")
 async def delete_ingestion(
     ingestion_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a website ingestion record (requires Bearer token authentication)"""
@@ -133,7 +142,7 @@ async def delete_ingestion(
         scraper = WebsiteScraper(db)
         
         # Verify ingestion exists and belongs to a tenant
-        ingestion = scraper.get_ingestion_status(current_tenant.id, ingestion_id)
+        ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
         if not ingestion:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -141,7 +150,7 @@ async def delete_ingestion(
             )
         
         # Delete ingestion record (this could also clean up related pages)
-        success = scraper.delete_ingestion(current_tenant.id, ingestion_id)
+        success = scraper.delete_ingestion(claims.tenant_id, ingestion_id)
         
         if not success:
             raise HTTPException(
@@ -153,7 +162,7 @@ async def delete_ingestion(
             "message": "Website ingestion deleted successfully",
             "ingestion_id": ingestion_id,
             "base_url": ingestion.base_url,
-            "tenant_id": current_tenant.id
+            "tenant_id": claims.tenant_id
         }
         
     except HTTPException:
@@ -168,7 +177,7 @@ async def delete_ingestion(
 @router.post("/ingestions/{ingestion_id}/retry")
 async def retry_ingestion(
     ingestion_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Retry a failed website ingestion (requires Bearer token authentication)"""
@@ -177,7 +186,7 @@ async def retry_ingestion(
         scraper = WebsiteScraper(db)
         
         # Get existing ingestion
-        ingestion = scraper.get_ingestion_status(current_tenant.id, ingestion_id)
+        ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
         if not ingestion:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -194,11 +203,11 @@ async def retry_ingestion(
         # Reset ingestion status and restart
         scraper.reset_ingestion_for_retry(ingestion_id)
         
-        # Start processing in background
+        # Start processing in the background
         import os
         openai_key = os.environ.get("OPENAI_API_KEY")
         asyncio.create_task(
-            background_website_ingestion(current_tenant.id, ingestion.base_url, ingestion_id, db, openai_key)
+            background_website_ingestion(claims.tenant_id, ingestion.base_url, ingestion_id, db, openai_key)
         )
         
         return {
@@ -206,7 +215,7 @@ async def retry_ingestion(
             "ingestion_id": ingestion_id,
             "base_url": ingestion.base_url,
             "status": "in_progress",
-            "tenant_id": current_tenant.id
+            "tenant_id": claims.tenant_id,
         }
         
     except HTTPException:
@@ -288,14 +297,14 @@ async def get_ingestion_pages(
     ingestion_id: str,
     page: int = 1,
     page_size: int = 20,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get individual pages for website ingestion with pagination (requires Bearer token authentication)"""
     
     # Verify ingestion belongs to tenant
     scraper = WebsiteScraper(db)
-    ingestion = scraper.get_ingestion_status(current_tenant.id, ingestion_id)
+    ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
         raise HTTPException(
@@ -308,7 +317,7 @@ async def get_ingestion_pages(
     
     # Get pages with pagination
     pages_query = db.query(WebsitePage).filter(
-        WebsitePage.tenant_id == current_tenant.id,
+        WebsitePage.tenant_id == claims.tenant_id,
         WebsitePage.ingestion_id == ingestion_id
     ).order_by(WebsitePage.created_at.desc())
     
@@ -340,21 +349,21 @@ async def get_ingestion_pages(
             "has_next": offset + page_size < total_pages,
             "has_previous": page > 1
         },
-        "tenant_id": current_tenant.id
+        "tenant_id": claims.tenant_id,
     }
 
 
 @router.get("/ingestions/{ingestion_id}/stats")
 async def get_ingestion_stats(
     ingestion_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get detailed statistics for a website ingestion (requires Bearer token authentication)"""
     
     # Verify ingestion belongs to tenant
     scraper = WebsiteScraper(db)
-    ingestion = scraper.get_ingestion_status(current_tenant.id, ingestion_id)
+    ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
         raise HTTPException(
@@ -367,20 +376,20 @@ async def get_ingestion_stats(
         WebsitePage.status,
         func.count(WebsitePage.id).label('count')
     ).filter(
-        WebsitePage.tenant_id == current_tenant.id,
+        WebsitePage.tenant_id == claims.tenant_id,
         WebsitePage.ingestion_id == ingestion_id
     ).group_by(WebsitePage.status).all()
     
     # Get total content size estimation (based on content_hash uniqueness)
     unique_pages = db.query(WebsitePage).filter(
-        WebsitePage.tenant_id == current_tenant.id,
+        WebsitePage.tenant_id == claims.tenant_id,
         WebsitePage.ingestion_id == ingestion_id,
         WebsitePage.content_hash.isnot(None)
     ).count()
     
     # Get all pages for detailed analysis
     all_pages = db.query(WebsitePage).filter(
-        WebsitePage.tenant_id == current_tenant.id,
+        WebsitePage.tenant_id == claims.tenant_id,
         WebsitePage.ingestion_id == ingestion_id
     ).all()
     
@@ -426,7 +435,7 @@ async def get_ingestion_stats(
             "estimated_total_characters": unique_pages * 2000,  # Rough estimate
             "note": "Content size is estimated based on average page content length"
         },
-        "tenant_id": current_tenant.id
+        "tenant_id": claims.tenant_id
     }
 
 
@@ -434,14 +443,14 @@ async def get_ingestion_stats(
 async def get_page_content_preview(
     ingestion_id: str,
     page_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get content preview for a specific page (requires Bearer token authentication)"""
     
     # Verify ingestion belongs to tenant
     scraper = WebsiteScraper(db)
-    ingestion = scraper.get_ingestion_status(current_tenant.id, ingestion_id)
+    ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
         raise HTTPException(
@@ -452,7 +461,7 @@ async def get_page_content_preview(
     # Get the specific page
     page = db.query(WebsitePage).filter(
         WebsitePage.id == page_id,
-        WebsitePage.tenant_id == current_tenant.id,
+        WebsitePage.tenant_id == claims.tenant_id,
         WebsitePage.ingestion_id == ingestion_id
     ).first()
     
@@ -487,5 +496,5 @@ async def get_page_content_preview(
         },
         "content_preview": content_preview,
         "note": "Content preview shows first 500 characters of processed content",
-        "tenant_id": current_tenant.id
+        "tenant_id": claims.tenant_id,
     }
