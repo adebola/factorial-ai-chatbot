@@ -60,7 +60,7 @@
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-            <scope>runtime</scope>
+<!--            <scope>runtime</scope>-->
         </dependency>
         <dependency>
             <groupId>org.projectlombok</groupId>
@@ -132,11 +132,11 @@
                 <artifactId>flyway-maven-plugin</artifactId>
 <!--                <version>11.3.0</version>-->
                 <configuration>
-                    <user>root</user>
+                    <user>postgres</user>
                     <password>password</password>
-                    <url>jdbc:postgresql://127.0.0.1:5432</url>
+                    <url>jdbc:postgresql://localhost:5432/authorization_db</url>
                     <schemas>
-                        <schema>authorization_db</schema>
+                        <schema>public</schema>
                     </schemas>
                 </configuration>
             </plugin>

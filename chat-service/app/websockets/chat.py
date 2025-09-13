@@ -7,8 +7,8 @@ from datetime import datetime
 
 from ..core.database import get_db
 from ..models.chat_models import ChatSession, ChatMessage
-from ..services.auth import TenantAuthService
 from ..services.chat_service import ChatService
+from ..services.tenant_client import TenantClient
 
 
 class ConnectionManager:
@@ -64,7 +64,7 @@ manager = ConnectionManager()
 class ChatWebSocket:
     def __init__(self, db: Session):
         self.db = db
-        self.auth_service = TenantAuthService()
+        self.tenant_client = TenantClient()
         self.chat_service = ChatService(db)
     
     async def handle_connection(self, websocket: WebSocket, api_key: str = None, tenant_id: str = None, user_identifier: str = None):
@@ -73,10 +73,10 @@ class ChatWebSocket:
         
         if api_key:
             # Try to find a tenant by API key
-            tenant = await self.auth_service.authenticate_tenant(api_key)
+            tenant = await self.tenant_client.get_tenant_by_api_key(api_key)
         elif tenant_id:
             # Try to find a tenant by ID
-            tenant = await self.auth_service.get_tenant_by_id(tenant_id)
+            tenant = await self.tenant_client.get_tenant_by_id(tenant_id)
         
         if not tenant:
             await websocket.close(code=4000, reason="Tenant not found. Please provide valid api_key or tenant_id")

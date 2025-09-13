@@ -8,13 +8,11 @@ from pydantic import BaseModel, Field
 
 from ..core.database import get_db
 from ..models.chat_models import ChatSession, ChatMessage
-from ..services.auth import TenantAuthService
 from ..core.logging_config import get_logger
+from ..services.dependencies import validate_token, TokenClaims
 
 router = APIRouter()
-logger = get_logger("admin_chat")
-auth_service = TenantAuthService()
-
+logger = get_logger("chat")
 
 # Response models
 class ChatMessageResponse(BaseModel):
@@ -53,32 +51,16 @@ class ChatSessionWithMessagesResponse(BaseModel):
 # Security scheme for Bearer token
 security = HTTPBearer()
 
-# Dependency for tenant authentication
-async def authenticate_tenant_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    """Authenticate tenant admin via JWT Bearer token in Authorization header"""
-    access_token = credentials.credentials
-    tenant = await auth_service.authenticate_tenant_by_token(access_token)
-    if not tenant:
-        raise HTTPException(
-            status_code=401, 
-            detail="Invalid access token",
-            headers={"WWW-Authenticate": "Bearer"}
-        )
-    
-    logger.info("Admin authenticated", tenant_id=tenant["id"], operation="admin_auth")
-    return tenant
-
-
 @router.get("/admin/sessions", response_model=List[ChatSessionResponse])
 async def list_chat_sessions(
-    tenant: dict = Depends(authenticate_tenant_admin),
     limit: int = Query(50, ge=1, le=500, description="Number of sessions to return"),
     offset: int = Query(0, ge=0, description="Number of sessions to skip"),
     active_only: bool = Query(False, description="Return only active sessions"),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ):
     """List all chat sessions for the authenticated tenant"""
-    tenant_id = tenant["id"]
+    tenant_id = claims.tenant_id
     
     logger.info("Listing chat sessions", tenant_id=tenant_id, limit=limit, offset=offset)
     
@@ -91,7 +73,7 @@ async def list_chat_sessions(
     # Get sessions with message count
     sessions = query.order_by(desc(ChatSession.last_activity)).offset(offset).limit(limit).all()
     
-    # Add message count to each session
+    # Add a message count to each session
     session_responses = []
     for session in sessions:
         message_count = db.query(ChatMessage).filter(
@@ -119,13 +101,13 @@ async def list_chat_sessions(
 @router.get("/admin/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
 async def get_session_messages(
     session_id: str,
-    tenant: dict = Depends(authenticate_tenant_admin),
     limit: int = Query(100, ge=1, le=1000, description="Number of messages to return"),
     offset: int = Query(0, ge=0, description="Number of messages to skip"),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ):
     """Get all messages for a specific chat session"""
-    tenant_id = tenant["id"]
+    tenant_id = claims.tenant_id
     
     logger.info("Getting session messages", tenant_id=tenant_id, session_id=session_id)
     
@@ -160,12 +142,12 @@ async def get_session_messages(
 @router.get("/admin/sessions/{session_id}", response_model=ChatSessionWithMessagesResponse)
 async def get_session_with_messages(
     session_id: str,
-    tenant: dict = Depends(authenticate_tenant_admin),
     message_limit: int = Query(100, ge=1, le=1000, description="Number of messages to return"),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ):
     """Get a complete chat session with all messages"""
-    tenant_id = tenant["id"]
+    tenant_id = claims.tenant_id
     
     logger.info("Getting complete session", tenant_id=tenant_id, session_id=session_id)
     
@@ -224,15 +206,15 @@ async def get_session_with_messages(
 @router.get("/admin/messages/search")
 async def search_messages(
     query: str = Query(..., description="Search query for message content"),
-    tenant: dict = Depends(authenticate_tenant_admin),
     limit: int = Query(50, ge=1, le=500, description="Number of messages to return"),
     offset: int = Query(0, ge=0, description="Number of messages to skip"),
     message_type: Optional[str] = Query(None, description="Filter by message type (user/assistant)"),
     session_id: Optional[str] = Query(None, description="Filter by specific session"),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ):
     """Search messages by content"""
-    tenant_id = tenant["id"]
+    tenant_id = claims.tenant_id
     
     logger.info("Searching messages", 
                tenant_id=tenant_id, 
@@ -268,11 +250,11 @@ async def search_messages(
 
 @router.get("/admin/stats")
 async def get_chat_stats(
-    tenant: dict = Depends(authenticate_tenant_admin),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ):
     """Get chat statistics for the tenant"""
-    tenant_id = tenant["id"]
+    tenant_id = claims.tenant_id
     
     logger.info("Getting chat stats", tenant_id=tenant_id)
     

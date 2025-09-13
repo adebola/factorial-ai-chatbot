@@ -52,7 +52,7 @@ class WidgetService:
         context = {
             "tenant_id": tenant_id,
             "tenant_name": tenant_name,
-            "api_key": tenant_details.get("api_key", ""),
+            "api_key": tenant_details.get("apiKey", ""),
             "logo_info": logo_info,
             "colors": colors,
             "widget_id": f"factorial-chat-{tenant_id}",
@@ -556,13 +556,7 @@ class WidgetService:
                     
                     <div class="factorial-chat-footer">
                         <span>Powered by</span>
-                        {% if logo_info.type == 'url' and logo_info.source %}
-                        <img src="{{ logo_info.source }}" alt="Company Logo" class="factorial-chat-logo">
-                        {% elif logo_info.type == 'initials' and logo_info.initials %}
-                        <span class="factorial-chat-logo-text">{{ tenant_name }}</span>
-                        {% else %}
-                        <span class="factorial-chat-logo-text">FactorialBot</span>
-                        {% endif %}
+                        <img src="{{ backend_url }}/static/chatcraft-logo2.png" alt="ChatCraft" class="factorial-chat-logo">
                     </div>
                 </div>
             `;

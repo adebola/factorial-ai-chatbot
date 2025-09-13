@@ -45,6 +45,15 @@ public class TenantService {
         }
         return tenant;
     }
+
+    public Tenant findByDomain(String domain) {
+        // Fetch from database and cache
+        Tenant tenant = tenantMapper.findByDomain(domain);
+        if (tenant != null) {
+            cacheService.cacheTenant(tenant);
+        }
+        return tenant;
+    }
     
     public Tenant findByName(String name) {
         return tenantMapper.findByName(name);
@@ -83,7 +92,7 @@ public class TenantService {
         if (findByDomain(domain) != null) {
             throw new IllegalArgumentException("A tenant with this domain already exists");
         }
-        
+
         if (findByName(name) != null) {
             throw new IllegalArgumentException("A tenant with this name already exists");
         }
