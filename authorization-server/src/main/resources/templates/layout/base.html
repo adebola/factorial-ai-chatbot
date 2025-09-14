@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" th:fragment="html">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${pageTitle != null ? pageTitle + ' - ChatCraft Auth' : 'ChatCraft Authorization Server'}">ChatCraft Authorization Server</title>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" th:href="@{/css/auth.css}">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" th:href="@{/favicon.ico}">
+    
+    <!-- Additional head content -->
+    <th:block th:fragment="additional-head"></th:block>
+</head>
+<body>
+    <!-- Header -->
+    <header class="auth-header">
+        <div class="container">
+            <nav class="d-flex justify-content-between align-items-center">
+                <a class="navbar-brand" th:href="@{/}">
+                    <img th:src="@{/image/chatcratf-logo2.png}" alt="ChatCraft" style="height: 24px; width: auto; margin-right: 8px; vertical-align: middle;">
+                </a>
+                
+                <!-- No tenant context needed for simplified login -->
+            </nav>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="auth-main">
+        <div class="container">
+            <th:block th:fragment="content">
+                <!-- Page content will be inserted here -->
+            </th:block>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="auth-footer">
+        <div class="container">
+            <p>&copy; 2024 ChatCraft Authorization Server</p>
+        </div>
+    </footer>
+
+    <!-- JavaScript -->
+    <script th:src="@{/js/auth.js}"></script>
+    
+    <!-- Additional scripts -->
+    <th:block th:fragment="additional-scripts"></th:block>
+</body>
+</html>

@@ -88,7 +88,7 @@ spring:
             - id: onboarding-widgets
               uri: ${ONBOARDING_SERVICE_URL:http://onboarding-service:8000}
               predicates:
-                - Path=/api/v1/widgets/**
+                - Path=/api/v1/widget/**
 
             # Chat Service Routes
             - id: chat-api

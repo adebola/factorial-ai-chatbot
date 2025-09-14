@@ -1,14 +1,13 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, Depends, Query
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
-from ..websockets.chat import ChatWebSocket
-
 from ..core.logging_config import get_logger
+from ..websockets.chat import ChatWebSocket
 
 router = APIRouter()
 
-logger = get_logger("auth")
+logger = get_logger("ws")
 
 
 @router.websocket("/ws/chat")

@@ -32,16 +32,32 @@ spring:
                   allowCredentials: true
             add-to-simple-url-handler-mapping: true
           routes:
-            # Onboarding Service Routes
+              # Onboarding Service Routes
               - id: onboarding-documents
                 uri: http://localhost:8001
                 predicates:
                     - Path=/api/v1/documents/**
 
-              - id: onboarding-tenants
+              - id: onboarding-logo
                 uri: http://localhost:8001
                 predicates:
+                  - Path=/api/v1/settings-logo/**
+
+              - id: auth-tenants
+                uri: http://localhost:9002
+                predicates:
                     - Path=/api/v1/tenants/**
+                filters:
+                  - RewritePath=/api/v1/tenants/(?<segment>.*),/auth/api/v1/tenants/$\{segment}
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+              - id: auth-users
+                uri: http://localhost:9002
+                predicates:
+                    - Path=/api/v1/users/**
+                filters:
+                  - RewritePath=/api/v1/users/(?<segment>.*),/auth/api/v1/users/$\{segment}
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
 
               - id: onboarding-websites
                 uri: http://localhost:8001
@@ -53,10 +69,12 @@ spring:
                 predicates:
                     - Path=/api/v1/ingestions/**
 
-              - id: onboarding-auth
-                uri: http://localhost:8001
-                predicates:
-                    - Path=/api/v1/auth/**
+#              - id: onboarding-auth
+#                uri: http://localhost:8001
+#                predicates:
+#                    - Path=/api/v1/auth/**
+#                filters:
+#                  - RewritePath=/health/auth,/auth/health
 
               - id: onboarding-plans
                 uri: http://localhost:8001
@@ -76,7 +94,7 @@ spring:
               - id: onboarding-widgets
                 uri: http://localhost:8001
                 predicates:
-                    - Path=/api/v1/widgets/**
+                    - Path=/api/v1/widget/**
 
                 # Chat Service Routes
               - id: chat-api
@@ -88,6 +106,14 @@ spring:
                 uri: http://localhost:8000
                 predicates:
                     - Path=/api/v1/vectors/**
+
+              # Auth Service Routes
+              - id: auth-api
+                uri: http://localhost:9002
+                predicates:
+                  - Path=/auth/**
+                filters:
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
 
                 # Health Check Routes
               - id: onboarding-health
@@ -103,3 +129,11 @@ spring:
                     - Path=/health/chat
                 filters:
                     - RewritePath=/health/chat,/health
+
+
+              - id: auth-health
+                uri: http://localhost:8000
+                predicates:
+                  - Path=/auth
+                filters:
+                  - RewritePath=/health/auth,/auth/health

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" th:replace="~{layout/base :: html}">
+<head>
+    <th:block th:fragment="additional-head">
+        <title>Dashboard - ChatCraft Auth</title>
+    </th:block>
+</head>
+<body>
+    <th:block th:fragment="content">
+        <div class="auth-card auth-card-wide">
+            <div class="auth-card-header">
+                <h1>ChatCraft Authorization Server</h1>
+                <p>Welcome to your OAuth2 authorization dashboard</p>
+            </div>
+
+            <!-- Tenant Context -->
+            <div th:if="${tenantContext}" class="tenant-info">
+                <h3>Current Context</h3>
+                <p th:text="${tenantContext}">Tenant context</p>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="mt-4">
+                <h4 class="text-primary">Quick Actions</h4>
+                
+                <div class="d-flex justify-content-between mb-3">
+                    <a th:href="@{/api/v1/tenants/current}" class="btn btn-primary">
+                        View Tenant Details
+                    </a>
+                    <a th:href="@{/api/v1/users/me}" class="btn btn-secondary">
+                        My Profile
+                    </a>
+                </div>
+                
+                <div class="d-flex justify-content-between">
+                    <a th:href="@{/api/v1/invitations/pending}" class="btn btn-success">
+                        Manage Invitations
+                    </a>
+                    <a th:href="@{/logout}" class="btn btn-danger">
+                        Sign Out
+                    </a>
+                </div>
+            </div>
+
+            <!-- OAuth2 Information -->
+            <div class="credentials-box">
+                <h4>OAuth2 Endpoints</h4>
+                
+                <div class="credential-item">
+                    <span class="credential-label">Authorization Endpoint</span>
+                    <code class="credential-value">/oauth2/authorize</code>
+                </div>
+                
+                <div class="credential-item">
+                    <span class="credential-label">Token Endpoint</span>
+                    <code class="credential-value">/oauth2/token</code>
+                </div>
+                
+                <div class="credential-item">
+                    <span class="credential-label">JWK Set Endpoint</span>
+                    <code class="credential-value">/.well-known/jwks.json</code>
+                </div>
+                
+                <div class="credential-item">
+                    <span class="credential-label">OpenID Configuration</span>
+                    <code class="credential-value">/.well-known/openid-configuration</code>
+                </div>
+            </div>
+
+            <!-- System Status -->
+            <div class="mt-4">
+                <h4 class="text-primary">System Status</h4>
+                <div class="alert alert-success">
+                    <strong>✓ Authorization Server:</strong> Online and ready
+                </div>
+                <div class="alert alert-success">
+                    <strong>✓ Database:</strong> Connected
+                </div>
+                <div class="alert alert-success">
+                    <strong>✓ Security:</strong> OAuth2 & OIDC enabled
+                </div>
+            </div>
+
+            <!-- Documentation Links -->
+            <div class="text-center mt-4">
+                <h4 class="text-primary">Resources</h4>
+                <p>
+                    <a href="https://docs.factorialbot.com/oauth2" target="_blank" class="text-primary">
+                        OAuth2 Documentation
+                    </a> |
+                    <a href="https://docs.factorialbot.com/api" target="_blank" class="text-primary">
+                        API Reference
+                    </a> |
+                    <a href="mailto:support@factorialsystems.io" class="text-primary">
+                        Support
+                    </a>
+                </p>
+            </div>
+        </div>
+    </th:block>
+
+    <th:block th:fragment="additional-scripts">
+        <script>
+            // Copy endpoint URLs to clipboard
+            document.querySelectorAll('.credential-value').forEach(element => {
+                element.style.cursor = 'pointer';
+                element.title = 'Click to copy';
+                
+                element.addEventListener('click', function() {
+                    const baseUrl = window.location.origin + '/auth';
+                    const endpoint = this.textContent.trim();
+                    const fullUrl = baseUrl + endpoint;
+                    
+                    navigator.clipboard.writeText(fullUrl).then(() => {
+                        // Show temporary success indicator
+                        const originalBg = this.style.backgroundColor;
+                        this.style.backgroundColor = '#d4edda';
+                        this.title = 'Copied: ' + fullUrl;
+                        
+                        setTimeout(() => {
+                            this.style.backgroundColor = originalBg;
+                            this.title = 'Click to copy';
+                        }, 2000);
+                    });
+                });
+            });
+        </script>
+    </th:block>
+</body>
+</html>

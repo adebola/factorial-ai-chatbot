@@ -4,7 +4,7 @@ import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.JWKSource;
 import com.nimbusds.jose.proc.SecurityContext;
-import jakarta.servlet.http.HttpServletRequest;
+import io.factorialsystems.authorizationserver.service.MultiTenantUserDetails;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
@@ -20,6 +20,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
+import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
@@ -27,7 +28,6 @@ import org.springframework.security.oauth2.server.authorization.token.JwtEncodin
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
-import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -38,7 +38,6 @@ import java.security.KeyPairGenerator;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -61,7 +60,7 @@ public class SecurityConfig {
                         // Enable OpenID Connect if needed
                         .oidc(Customizer.withDefaults())
                 )
-                // Optional: resource server and exception handling
+                // Redirect to login when authentication is required
                 .exceptionHandling(ex -> ex
                         .defaultAuthenticationEntryPointFor(
                                 new LoginUrlAuthenticationEntryPoint("/login"),
@@ -72,31 +71,6 @@ public class SecurityConfig {
 
         return http.build();
     }
-
-
-//    @Bean
-//    @Order(1)
-//    public SecurityFilterChain authorizationServerSecurityFilterChain(HttpSecurity http) throws Exception {
-//        OAuth2AuthorizationServerConfiguration.applyDefaultSecurity(http);
-//
-//        // Enable OpenID Connect 1.0 for the Authorization Server
-//        http.getConfigurer(OAuth2AuthorizationServerConfigurer.class).oidc(Customizer.withDefaults());
-//        http
-//                .cors(Customizer.withDefaults())
-//                // Redirect to the login page when not authenticated from the
-//                // authorization endpoint
-//                .exceptionHandling((exceptions) -> exceptions
-//                        .defaultAuthenticationEntryPointFor(
-//                                new LoginUrlAuthenticationEntryPoint("/login"),
-//                                new MediaTypeRequestMatcher(MediaType.TEXT_HTML)
-//                        )
-//                )
-//                // Accept access tokens for User Info and/or UserRegisteredClient Registration
-//                .oauth2ResourceServer((resourceServer) -> resourceServer
-//                        .jwt(Customizer.withDefaults()));
-//
-//        return http.build();
-//    }
 
     @Bean
     @Order(2)
@@ -109,11 +83,15 @@ public class SecurityConfig {
                                 "/error",
                                 "/register",
                                 "/images/**",
+                                "/image/**",
                                 "/webjars/**",
                                 "/css/**",
+                                "/js/**",
                                 "/assets/**",
                                 "/favicon.ico",
-                                "/confirm").permitAll()
+                                "/confirm",
+                                "/.well-known/**").permitAll()
+                        .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 // Form login handles the redirect to the login page from the
@@ -133,29 +111,12 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(properties.getAllowedOrigins()); // Add your frontend origin(s)
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Origin", "Accept", "X-Requested-With", "X-XSRF-TOKEN"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration); // Apply to all endpoints
         return source;
-    }
-
-    @Bean
-    OAuth2TokenCustomizer<JwtEncodingContext> tokenCustomizer(HttpServletRequest request) {
-        return (context) -> {
-            Authentication principal = context.getPrincipal();
-            context.getClaims().claim("organization", "Factorial Systems");
-
-            if (context.getTokenType().getValue().equals("access_token")) {
-                Set<String> authorities = principal.getAuthorities().stream()
-                        .map(GrantedAuthority::getAuthority)
-                        .collect(java.util.stream.Collectors.toSet());
-
-                context.getClaims()
-                        .claim("authorities", authorities);
-            }
-        };
     }
 
     @Bean
@@ -199,5 +160,58 @@ public class SecurityConfig {
         return AuthorizationServerSettings.builder()
                 .issuer(properties.getLocation())
                 .build();
+    }
+
+    @Bean
+    public OAuth2TokenCustomizer<JwtEncodingContext> jwtCustomizer(AuthorizationProperties properties) {
+        return (context) -> {
+            if (context.getTokenType() == OAuth2TokenType.ACCESS_TOKEN) {
+                Authentication principal = context.getPrincipal();
+                
+                // Check if the principal details is our MultiTenantUserDetails
+                Object principalDetails = principal.getPrincipal();
+                if (principalDetails instanceof MultiTenantUserDetails userDetails) {
+
+                    context.getClaims().claims((claims) -> {
+                        // Add platform information
+                        claims.put("platform", "ChatCraft");
+                        
+                        // Add core user/tenant information
+                        claims.put("tenant_id", userDetails.getTenantId());
+                        claims.put("user_id", userDetails.getUserId());
+                        claims.put("tenant_domain", userDetails.getTenantDomain());
+                        claims.put("tenant_name", userDetails.getTenantName());
+                        
+                        // Add roles (role names without ROLE_ prefix)
+                        claims.put("roles", userDetails.getAllRoleNames());
+                        
+                        // Add permissions (individual permission strings)  
+                        claims.put("permissions", userDetails.getAllPermissions());
+                        
+                        // Add Spring Security authorities (for backward compatibility)
+                        claims.put("authorities", userDetails.getAuthorities().stream()
+                                .map(GrantedAuthority::getAuthority)
+                                .collect(java.util.stream.Collectors.toSet()));
+                        
+                        // Add user profile information
+                        claims.put("email", userDetails.getEmail());
+                        claims.put("full_name", userDetails.getFullName());
+                        
+                        // Add tenant admin flag
+                        claims.put("is_tenant_admin", userDetails.isTenantAdmin());
+                        
+                        // Custom issuer
+                        claims.put("iss", properties.getLocation());
+                        
+                        log.debug("Added claims to access token for user: {} in tenant: {}", 
+                                userDetails.getUsername(), userDetails.getTenantDomain());
+                    });
+                } else {
+                    // Fallback for other authentication types (client credentials, etc.)
+                    log.debug("Principal is not MultiTenantUserDetails, skipping custom claims. Type: {}", 
+                            principalDetails != null ? principalDetails.getClass().getSimpleName() : "null");
+                }
+            }
+        };
     }
 }

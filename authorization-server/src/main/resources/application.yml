@@ -3,16 +3,27 @@ server:
   servlet:
     context-path: /auth
 
+logging:
+  pattern:
+    console: "%green(%d{HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
+  level:
+    org.springframework.web: DEBUG
+    org.springframework.security: TRACE
+    org.springframework.security.oauth2.server.authorization: TRACE
+    org.springframework.cloud.gateway: TRACE
+    reactor.netty: DEBUG
+
 spring:
   application:
     name: authorization-server
+  thymeleaf:
+    cache: false
 
   rabbitmq:
     host: localhost
     port: 5672
     username: user
     password: password
-
 
   data:
     redis:

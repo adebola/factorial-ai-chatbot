@@ -7,17 +7,14 @@ import io
 from ..core.database import get_db, get_vector_db
 from ..services.document_processor import DocumentProcessor
 from ..services.pg_vector_ingestion import PgVectorIngestionService
-from ..services.dependencies import get_current_tenant
-from ..models.tenant import Tenant
+from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
 
 router = APIRouter()
-
-
 
 @router.post("/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db),
     vector_db: Session = Depends(get_vector_db)
 ) -> Dict[str, Any]:
@@ -40,7 +37,7 @@ async def upload_document(
         # Process document
         doc_processor = DocumentProcessor(db)
         documents, document_id  = doc_processor.process_document(
-            tenant_id=current_tenant.id,
+            tenant_id=claims.tenant_id,
             file_data=file.file,
             filename=file.filename,
             content_type=file.content_type
@@ -48,14 +45,17 @@ async def upload_document(
         
         # Ingest into vector store
         vector_service = PgVectorIngestionService(vector_db)
-        vector_service.ingest_documents(current_tenant.id, documents, document_id)
+        vector_service.ingest_documents(claims.tenant_id, documents, document_id)
+        
+        # Get tenant details if needed
+        tenant_details = await get_full_tenant_details(claims.tenant_id)
         
         return {
             "message": "Document uploaded and processed successfully",
             "filename": file.filename,
             "chunks_created": len(documents),
-            "tenant_id": current_tenant.id,
-            "tenant_name": current_tenant.name
+            "tenant_id": claims.tenant_id,
+            "tenant_name": tenant_details.get("name")
         }
         
     except Exception as e:
@@ -66,13 +66,13 @@ async def upload_document(
 
 @router.get("/documents/")
 async def list_tenant_documents(
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """List all documents for a tenant (requires Bearer token authentication)"""
     
     doc_processor = DocumentProcessor(db)
-    documents = doc_processor.get_tenant_documents(current_tenant.id)
+    documents = doc_processor.get_tenant_documents(claims.tenant_id)
     
     return {
         "documents": [
@@ -88,14 +88,11 @@ async def list_tenant_documents(
         ]
     }
 
-
-
-
 @router.put("/documents/{document_id}/replace")
 async def replace_document(
     document_id: str,
     file: UploadFile = File(...),
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db),
     vector_db: Session = Depends(get_vector_db)
 ) -> Dict[str, Any]:
@@ -117,7 +114,7 @@ async def replace_document(
     try:
         # Get an existing document to ensure it belongs to the tenant
         doc_processor = DocumentProcessor(db)
-        existing_documents = doc_processor.get_tenant_documents(current_tenant.id)
+        existing_documents = doc_processor.get_tenant_documents(claims.tenant_id)
         existing_doc = next((doc for doc in existing_documents if doc.id == document_id), None)
         
         if not existing_doc:
@@ -127,11 +124,11 @@ async def replace_document(
             )
         
         # Delete the old document (this will also clean up storage)
-        doc_processor.delete_document(current_tenant.id, document_id)
+        doc_processor.delete_document(claims.tenant_id, document_id)
         
         # Process the new document with the same metadata where possible
         new_documents, x_id = doc_processor.process_document(
-            tenant_id=current_tenant.id,
+            tenant_id=claims.tenant_id,
             file_data=file.file,
             filename=file.filename,
             content_type=file.content_type
@@ -140,11 +137,11 @@ async def replace_document(
         # Update the new document record to use the original document ID
         if new_documents:
             # Get the newly created document
-            updated_documents = doc_processor.get_tenant_documents(current_tenant.id)
+            updated_documents = doc_processor.get_tenant_documents(claims.tenant_id)
             newest_doc = max(updated_documents, key=lambda x: x.created_at)
             
             # Update the ID to match the original document
-            db.execute(
+            db.execute (
                 "UPDATE documents SET id = :old_id WHERE id = :new_id",
                 {"old_id": document_id, "new_id": newest_doc.id}
             )
@@ -152,7 +149,10 @@ async def replace_document(
         
         # Ingest into vector store (this will create new embeddings)
         vector_service = PgVectorIngestionService(vector_db)
-        vector_service.ingest_documents(current_tenant.id, new_documents, document_id)
+        vector_service.ingest_documents(claims.tenant_id, new_documents, document_id)
+        
+        # Get tenant details if needed
+        tenant_details = await get_full_tenant_details(claims.tenant_id)
         
         return {
             "message": "Document replaced successfully",
@@ -160,8 +160,8 @@ async def replace_document(
             "original_filename": existing_doc.original_filename,
             "new_filename": file.filename,
             "chunks_created": len(new_documents),
-            "tenant_id": current_tenant.id,
-            "tenant_name": current_tenant.name
+            "tenant_id": claims.tenant_id,
+            "tenant_name": tenant_details.get("name")
         }
         
     except HTTPException:
@@ -176,7 +176,7 @@ async def replace_document(
 @router.delete("/documents/{document_id}")
 async def delete_document(
     document_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a single document (requires Bearer token authentication)"""
@@ -185,7 +185,7 @@ async def delete_document(
         doc_processor = DocumentProcessor(db)
         
         # Verify the document exists and belongs to tenant
-        existing_documents = doc_processor.get_tenant_documents(current_tenant.id)
+        existing_documents = doc_processor.get_tenant_documents(claims.tenant_id)
         existing_doc = next((doc for doc in existing_documents if doc.id == document_id), None)
         
         if not existing_doc:
@@ -195,7 +195,7 @@ async def delete_document(
             )
         
         # Delete document (this also removes from storage)
-        success = doc_processor.delete_document(current_tenant.id, document_id)
+        success = doc_processor.delete_document(claims.tenant_id, document_id)
         
         if not success:
             raise HTTPException(
@@ -207,7 +207,7 @@ async def delete_document(
             "message": "Document deleted successfully",
             "document_id": document_id,
             "filename": existing_doc.original_filename,
-            "tenant_id": current_tenant.id
+            "tenant_id": claims.tenant_id
         }
         
     except HTTPException:
@@ -222,7 +222,7 @@ async def delete_document(
 @router.delete("/documents/")
 async def delete_multiple_documents(
     document_ids: List[str],
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete multiple documents (requires Bearer token authentication)"""
@@ -235,7 +235,7 @@ async def delete_multiple_documents(
     
     try:
         doc_processor = DocumentProcessor(db)
-        existing_documents = doc_processor.get_tenant_documents(current_tenant.id)
+        existing_documents = doc_processor.get_tenant_documents(claims.tenant_id)
         existing_doc_ids = {doc.id for doc in existing_documents}
         
         # Validate all documents belong to tenant
@@ -251,7 +251,7 @@ async def delete_multiple_documents(
         failed_ids = []
         
         for document_id in document_ids:
-            success = doc_processor.delete_document(current_tenant.id, document_id)
+            success = doc_processor.delete_document(claims.tenant_id, document_id)
             if success:
                 deleted_count += 1
             else:
@@ -261,7 +261,7 @@ async def delete_multiple_documents(
             "message": f"Deleted {deleted_count} of {len(document_ids)} documents",
             "deleted_count": deleted_count,
             "total_requested": len(document_ids),
-            "tenant_id": current_tenant.id
+            "tenant_id": claims.tenant_id
         }
         
         if failed_ids:
@@ -281,14 +281,14 @@ async def delete_multiple_documents(
 @router.get("/documents/{document_id}/download")
 async def download_document(
     document_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> StreamingResponse:
     """Download a document file (requires Bearer token authentication)"""
     
     try:
         doc_processor = DocumentProcessor(db)
-        existing_documents = doc_processor.get_tenant_documents(current_tenant.id)
+        existing_documents = doc_processor.get_tenant_documents(claims.tenant_id)
         existing_doc = next((doc for doc in existing_documents if doc.id == document_id), None)
         
         if not existing_doc:
@@ -332,14 +332,14 @@ async def download_document(
 @router.get("/documents/{document_id}/view")
 async def view_document(
     document_id: str,
-    current_tenant: Tenant = Depends(get_current_tenant),
+    claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """View document metadata and content preview (requires Bearer token authentication)"""
     
     try:
         doc_processor = DocumentProcessor(db)
-        existing_documents = doc_processor.get_tenant_documents(current_tenant.id)
+        existing_documents = doc_processor.get_tenant_documents(claims.tenant_id)
         existing_doc = next((doc for doc in existing_documents if doc.id == document_id), None)
         
         if not existing_doc:
@@ -360,6 +360,9 @@ async def view_document(
             except Exception:
                 content_preview = "Preview not available"
         
+        # Get tenant details if needed
+        tenant_details = await get_full_tenant_details(claims.tenant_id)
+        
         return {
             "document_id": existing_doc.id,
             "filename": existing_doc.original_filename,
@@ -370,8 +373,8 @@ async def view_document(
             "processed_at": existing_doc.processed_at.isoformat() if existing_doc.processed_at else None,
             "error_message": existing_doc.error_message,
             "content_preview": content_preview,
-            "tenant_id": current_tenant.id,
-            "tenant_name": current_tenant.name
+            "tenant_id": claims.tenant_id,
+            "tenant_name": tenant_details.get("name")
         }
         
     except HTTPException:

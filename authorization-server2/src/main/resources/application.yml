@@ -1,0 +1,69 @@
+server:
+  port: 9002
+  servlet:
+    context-path: /auth
+
+logging:
+  pattern:
+    console: "%green(%d{HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
+  level:
+    org.springframework.web: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.security.oauth2.server.authorization: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+    reactor.netty: DEBUG
+
+spring:
+  application:
+    name: authorization-server2
+  thymeleaf:
+    cache: false
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      username:
+      password:
+
+  cache:
+    type: redis
+    redis:
+      time-to-live: 60000
+
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: user
+    password: password
+
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://localhost:5432/authorization_db2
+    username: postgres
+    password: password
+
+authorization:
+  config:
+    rabbitmq:
+      key:
+        widget: widget-key
+        logo-update: logo.update
+      queue:
+        widget: widget-queue
+        logo-update: logo-update-queue
+      exchange:
+        name: topic-exchange
+    security:
+      allowed-origins:
+        - http://localhost:4200
+        - http://localhost:8080
+      location: http://localhost:9002/auth
+
+# External service URLs
+onboarding:
+  service:
+    url: http://localhost:8001

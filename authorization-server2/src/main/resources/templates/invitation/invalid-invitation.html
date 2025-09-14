@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" th:replace="~{layout/base :: html}">
+<head>
+    <th:block th:fragment="additional-head">
+        <title>Invalid Invitation - ChatCraft Auth</title>
+    </th:block>
+</head>
+<body>
+    <th:block th:fragment="content">
+        <div class="auth-card">
+            <div class="auth-card-header">
+                <h1 class="text-warning">Invalid Invitation</h1>
+                <p>The invitation link you're trying to use is not valid.</p>
+            </div>
+
+            <!-- Error Message -->
+            <div class="alert alert-warning" role="alert">
+                <span th:text="${errorMessage ?: 'This invitation link is invalid or has expired.'}">Error message</span>
+            </div>
+
+            <!-- Common Reasons -->
+            <div class="mt-4">
+                <h4 class="text-primary">This might happen because:</h4>
+                <ul>
+                    <li>The invitation link has expired</li>
+                    <li>The invitation has already been used</li>
+                    <li>The invitation was cancelled by an administrator</li>
+                    <li>The link was copied incorrectly</li>
+                </ul>
+            </div>
+
+            <!-- What to do -->
+            <div class="mt-4">
+                <h4 class="text-primary">What you can do:</h4>
+                <ul>
+                    <li>Contact the person who invited you for a new invitation</li>
+                    <li>Check your email for the most recent invitation</li>
+                    <li>Make sure you're using the complete invitation URL</li>
+                </ul>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="text-center mt-4">
+                <a th:href="@{/login}" class="btn btn-primary">
+                    Sign In (if you have an account)
+                </a>
+            </div>
+
+            <!-- Support Info -->
+            <div class="text-center mt-4">
+                <p class="text-muted">
+                    Still having trouble? Contact us at 
+                    <a href="mailto:support@factorialsystems.io" class="text-primary">
+                        support@factorialsystems.io
+                    </a>
+                </p>
+            </div>
+        </div>
+    </th:block>
+</body>
+</html>

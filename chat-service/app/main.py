@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from .api.chat import router as chat_router
-from .api.vectors import router as vectors_router
 from .api.admin_chat import router as admin_chat_router
 from .core.config import settings
 from .core.logging_config import (
@@ -53,6 +52,10 @@ async def startup_event():
 @app.middleware("http")
 async def logging_middleware(request: Request, call_next):
     """Middleware for request/response logging and context tracking."""
+    # Skip middleware for WebSocket connections
+    if request.url.path.startswith("/ws/"):
+        return await call_next(request)
+
     start_time = time.time()
     
     # Generate request ID
@@ -125,7 +128,6 @@ async def logging_middleware(request: Request, call_next):
 
 # Include routers
 app.include_router(chat_router, prefix=settings.API_V1_STR)
-app.include_router(vectors_router, prefix=f"{settings.API_V1_STR}/vectors", tags=["vectors"])
 app.include_router(admin_chat_router, prefix=f"{settings.API_V1_STR}/chat", tags=["admin", "chat"])
 
 # Also include WebSocket route at root level for easier client access
