@@ -1,0 +1,18 @@
+spring:
+  application:
+    name: authorization-server2-test
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://localhost:5432/authorization_db2
+    username: postgres
+    password: password
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+
+logging:
+  level:
+    io.factorialsystems.authorizationserver2: DEBUG
+    org.springframework.test: INFO
+    org.mybatis: DEBUG
