@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<!--<html xmlns="http://www.w3.org/1999/xhtml" xmlns:th="https://www.thymeleaf.org" lang="en">-->
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - ChatCraft Auth</title>
+    <link rel="stylesheet" th:href="@{/css/auth.css}">
+    <link rel="icon" type="image/x-icon" th:href="@{/favicon.ico}">
+</head>
+<body>
+    <!-- Header -->
+    <header class="auth-header">
+        <div class="container">
+            <nav class="d-flex justify-content-between align-items-center">
+                <a class="navbar-brand" th:href="@{/}">
+                    <img th:src="@{/image/chatcratf-logo2.png}" alt="ChatCraft" style="height: 24px; width: auto; margin-right: 8px; vertical-align: middle;">
+                </a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="auth-main">
+        <div class="container">
+        <div class="auth-card">
+            <div class="auth-card-header">
+                <h1>Sign In</h1>
+                <p>Enter your credentials to access ChatCraft</p>
+            </div>
+
+            <!-- Success Message -->
+            <div th:if="${successMessage}" class="alert alert-success" role="alert">
+                <span th:text="${successMessage}">Success message</span>
+            </div>
+
+            <!-- Error Message -->
+            <div th:if="${errorMessage}" class="alert alert-danger" role="alert">
+                <span th:text="${errorMessage}">Error message</span>
+            </div>
+
+            <!-- Login Form -->
+            <form th:action="@{/login}" method="post" id="loginForm">
+                <!-- CSRF Token -->
+                <input type="hidden" th:name="${_csrf.parameterName}" th:value="${_csrf.token}"/>
+
+                <!-- OAuth2 Context (optional, only for OAuth2 flows) -->
+                <input type="hidden" name="client_id" th:value="${clientId}" th:if="${clientId}"/>
+
+                <div class="form-group">
+                    <label for="username" class="form-label">Username or Email</label>
+                    <input type="text"
+                           class="form-control"
+                           id="username"
+                           name="username"
+                           required
+                           autocomplete="username"
+                           placeholder="Enter your username or email">
+                </div>
+
+                <div class="form-group">
+                    <label for="password" class="form-label">Password</label>
+                    <input type="password"
+                           class="form-control"
+                           id="password"
+                           name="password"
+                           required
+                           autocomplete="current-password"
+                           placeholder="Enter your password">
+                </div>
+
+                <div class="form-group">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <label class="form-check-label">
+                            <input type="checkbox" name="remember-me" id="rememberMe">
+                            Remember me
+                        </label>
+                        <a href="#" class="text-primary">Forgot password?</a>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-block" id="loginBtn">
+                    Sign In
+                </button>
+            </form>
+
+            <!-- Additional Actions -->
+            <div class="text-center mt-4">
+                <p class="text-muted">
+                    Don't have an account?
+                    <a th:href="@{/register}" class="text-primary">Register your organization</a>
+                </p>
+            </div>
+        </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="auth-footer">
+        <div class="container">
+            <p>&copy; 2024 ChatCraft Authorization Server</p>
+        </div>
+    </footer>
+
+    <script th:src="@{/js/auth.js}"></script>
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            const btn = document.getElementById('loginBtn');
+            btn.classList.add('btn-loading');
+            btn.disabled = true;
+        });
+        // Focus first input
+        document.getElementById('username').focus();
+    </script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org" th:replace="~{layout/base :: html}">
+<head>
+    <th:block th:fragment="additional-head">
+        <title>Welcome - ChatCraft Auth</title>
+    </th:block>
+</head>
+<body>
+    <th:block th:fragment="content">
+        <div class="auth-card">
+            <!-- Success Icon -->
+            <div class="success-icon">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                </svg>
+            </div>
+
+            <div class="auth-card-header">
+                <h1 class="text-success">Welcome to the Team!</h1>
+                <p>Your account has been successfully created.</p>
+            </div>
+
+            <!-- Success Message -->
+            <div th:if="${successMessage}" class="alert alert-success" role="alert">
+                <span th:text="${successMessage}">Success message</span>
+            </div>
+
+            <!-- User Information -->
+            <div th:if="${user}" class="invitation-details">
+                <h3>Account Details</h3>
+                <div class="detail-row" th:if="${invitation}">
+                    <span class="detail-label">Organization:</span>
+                    <span class="detail-value" th:text="${invitation.tenantName}">Organization Name</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Username:</span>
+                    <span class="detail-value" th:text="${user.username}">username</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Email:</span>
+                    <span class="detail-value" th:text="${user.email}">user@example.com</span>
+                </div>
+                <div class="detail-row" th:if="${user.fullName}">
+                    <span class="detail-label">Name:</span>
+                    <span class="detail-value" th:text="${user.fullName}">Full Name</span>
+                </div>
+                <div class="detail-row" th:if="${user.isTenantAdmin}">
+                    <span class="detail-label">Role:</span>
+                    <span class="detail-value text-primary">Administrator</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Account Created:</span>
+                    <span class="detail-value" th:text="${#temporals.format(user.createdAt, 'MMM dd, yyyy HH:mm')}">Created Date</span>
+                </div>
+            </div>
+
+            <!-- Next Steps -->
+            <div class="mt-4">
+                <h4 class="text-primary">What's Next?</h4>
+                <ol>
+                    <li class="mb-2">
+                        <strong>Sign in to your account</strong> - 
+                        Use your username and the password you just created.
+                    </li>
+                    <li class="mb-2" th:if="${user?.isTenantAdmin}">
+                        <strong>Manage your organization</strong> - 
+                        As an administrator, you can invite team members and configure settings.
+                    </li>
+                    <li class="mb-2">
+                        <strong>Explore FactorialBot</strong> - 
+                        Upload documents, set up chat functionality, and more.
+                    </li>
+                    <li class="mb-2">
+                        <strong>Get support</strong> - 
+                        Contact our team if you need help getting started.
+                    </li>
+                </ol>
+            </div>
+
+            <!-- Features Overview -->
+            <div class="credentials-box">
+                <h4>Available Features</h4>
+                <ul class="mb-0">
+                    <li><strong>Document Management:</strong> Upload and organize your knowledge base</li>
+                    <li><strong>AI Chat:</strong> Get intelligent responses based on your documents</li>
+                    <li><strong>Team Collaboration:</strong> Invite team members and manage access</li>
+                    <li><strong>API Integration:</strong> Connect with your existing applications</li>
+                </ul>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="d-flex justify-content-between mt-4">
+                <a th:href="@{/login}" class="btn btn-primary">
+                    Sign In Now
+                </a>
+                
+                <a href="https://docs.factorialbot.com" target="_blank" class="btn btn-secondary">
+                    View Documentation
+                </a>
+            </div>
+
+            <!-- Support Info -->
+            <div class="text-center mt-4">
+                <p class="text-muted">
+                    Questions? Contact us at 
+                    <a href="mailto:support@factorialsystems.io" class="text-primary">
+                        support@factorialsystems.io
+                    </a>
+                </p>
+            </div>
+        </div>
+    </th:block>
+
+    <th:block th:fragment="additional-scripts">
+        <script>
+            // Auto-redirect to login after 10 seconds
+            let countdown = 10;
+            const loginBtn = document.querySelector('a[href*="/login"]');
+            const originalText = loginBtn.textContent;
+            
+            function updateCountdown() {
+                loginBtn.textContent = `${originalText} (${countdown})`;
+                countdown--;
+                
+                if (countdown < 0) {
+                    window.location.href = loginBtn.href;
+                } else {
+                    setTimeout(updateCountdown, 1000);
+                }
+            }
+            
+            // Start countdown after 5 seconds
+            setTimeout(() => {
+                updateCountdown();
+            }, 5000);
+            
+            // Cancel countdown if user interacts
+            document.addEventListener('click', () => {
+                countdown = -1;
+                loginBtn.textContent = originalText;
+            });
+        </script>
+    </th:block>
+</body>
+</html>
