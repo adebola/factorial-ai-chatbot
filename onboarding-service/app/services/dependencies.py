@@ -12,10 +12,11 @@ from typing import Dict, Any
 from ..services.oauth2_client import oauth2_client
 
 logger = logging.getLogger(__name__)
-security = HTTPBearer()
+# Configure HTTPBearer to return 401 instead of 403 for authentication failures
+security = HTTPBearer(auto_error=False)
 
 
-@dataclass  
+@dataclass
 class TokenClaims:
     """Simple container for validated JWT token claims"""
     tenant_id: str
@@ -25,21 +26,30 @@ class TokenClaims:
     api_key: Optional[str] = None
     authorities: list = None
     access_token: Optional[str] = None
-    
+
     @property
     def is_admin(self) -> bool:
         """Check if user has admin privileges"""
         if not self.authorities:
             return False
-        return any(role in ["ROLE_ADMIN", "ADMIN", "ROLE_TENANT_ADMIN", "TENANT_ADMIN"] 
+        return any(role in ["ROLE_ADMIN", "ADMIN", "ROLE_TENANT_ADMIN", "TENANT_ADMIN"]
                   for role in self.authorities)
 
 
 async def validate_token(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> TokenClaims:
     """Validate OAuth2 token and extract claims"""
-    
+
+    # Check if credentials were provided
+    if not credentials:
+        logger.warning("No authorization credentials provided")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
     token = credentials.credentials
     
     try:

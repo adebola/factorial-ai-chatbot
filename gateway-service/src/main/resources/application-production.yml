@@ -25,7 +25,9 @@ spring:
           globalcors:
             cors-configurations:
               '[/**]':
-                allowedOriginPatterns: "https://factorai-370af.web.app"
+                allowedOriginPatterns:
+                  - https://app.chatcraft.cc
+                  - https://factorai-370af.web.app
                 allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                 allowedHeaders: "*"
                 exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
@@ -38,10 +40,26 @@ spring:
               predicates:
                 - Path=/api/v1/documents/**
 
-            - id: onboarding-tenants
+            - id: onboarding-logo
               uri: http://onboarding-service:8000
               predicates:
+                - Path=/api/v1/settings-logo/**
+
+            - id: auth-tenants
+              uri: http://authorization-service:9000
+              predicates:
                 - Path=/api/v1/tenants/**
+              filters:
+                - RewritePath=/api/v1/tenants/(?<segment>.*),/auth/api/v1/tenants/$\{segment}
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+            - id: auth-users
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/api/v1/users/**
+              filters:
+                - RewritePath=/api/v1/users/(?<segment>.*),/auth/api/v1/users/$\{segment}
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
 
             - id: onboarding-websites
               uri: http://onboarding-service:8000
@@ -53,10 +71,12 @@ spring:
               predicates:
                 - Path=/api/v1/ingestions/**
 
-            - id: onboarding-auth
-              uri: http://onboarding-service:8000
-              predicates:
-                - Path=/api/v1/auth/**
+            #              - id: onboarding-auth
+            #                uri: http://localhost:8001
+            #                predicates:
+            #                    - Path=/api/v1/auth/**
+            #                filters:
+            #                  - RewritePath=/health/auth,/auth/health
 
             - id: onboarding-plans
               uri: http://onboarding-service:8000
@@ -84,20 +104,22 @@ spring:
               predicates:
                 - Path=/api/v1/chat/**
 
-            - id: chat-vectors
-              uri: http://chat-service:8000
-              predicates:
-                - Path=/api/v1/vectors/**
+#            - id: chat-vectors
+#              uri: http://chat-service:8000
+#              predicates:
+#                - Path=/api/v1/vectors/**
 
             # Auth Service Routes
             - id: auth-api
               uri: http://authorization-service:9000
               predicates:
                 - Path=/auth/**
+              filters:
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
 
               # Health Check Routes
             - id: onboarding-health
-              uri:  http://onboarding-service:8000
+              uri: http://onboarding-service:8000
               predicates:
                 - Path=/health/onboarding
               filters:
@@ -109,10 +131,3 @@ spring:
                 - Path=/health/chat
               filters:
                 - RewritePath=/health/chat,/health
-
-            - id: auth-health
-              uri: http://authorization-service:9000
-              predicates:
-                - Path=/health/auth
-              filters:
-                - RewritePath=/health/auth,/auth/health

@@ -435,6 +435,39 @@ logger.info("Operation completed",
 
 ## Development Guidelines for Claude Code
 
+### Python Dependency Management
+**CRITICAL - ALWAYS UPDATE requirements.txt**: When adding any Python library to the project:
+
+1. **Install the library**: `pip install <library-name>`
+2. **IMMEDIATELY update requirements.txt**: Add the library with its version to the appropriate service's requirements.txt file
+3. **Verify the entry**: Ensure the exact library name and version are in requirements.txt
+
+**Why this is critical**:
+- Docker builds rely SOLELY on requirements.txt files
+- Development environments may have libraries installed that aren't in requirements.txt
+- Missing entries cause production container failures with "ModuleNotFoundError"
+- The build process cannot detect missing dependencies until runtime
+
+**Example workflow**:
+```bash
+# WRONG - Only installing locally
+pip install redis
+
+# CORRECT - Install AND update requirements.txt
+pip install redis
+echo "redis==5.0.1" >> onboarding-service/requirements.txt
+```
+
+**Common mistakes to avoid**:
+- ❌ Installing a library locally but forgetting to add it to requirements.txt
+- ❌ Using `pip freeze > requirements.txt` which may include unneeded dependencies
+- ❌ Adding a library import in code without updating requirements.txt
+- ✅ Always add the specific version to requirements.txt immediately after installation
+
+**Services with requirements.txt**:
+- `chat-service/requirements.txt` - Chat service dependencies
+- `onboarding-service/requirements.txt` - Onboarding service dependencies
+
 ### Service Testing Protocol
 **CRITICAL**: Only clean up processes that Claude Code starts during testing:
 
@@ -503,3 +536,52 @@ public class User {
 - Makes debugging harder when you don't control which methods are generated
 - Can expose sensitive fields in `toString()` output
 - Better to be explicit about what methods you need
+
+## FastAPI Authentication Guidelines
+
+### Proper HTTP Status Codes for Authentication
+
+**CRITICAL**: All FastAPI services must return proper HTTP status codes for authentication failures.
+
+**Authentication Setup Pattern**:
+```python
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from typing import Optional
+
+# IMPORTANT: Always use auto_error=False to control status codes
+security = HTTPBearer(auto_error=False)
+
+async def validate_token(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> TokenClaims:
+    """Validate OAuth2 token and extract claims"""
+
+    # Check if credentials were provided
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,  # NOT 403!
+            detail="Authorization header missing",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    token = credentials.credentials
+    # ... rest of validation logic
+```
+
+**Status Code Rules**:
+- **401 Unauthorized**: Use for authentication failures
+  - Missing authorization header
+  - Invalid token format
+  - Expired token
+  - Token validation failed
+- **403 Forbidden**: Use for authorization failures
+  - Valid token but insufficient permissions
+  - Admin-only endpoints accessed by regular users
+  - Resource access denied
+
+**Why this matters**:
+- FastAPI's `HTTPBearer()` defaults to returning 403 for missing/invalid credentials
+- This violates HTTP semantics where 401 means "not authenticated" and 403 means "authenticated but not authorized"
+- Using `auto_error=False` allows proper control of status codes
+- Consistent status codes across all services improve client error handling

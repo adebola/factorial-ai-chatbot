@@ -7,6 +7,7 @@
 CREATE DATABASE vector_db;
 CREATE DATABASE chatbot_db;
 CREATE DATABASE onboard_db;
+CREATE DATABASE authorization_db;
 
 -- Connect to vector_db and enable pgvector extension
 \c vector_db;
@@ -23,6 +24,11 @@ GRANT ALL PRIVILEGES ON DATABASE chatbot_db TO postgres;
 \c onboard_db;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 GRANT ALL PRIVILEGES ON DATABASE onboard_db TO postgres;
+
+\c authorization_db;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+GRANT ALL PRIVILEGES ON DATABASE authorization_db TO postgres;
+
 
 -- Log completion
 \c postgres;

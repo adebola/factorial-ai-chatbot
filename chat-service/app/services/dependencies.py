@@ -12,10 +12,11 @@ from typing import Dict, Any
 from ..services.oauth2_client import oauth2_client
 
 logger = logging.getLogger(__name__)
-security = HTTPBearer()
+# Configure HTTPBearer to return 401 instead of 403 for authentication failures
+security = HTTPBearer(auto_error=False)
 
 
-@dataclass  
+@dataclass
 class TokenClaims:
     """Simple container for validated JWT token claims"""
     tenant_id: str
@@ -25,21 +26,30 @@ class TokenClaims:
     api_key: Optional[str] = None
     authorities: list = None
     access_token: Optional[str] = None
-    
+
     @property
     def is_admin(self) -> bool:
         """Check if user has admin privileges"""
         if not self.authorities:
             return False
-        return any(role in ["ROLE_ADMIN", "ADMIN", "ROLE_TENANT_ADMIN", "TENANT_ADMIN"] 
+        return any(role in ["ROLE_ADMIN", "ADMIN", "ROLE_TENANT_ADMIN", "TENANT_ADMIN"]
                   for role in self.authorities)
 
 
 async def validate_token(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> TokenClaims:
     """Validate OAuth2 token and extract claims"""
-    
+
+    # Check if credentials were provided
+    if not credentials:
+        logger.warning("No authorization credentials provided")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
     token = credentials.credentials
     
     try:
@@ -101,117 +111,3 @@ async def require_admin(
         )
     
     return claims
-
-
-# async def get_full_tenant_details(tenant_id: str, access_token: Optional[str] = None) -> Dict[str, Any]:
-#     """Fetch full tenant details from the authorization server (checks cache first)"""
-#
-#     # Try cache first (read-only, don't save to cache - OAuth server handles that)
-#     from ..services.cache_service import CacheService
-#     cache_service = CacheService()
-#
-#     # Check cache first
-#     cached_tenant = cache_service.get_cached_tenant('id', tenant_id)
-#     if cached_tenant:
-#         logger.debug(f"Tenant details found in cache: {tenant_id}")
-#         return cached_tenant
-#
-#     logger.debug(f"Tenant cache miss, fetching from auth server: {tenant_id}")
-#
-#     auth_server_url = os.environ.get("AUTHORIZATION_SERVER_URL", "http://localhost:9002/auth")
-#
-#     try:
-#         # Prepare headers
-#         headers = {"content-type": "application/json"}
-#         if access_token:
-#             headers["Authorization"] = f"Bearer {access_token}"
-#
-#         async with httpx.AsyncClient() as client:
-#             response = await client.get(
-#                 f"{auth_server_url}/api/v1/tenants/{tenant_id}",
-#                 headers=headers,
-#                 timeout=10.0
-#             )
-#
-#             if response.status_code == 404:
-#                 raise HTTPException(
-#                     status_code=status.HTTP_404_NOT_FOUND,
-#                     detail="Tenant not found"
-#                 )
-#
-#             if response.status_code != 200:
-#                 logger.error(f"Failed to fetch tenant details: {response.status_code}")
-#                 raise HTTPException(
-#                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-#                     detail="Unable to fetch tenant details"
-#                 )
-#
-#             # OAuth server will cache the result, we just return it without caching
-#             tenant_data = response.json()
-#             logger.debug(f"Fetched tenant details from auth server: {tenant_id}")
-#             return tenant_data
-#
-#     except httpx.RequestError as e:
-#         logger.error(f"Failed to connect to authorization server: {e}")
-#         raise HTTPException(
-#             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-#             detail="Authorization server unavailable"
-#         )
-#
-#
-# def get_tenant_settings(tenant_id: str, access_token: Optional[str] = None) -> Dict[str, Any]:
-#     """Get tenant settings from the OAuth2 server for widget customization"""
-#     try:
-#         # Get settings from OAuth2 server
-#         oauth2_server_url = os.getenv("AUTHORIZATION_SERVER_URL", "http://localhost:9000")
-#         settings_url = f"{oauth2_server_url}/api/v1/tenants/{tenant_id}/settings"
-#
-#         # For now, we'll need a way to authenticate with the OAuth2 server
-#         # This is a service-to-service call, so we might need a service account token
-#         # For the migration, we'll use a fallback approach
-#
-#         headers = {
-#             "Content-Type": "application/json",
-#         }
-#
-#         # Add authorization header if access token is provided
-#         if access_token:
-#             headers["Authorization"] = f"Bearer {access_token}"
-#
-#         try:
-#             response = requests.get(settings_url, headers=headers, timeout=5)
-#             if response.status_code == 200:
-#                 settings_data = response.json()
-#                 return {
-#                     "primary_color": settings_data.get("primaryColor"),
-#                     "secondary_color": settings_data.get("secondaryColor"),
-#                     "company_logo_url": settings_data.get("companyLogoUrl"),
-#                     "chatLogo": settings_data.get("chatLogo"),  # New field with type, url, initials
-#                     "hover_text": settings_data.get("hoverText"),
-#                     "welcome_message": settings_data.get("welcomeMessage"),
-#                     "chat_window_title": settings_data.get("chatWindowTitle"),
-#                     "logo_url": settings_data.get("companyLogoUrl"),
-#                 }
-#             else:
-#                 logger.warning(f"Failed to fetch settings from OAuth2 server: {response.status_code}")
-#                 return _get_fallback_settings()
-#
-#         except requests.exceptions.RequestException as e:
-#             logger.warning(f"Error connecting to OAuth2 server: {str(e)}")
-#             return _get_fallback_settings()
-#
-#     except Exception as e:
-#         logger.warning(f"Could not load tenant settings for {tenant_id}: {str(e)}")
-#         return _get_fallback_settings()
-#
-#
-# def _get_fallback_settings() -> Dict[str, Any]:
-#     """Fallback to the local settings service if OAuth2 server is unavailable"""
-#     return {
-#         "primary_color": "#5D3EC1",
-#         "secondary_color": "#C15D3E",
-#         "company_logo_url": "https://",
-#         "hover_text": "AI Chat",
-#         "welcome_message": "Welcome to AI Chat",
-#         "chat_window_title": "Chat Support",
-#     }
