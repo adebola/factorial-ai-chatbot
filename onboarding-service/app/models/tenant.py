@@ -58,7 +58,7 @@ class Plan(Base):
 
 class Document(Base):
     __tablename__ = "documents"
-    
+
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(String(36), nullable=False, index=True)
     filename = Column(String(500), nullable=False)
@@ -70,6 +70,19 @@ class Document(Base):
     error_message = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True))
+
+    # Categorization relationships
+    category_assignments = relationship(
+        "DocumentCategoryAssignment",
+        back_populates="document",
+        cascade="all, delete-orphan"
+    )
+
+    tag_assignments = relationship(
+        "DocumentTagAssignment",
+        back_populates="document",
+        cascade="all, delete-orphan"
+    )
 
 
 class WebsiteIngestion(Base):

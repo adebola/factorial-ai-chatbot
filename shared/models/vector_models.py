@@ -3,6 +3,7 @@ from sqlalchemy import Column, String, Text, DateTime, Integer, ForeignKey, Inde
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import ARRAY
 from pgvector.sqlalchemy import Vector
 
 Base = declarative_base()
@@ -31,7 +32,12 @@ class DocumentChunk(Base):
     source_name = Column(String(255), nullable=True)  # filename or URL
     page_number = Column(Integer, nullable=True)  # for PDFs
     section_title = Column(String(500), nullable=True)  # for structured docs
-    
+
+    # Categorization fields (added for document tagging system)
+    category_ids = Column(ARRAY(String(36)), default=list, nullable=False)
+    tag_ids = Column(ARRAY(String(36)), default=list, nullable=False)
+    content_type = Column(String(50), nullable=True)  # 'text', 'table', 'list', etc.
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -49,6 +55,10 @@ Index(
 Index("idx_chunks_tenant_doc", DocumentChunk.tenant_id, DocumentChunk.document_id)
 Index("idx_chunks_tenant_ingestion", DocumentChunk.tenant_id, DocumentChunk.ingestion_id)
 Index("idx_chunks_content_hash", DocumentChunk.content_hash)
+
+# GIN indexes for array-based categorization filtering
+Index("idx_chunks_category_ids", DocumentChunk.category_ids, postgresql_using="gin")
+Index("idx_chunks_tag_ids", DocumentChunk.tag_ids, postgresql_using="gin")
 
 
 class VectorSearchIndex(Base):

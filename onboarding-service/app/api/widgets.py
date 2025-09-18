@@ -301,3 +301,53 @@ async def get_widget_status(
             "preview": f"/api/v1/widget/preview"
         }
     }
+
+
+@router.get("/widget/static/{filename}")
+async def get_widget_static_asset(filename: str):
+    """Serve static assets for the chat widget (logos, icons, etc.)"""
+
+    # Security: Only allow specific whitelisted files
+    allowed_files = [
+        "chatcraft-logo2.png",
+        "factorialbot_logo.svg",
+        "favicon.ico"
+    ]
+
+    if filename not in allowed_files:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asset not found"
+        )
+
+    # Construct the file path
+    static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static")
+    file_path = os.path.join(static_dir, filename)
+
+    # Check if file exists
+    if not os.path.exists(file_path):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Asset not found"
+        )
+
+    # Determine media type based on file extension
+    media_types = {
+        ".png": "image/png",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg"
+    }
+
+    file_ext = os.path.splitext(filename)[1].lower()
+    media_type = media_types.get(file_ext, "application/octet-stream")
+
+    return FileResponse(
+        file_path,
+        media_type=media_type,
+        headers={
+            "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+            "Content-Disposition": f"inline; filename={filename}"
+        }
+    )

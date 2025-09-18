@@ -4,12 +4,11 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy import Column, String, DateTime, Boolean, Text, JSON, Enum, ForeignKey, Numeric, Integer
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
 
-Base = declarative_base()
+from .tenant import Base  # Use the same Base as other models
 
 
 class SubscriptionStatus(str, enum.Enum):

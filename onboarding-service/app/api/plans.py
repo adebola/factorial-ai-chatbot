@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..models.tenant import Plan
-from ..services.dependencies import TokenClaims, validate_token
+from ..services.dependencies import TokenClaims, validate_token, logger
 from ..services.plan_service import PlanService
 
 router = APIRouter()
@@ -79,6 +79,15 @@ async def create_plan(
             yearly_plan_cost=plan_data.yearly_plan_cost,
             features=plan_data.features or {}
         )
+
+        # Invalidate plan caches after creation
+        try:
+            from ..services.cache_service import CacheService
+            cache_service = CacheService()
+            await cache_service.invalidate_all_plans_cache()
+            logger.info("Invalidated plan caches after creating new plan")
+        except Exception as cache_error:
+            logger.warning(f"Failed to invalidate plan cache after creation: {cache_error}")
         
         return {
             "message": "Plan created successfully",
@@ -279,12 +288,24 @@ async def update_plan(
         }
         
         plan = plan_service.update_plan(plan_id, **update_data)
-        
+
         if not plan:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Plan not found"
             )
+
+        # Invalidate plan caches after update
+        try:
+            from ..services.cache_service import CacheService
+            cache_service = CacheService()
+            await cache_service.invalidate_plan_by_id(plan_id)
+            if plan.name == "Free":
+                await cache_service.invalidate_free_tier_plan()
+            await cache_service.invalidate_all_plans_cache()
+            logger.info(f"Invalidated plan caches after updating plan: {plan_id}")
+        except Exception as cache_error:
+            logger.warning(f"Failed to invalidate plan cache after update: {cache_error}")
         
         return {
             "message": "Plan updated successfully",
@@ -343,12 +364,24 @@ async def delete_plan(
             )
         
         success = plan_service.soft_delete_plan(plan_id)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete plan"
             )
+
+        # Invalidate plan caches after deletion
+        try:
+            from ..services.cache_service import CacheService
+            cache_service = CacheService()
+            await cache_service.invalidate_plan_by_id(plan_id)
+            if plan.name == "Free":
+                await cache_service.invalidate_free_tier_plan()
+            await cache_service.invalidate_all_plans_cache()
+            logger.info(f"Invalidated plan caches after deleting plan: {plan_id}")
+        except Exception as cache_error:
+            logger.warning(f"Failed to invalidate plan cache after deletion: {cache_error}")
         
         return {
             "message": f"Plan '{plan.name}' deleted successfully",
@@ -724,28 +757,27 @@ async def get_free_tier_plan(db: Session = Depends(get_db)) -> Dict[str, Any]:
     
     try:
         cache_service = CacheService()
-        cache_key = "free_tier_plan"
-        
-        # Try to get from cache first
-        cached_plan = await cache_service.get(cache_key)
+
+        # Try to get from cache first using the new cache key format
+        cached_plan = await cache_service.get_free_tier_plan()
         if cached_plan:
             logger.debug("Retrieved free-tier plan from cache")
             return cached_plan
-        
+
         # Not in cache, get from database
         free_plan = db.query(Plan).filter(
             Plan.name == "Free",
             Plan.is_active == True,
             Plan.is_deleted == False
         ).first()
-        
+
         if not free_plan:
             logger.error("Free-tier plan not found in database")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Free-tier plan not found. Please ensure default plans are created."
             )
-        
+
         # Prepare response data
         plan_data = {
             "id": free_plan.id,
@@ -762,11 +794,11 @@ async def get_free_tier_plan(db: Session = Depends(get_db)) -> Dict[str, Any]:
             "created_at": free_plan.created_at.isoformat(),
             "updated_at": free_plan.updated_at.isoformat() if free_plan.updated_at else None
         }
-        
-        # Cache for 1 hour (3600 seconds)
-        await cache_service.set(cache_key, plan_data, ttl=3600)
-        logger.info("Cached free-tier plan for 1 hour")
-        
+
+        # Cache using the new cache service method
+        await cache_service.cache_free_tier_plan(plan_data)
+        logger.info("Cached free-tier plan for 1 hour using onboarding service cache manager")
+
         return plan_data
         
     except HTTPException:

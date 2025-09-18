@@ -38,6 +38,11 @@ spring:
                 predicates:
                     - Path=/api/v1/documents/**
 
+              - id: onboarding-categorization
+                uri: http://localhost:8001
+                predicates:
+                    - Path=/api/v1/categories/**,/api/v1/tags/**,/api/v1/analytics/**,/api/v1/setup/**
+
               - id: onboarding-logo
                 uri: http://localhost:8001
                 predicates:

@@ -15,6 +15,7 @@ from .api.widgets import router as widgets_router
 from .api.payments import router as payments_router
 from .api.subscriptions import router as subscriptions_router
 from .api.logos import router as logos_router
+from .api.categorization import router as categorization_router
 from .core.config import settings
 from .core.logging_config import (
     setup_logging, 
@@ -139,6 +140,7 @@ app.include_router(widgets_router, prefix=settings.API_V1_STR, tags=["chat-widge
 app.include_router(payments_router, prefix=settings.API_V1_STR, tags=["payments"])
 app.include_router(subscriptions_router, prefix=settings.API_V1_STR, tags=["subscriptions"])
 app.include_router(logos_router, prefix=settings.API_V1_STR, tags=["logos"])
+app.include_router(categorization_router, prefix=settings.API_V1_STR, tags=["categorization"])
 
 
 @app.get("/")

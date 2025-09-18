@@ -32,33 +32,35 @@ public class OnboardingServiceClient {
 
     /**
      * Get the free-tier plan from the onboarding service.
-     * First checks Redis cache, then falls back to API call.
+     * First checks Redis cache (managed by onboarding service), then falls back to API call.
+     *
+     * IMPORTANT: This service only READS from cache. The onboarding service is responsible
+     * for managing the cache lifecycle (write/invalidate).
      *
      * @return Free-tier plan information as JsonNode
      * @throws RuntimeException if the plan cannot be retrieved
      */
     public JsonNode getFreeTierPlan() {
-        String cacheKey = "free_tier_plan";
-        
+        // Use the same cache key format as onboarding service
+        String cacheKey = "plan:free_tier";
+
         try {
-            // Try to get from Redis cache first
+            // Try to get from Redis cache first (read-only)
             String cachedPlan = redisTemplate.opsForValue().get(cacheKey);
             if (cachedPlan != null && !cachedPlan.isEmpty()) {
-                log.debug("Retrieved free-tier plan from Redis cache");
+                log.debug("Retrieved free-tier plan from shared Redis cache (managed by onboarding service)");
                 return objectMapper.readTree(cachedPlan);
             }
-            
+
             // Not in cache, call the onboarding service
-            log.info("Free-tier plan not in cache, calling onboarding service");
+            log.info("Free-tier plan not in shared cache, calling onboarding service");
             JsonNode planData = fetchFreeTierPlanFromService();
-            
-            // Cache the result for future use (let the onboarding service handle its own caching)
-            // We just cache locally for a short time to avoid repeated calls
-            redisTemplate.opsForValue().set(cacheKey, planData.toString(), Duration.ofMinutes(5));
-            log.debug("Cached free-tier plan locally for 5 minutes");
-            
+
+            // DO NOT cache here - let the onboarding service handle all cache management
+            log.debug("Retrieved free-tier plan from onboarding service API (cache will be managed by onboarding service)");
+
             return planData;
-            
+
         } catch (Exception e) {
             log.error("Failed to retrieve free-tier plan: {}", e.getMessage(), e);
             throw new RuntimeException("Unable to retrieve free-tier plan: " + e.getMessage(), e);
@@ -86,14 +88,18 @@ public class OnboardingServiceClient {
     }
     
     /**
-     * Call the onboarding service API to get the free-tier plan
-     * Uses the public plans endpoint and filters for the Free plan
+     * Call the onboarding service API to get the free-tier plan.
+     *
+     * IMPORTANT: This calls the onboarding service's /api/v1/plans/free-tier endpoint
+     * which handles its own caching. The onboarding service will check its cache first,
+     * then populate the cache if needed.
      *
      * @return Free-tier plan as JsonNode
      * @throws Exception if the API call fails
      */
     private JsonNode fetchFreeTierPlanFromService() throws Exception {
-        String url = onboardingServiceUrl + "/api/v1/plans/public";
+        // Use the dedicated free-tier endpoint that handles caching
+        String url = onboardingServiceUrl + "/api/v1/plans/free-tier";
         
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(url))
@@ -103,39 +109,30 @@ public class OnboardingServiceClient {
                 .GET()
                 .build();
         
-        log.debug("Calling onboarding service public plans endpoint at: {}", url);
-        
+        log.debug("Calling onboarding service free-tier endpoint at: {}", url);
+
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        
+
         if (response.statusCode() != 200) {
             log.error("Onboarding service returned status {}: {}", response.statusCode(), response.body());
             throw new RuntimeException(
-                String.format("Onboarding service error: HTTP %d - %s", 
+                String.format("Onboarding service error: HTTP %d - %s",
                     response.statusCode(), response.body())
             );
         }
-        
+
         String responseBody = response.body();
         JsonNode responseJson = objectMapper.readTree(responseBody);
-        
-        // Extract plans array
-        JsonNode plansArray = responseJson.get("plans");
-        if (plansArray == null || !plansArray.isArray()) {
-            log.error("Invalid response format: no plans array found");
-            throw new RuntimeException("Invalid response format from onboarding service");
+
+        // The free-tier endpoint returns the plan directly, not in an array
+        JsonNode planIdNode = responseJson.get("id");
+        if (planIdNode == null || planIdNode.isNull()) {
+            log.error("Invalid response format: no plan ID found in free-tier response");
+            throw new RuntimeException("Invalid response format from onboarding service free-tier endpoint");
         }
-        
-        // Find the Free plan
-        for (JsonNode plan : plansArray) {
-            JsonNode nameNode = plan.get("name");
-            if (nameNode != null && "Free".equals(nameNode.asText())) {
-                log.debug("Found Free plan in response");
-                return plan;
-            }
-        }
-        
-        log.error("Free plan not found in the plans list");
-        throw new RuntimeException("Free plan not found in onboarding service response");
+
+        log.debug("Successfully retrieved free-tier plan from onboarding service");
+        return responseJson;
     }
     
     /**

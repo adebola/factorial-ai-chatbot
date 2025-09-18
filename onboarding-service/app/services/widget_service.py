@@ -48,7 +48,20 @@ class WidgetService:
         colors = self._get_colors(tenant_settings)
         
         from datetime import datetime
-        
+
+        # Determine environment and set appropriate URLs
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        production_domain = os.getenv("PRODUCTION_DOMAIN", "ai.factorialsystems.io")
+
+        if environment == "production" or environment == "prod":
+            # Production URLs
+            backend_url = f"https://{production_domain}"
+            chat_service_url = f"https://{production_domain}"
+        else:
+            # Development URLs (fallback to existing behavior)
+            backend_url = os.getenv("BACKEND_URL", "http://localhost:8001")
+            chat_service_url = os.getenv("CHAT_SERVICE_URL", "http://localhost:8000")
+
         context = {
             "tenant_id": tenant_id,
             "tenant_name": tenant_name,
@@ -56,14 +69,17 @@ class WidgetService:
             "logo_info": logo_info,
             "colors": colors,
             "widget_id": f"factorial-chat-{tenant_id}",
-            "backend_url": os.getenv("BACKEND_URL", "http://localhost:8001"),
-            "chat_service_url": os.getenv("CHAT_SERVICE_URL", "http://localhost:8000"),
+            "backend_url": backend_url,
+            "chat_service_url": chat_service_url,
             "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             # Settings-based customization
             "hover_text": tenant_settings.get("hover_text", "Chat with us!"),
             "welcome_message": tenant_settings.get("welcome_message", "Hello! How can I help you today?"),
             "chat_window_title": tenant_settings.get("chat_window_title", "Chat Support"),
-            "has_custom_logo": logo_info.get("is_custom", False)
+            "has_custom_logo": logo_info.get("is_custom", False),
+            # Environment info for debugging
+            "environment": environment,
+            "production_domain": production_domain
         }
         
         return {
@@ -556,7 +572,7 @@ class WidgetService:
                     
                     <div class="factorial-chat-footer">
                         <span>Powered by</span>
-                        <img src="{{ backend_url }}/static/chatcraft-logo2.png" alt="ChatCraft" class="factorial-chat-logo">
+                        <img src="{{ backend_url }}/api/v1/widget/static/chatcraft-logo2.png" alt="ChatCraft" class="factorial-chat-logo">
                     </div>
                 </div>
             `;
@@ -614,7 +630,11 @@ class WidgetService:
         }
         
         connectWebSocket() {
-            const wsUrl = CONFIG.chatServiceUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+            // Convert HTTP/HTTPS URLs to WebSocket URLs
+            let wsUrl = CONFIG.chatServiceUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+
+            // For production domains, ensure we use the direct /ws/chat path
+            // since nginx proxies /ws/chat directly to the chat service
             const wsEndpoint = `${wsUrl}/ws/chat?api_key=${CONFIG.apiKey}`;
             
             try {

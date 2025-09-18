@@ -1,59 +1,79 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from sqlalchemy import text
+from typing import List, Dict, Any, Optional
 import io
 
 from ..core.database import get_db, get_vector_db
 from ..services.document_processor import DocumentProcessor
 from ..services.pg_vector_ingestion import PgVectorIngestionService
+from ..services.categorized_vector_store import CategorizedVectorStore
 from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
 
 router = APIRouter()
 
 @router.post("/documents/upload")
-async def upload_document(
+async def upload_document_with_categorization(
     file: UploadFile = File(...),
+    categories: Optional[List[str]] = Form(None, description="User-specified categories"),
+    tags: Optional[List[str]] = Form(None, description="User-specified tags"),
+    auto_categorize: bool = Form(True, description="Enable AI categorization"),
     claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db),
     vector_db: Session = Depends(get_vector_db)
 ) -> Dict[str, Any]:
-    """Upload and process a document (requires Bearer token authentication)"""
-    
+    """Upload and process a document with enhanced categorization (requires Bearer token authentication)"""
+
     # Validate file type
     allowed_types = {
         "application/pdf",
-        "text/plain", 
+        "text/plain",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     }
-    
+
     if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported file type: {file.content_type}"
         )
-    
+
     try:
-        # Process document
+        # Process document with categorization
         doc_processor = DocumentProcessor(db)
-        documents, document_id  = doc_processor.process_document(
+        documents, document_id, classification = await doc_processor.process_document(
             tenant_id=claims.tenant_id,
             file_data=file.file,
             filename=file.filename,
-            content_type=file.content_type
+            content_type=file.content_type,
+            user_categories=categories,
+            user_tags=tags,
+            auto_categorize=auto_categorize
         )
-        
-        # Ingest into vector store
+
+        # Ingest into vector store (metadata is already in documents)
         vector_service = PgVectorIngestionService(vector_db)
         vector_service.ingest_documents(claims.tenant_id, documents, document_id)
-        
-        # Get tenant details if needed
+
+        # Get tenant details
         tenant_details = await get_full_tenant_details(claims.tenant_id)
-        
+
         return {
-            "message": "Document uploaded and processed successfully",
+            "message": "Document uploaded and categorized successfully",
+            "document_id": document_id,
             "filename": file.filename,
             "chunks_created": len(documents),
+            "classification": {
+                "categories": classification.categories if classification else [],
+                "tags": classification.tags if classification else [],
+                "content_type": classification.content_type if classification else "document",
+                "language": classification.language if classification else "en",
+                "confidence": max([c["confidence"] for c in classification.categories]) if classification and classification.categories else 0
+            },
+            "user_specified": {
+                "categories": categories or [],
+                "tags": tags or []
+            },
             "tenant_id": claims.tenant_id,
             "tenant_name": tenant_details.get("name")
         }
@@ -383,4 +403,132 @@ async def view_document(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to view document: {str(e)}"
+        )
+
+
+@router.get("/documents/{document_id}/metadata")
+async def get_document_metadata(
+    document_id: str,
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db),
+    vector_db: Session = Depends(get_vector_db)
+) -> Dict[str, Any]:
+    """Get comprehensive document metadata including categories, tags, and file information (requires Bearer token authentication)"""
+
+    try:
+        doc_processor = DocumentProcessor(db)
+        existing_documents = doc_processor.get_tenant_documents(claims.tenant_id)
+        existing_doc = next((doc for doc in existing_documents if doc.id == document_id), None)
+
+        if not existing_doc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Document not found or does not belong to this tenant"
+            )
+
+        # Get document categories
+        categories = db.execute(
+            text("""
+                SELECT c.id, c.name, c.description, c.color, c.icon, c.is_system_category,
+                       dca.confidence_score, dca.assigned_by, dca.assigned_at
+                FROM document_categories c
+                JOIN document_category_assignments dca ON c.id = dca.category_id
+                WHERE dca.document_id = :document_id
+                ORDER BY dca.confidence_score DESC
+            """),
+            {"document_id": document_id}
+        ).fetchall()
+
+        # Get document tags
+        tags = db.execute(
+            text("""
+                SELECT t.id, t.name, t.tag_type, t.usage_count,
+                       dta.confidence_score, dta.assigned_by, dta.assigned_at
+                FROM document_tags t
+                JOIN document_tag_assignments dta ON t.id = dta.tag_id
+                WHERE dta.document_id = :document_id
+                ORDER BY dta.confidence_score DESC
+            """),
+            {"document_id": document_id}
+        ).fetchall()
+
+        # Format file size in human-readable format
+        def format_file_size(size_bytes):
+            if size_bytes == 0:
+                return "0 B"
+            size_names = ["B", "KB", "MB", "GB", "TB"]
+            import math
+            i = int(math.floor(math.log(size_bytes, 1024)))
+            p = math.pow(1024, i)
+            s = round(size_bytes / p, 2)
+            return f"{s} {size_names[i]}"
+
+        # Get processing statistics from vector database
+        processing_stats = vector_db.execute(
+            text("""
+                SELECT COUNT(*) as chunk_count
+                FROM public.document_chunks
+                WHERE document_id = :document_id
+            """),
+            {"document_id": document_id}
+        ).fetchone()
+
+        return {
+            "document_id": existing_doc.id,
+            "filename": existing_doc.original_filename,
+            "file_size": existing_doc.file_size,
+            "file_size_formatted": format_file_size(existing_doc.file_size or 0),
+            "mime_type": existing_doc.mime_type,
+            "status": existing_doc.status,
+            "file_path": existing_doc.file_path,
+            "created_at": existing_doc.created_at.isoformat(),
+            "processed_at": existing_doc.processed_at.isoformat() if existing_doc.processed_at else None,
+            "error_message": existing_doc.error_message,
+            "tenant_id": claims.tenant_id,
+            "categories": [
+                {
+                    "id": cat.id,
+                    "name": cat.name,
+                    "description": cat.description,
+                    "color": cat.color,
+                    "icon": cat.icon,
+                    "is_system_category": cat.is_system_category,
+                    "confidence_score": float(cat.confidence_score or 0),
+                    "assigned_by": cat.assigned_by,
+                    "assigned_at": cat.assigned_at.isoformat() if cat.assigned_at else None
+                }
+                for cat in categories
+            ],
+            "tags": [
+                {
+                    "id": tag.id,
+                    "name": tag.name,
+                    "tag_type": tag.tag_type,
+                    "usage_count": tag.usage_count,
+                    "confidence_score": float(tag.confidence_score or 0),
+                    "assigned_by": tag.assigned_by,
+                    "assigned_at": tag.assigned_at.isoformat() if tag.assigned_at else None
+                }
+                for tag in tags
+            ],
+            "processing_stats": {
+                "chunk_count": processing_stats.chunk_count if processing_stats else 0,
+                "has_vector_data": bool(processing_stats and processing_stats.chunk_count > 0)
+            },
+            "categorization_summary": {
+                "total_categories": len(categories),
+                "total_tags": len(tags),
+                "ai_assigned_categories": len([c for c in categories if c.assigned_by == "ai"]),
+                "user_assigned_categories": len([c for c in categories if c.assigned_by == "user"]),
+                "auto_tags": len([t for t in tags if t.tag_type == "auto"]),
+                "custom_tags": len([t for t in tags if t.tag_type == "custom"])
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get document metadata: {str(e)}"
         )
