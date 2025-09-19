@@ -127,7 +127,7 @@ class CategorizedVectorStore:
                         tag_ids,
                         content_type,
                         embedding <-> :query_embedding as distance
-                    FROM public.document_chunks
+                    FROM vectors.document_chunks
                     WHERE tenant_id = :tenant_id
                     AND (1 - (embedding <-> :query_embedding)) >= :similarity_threshold
                     ORDER BY embedding <-> :query_embedding
@@ -275,7 +275,7 @@ class CategorizedVectorStore:
                 content_type,
                 embedding <-> :query_embedding as distance,
                 1 - (embedding <-> :query_embedding) as similarity
-            FROM public.document_chunks
+            FROM vectors.document_chunks
             WHERE tenant_id = :tenant_id
             {filter_conditions.get("category_filter", "")}
             {filter_conditions.get("tag_filter", "")}
@@ -361,7 +361,7 @@ class CategorizedVectorStore:
                     chunk_result = self.vector_db.execute(
                         text("""
                             SELECT COUNT(*) as chunk_count
-                            FROM public.document_chunks
+                            FROM vectors.document_chunks
                             WHERE tenant_id = :tenant_id
                             AND :category_id = ANY(category_ids)
                         """),
@@ -449,7 +449,7 @@ class CategorizedVectorStore:
                     SELECT
                         COALESCE(array_length(category_ids, 1), 0) as category_count,
                         COUNT(*) as chunk_count
-                    FROM public.document_chunks
+                    FROM vectors.document_chunks
                     WHERE tenant_id = :tenant_id
                     GROUP BY COALESCE(array_length(category_ids, 1), 0)
                     ORDER BY category_count
@@ -465,7 +465,7 @@ class CategorizedVectorStore:
                         COUNT(DISTINCT document_id) as total_documents,
                         AVG(array_length(category_ids, 1)) as avg_categories_per_chunk,
                         AVG(array_length(tag_ids, 1)) as avg_tags_per_chunk
-                    FROM public.document_chunks
+                    FROM vectors.document_chunks
                     WHERE tenant_id = :tenant_id
                 """),
                 {"tenant_id": tenant_id}
@@ -542,7 +542,7 @@ class CategorizedVectorStore:
         try:
             self.db.execute(
                 text("""
-                    UPDATE public.document_chunks
+                    UPDATE vectors.document_chunks
                     SET
                         category_ids = :category_ids,
                         tag_ids = :tag_ids,
@@ -583,7 +583,7 @@ class CategorizedVectorStore:
         try:
             result = self.db.execute(
                 text("""
-                    DELETE FROM public.document_chunks
+                    DELETE FROM vectors.document_chunks
                     WHERE tenant_id = :tenant_id
                     AND document_id = :document_id
                 """),

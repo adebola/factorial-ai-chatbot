@@ -467,7 +467,7 @@ async def get_document_metadata(
         processing_stats = vector_db.execute(
             text("""
                 SELECT COUNT(*) as chunk_count
-                FROM public.document_chunks
+                FROM vectors.document_chunks
                 WHERE document_id = :document_id
             """),
             {"document_id": document_id}

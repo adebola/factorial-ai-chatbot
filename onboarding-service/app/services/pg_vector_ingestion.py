@@ -27,6 +27,17 @@ class PgVectorIngestionService:
         
         self.openai_client = OpenAI(api_key=openai_api_key)
     
+    def _sanitize_content(self, content: str) -> str:
+        """Remove NUL characters and other problematic characters from content"""
+        if not content:
+            return ""
+        # Remove NUL characters (0x00) that PostgreSQL doesn't allow
+        sanitized = content.replace('\x00', '')
+        # Also remove other control characters except tab, newline, carriage return
+        import re
+        sanitized = re.sub(r'[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]', '', sanitized)
+        return sanitized
+
     def _get_content_hash(self, content: str) -> str:
         """Generate a hash for content deduplication"""
         return hashlib.sha256(content.encode()).hexdigest()
@@ -86,37 +97,42 @@ class PgVectorIngestionService:
                 # Prepare batch insert data
                 insert_data = []
                 for j, (doc, embedding) in enumerate(zip(batch, embeddings)):
-                    content_hash = self._get_content_hash(doc.page_content)
-                    
+                    # Sanitize content to remove NUL characters
+                    sanitized_content = self._sanitize_content(doc.page_content)
+                    content_hash = self._get_content_hash(sanitized_content)
+
                     # Check for duplicates
                     existing = self.db.execute(
-                        text("SELECT id FROM document_chunks WHERE tenant_id = :tenant_id AND content_hash = :hash"),
+                        text("SELECT id FROM vectors.document_chunks WHERE tenant_id = :tenant_id AND content_hash = :hash"),
                         {"tenant_id": tenant_id, "hash": content_hash}
                     ).first()
-                        
+
                     if existing:
                         self.logger.debug(f"Skipping duplicate chunk for tenant {tenant_id}")
                         continue
-                    
-                    # Extract metadata
+
+                    # Extract metadata and sanitize text fields
                     metadata = doc.metadata or {}
                     source_type = metadata.get('source_type', 'document')
-                    source_name = metadata.get('source_name', '')
+                    source_name = self._sanitize_content(metadata.get('source_name', ''))
                     page_number = metadata.get('page', None)
-                    section_title = metadata.get('section_title', None)
-                    
+                    section_title = self._sanitize_content(metadata.get('section_title', '') if metadata.get('section_title') else None)
+
                     insert_data.append({
                         'tenant_id': tenant_id,
                         'document_id': document_id,
                         'ingestion_id': ingestion_id,
-                        'content': doc.page_content,
+                        'content': sanitized_content,
                         'content_hash': content_hash,
                         'chunk_index': i + j,
                         'embedding': embedding,  # Keep as list for proper conversion
                         'source_type': source_type,
                         'source_name': source_name,
                         'page_number': page_number,
-                        'section_title': section_title
+                        'section_title': section_title,
+                        'category_ids': '{}',  # Default empty array for categorization
+                        'tag_ids': '{}',       # Default empty array for tags
+                        'content_type': None   # Default null content type
                     })
                 
                 if insert_data:
@@ -124,12 +140,13 @@ class PgVectorIngestionService:
                     for item in insert_data:
                         self.db.execute(
                             text("""
-                                INSERT INTO document_chunks 
-                                (id, tenant_id, document_id, ingestion_id, content, content_hash, chunk_index, 
-                                 embedding, source_type, source_name, page_number, section_title)
-                                VALUES (gen_random_uuid(), :tenant_id, :document_id, :ingestion_id, :content, 
-                                       :content_hash, :chunk_index, :embedding, :source_type, :source_name, 
-                                       :page_number, :section_title)
+                                INSERT INTO vectors.document_chunks
+                                (id, tenant_id, document_id, ingestion_id, content, content_hash, chunk_index,
+                                 embedding, source_type, source_name, page_number, section_title,
+                                 category_ids, tag_ids, content_type)
+                                VALUES (gen_random_uuid(), :tenant_id, :document_id, :ingestion_id, :content,
+                                       :content_hash, :chunk_index, :embedding, :source_type, :source_name,
+                                       :page_number, :section_title, :category_ids, :tag_ids, :content_type)
                             """),
                             {
                                 **item,
@@ -148,10 +165,10 @@ class PgVectorIngestionService:
             # Update search index statistics
             self.db.execute(
                 text("""
-                    INSERT INTO vector_search_indexes (id, tenant_id, total_chunks, last_indexed_at)
+                    INSERT INTO vectors.vector_search_indexes (id, tenant_id, total_chunks, last_indexed_at)
                     VALUES (gen_random_uuid(), :tenant_id, :total_chunks, NOW())
                     ON CONFLICT (tenant_id) DO UPDATE SET
-                        total_chunks = vector_search_indexes.total_chunks + :total_chunks,
+                        total_chunks = vectors.vector_search_indexes.total_chunks + :total_chunks,
                         last_indexed_at = NOW()
                 """),
                 {"tenant_id": tenant_id, "total_chunks": total_inserted}
@@ -190,7 +207,7 @@ class PgVectorIngestionService:
         """Delete all vectors for a specific document"""
         try:
             result = self.db.execute(
-                text("DELETE FROM document_chunks WHERE tenant_id = :tenant_id AND document_id = :document_id"),
+                text("DELETE FROM vectors.document_chunks WHERE tenant_id = :tenant_id AND document_id = :document_id"),
                 {"tenant_id": tenant_id, "document_id": document_id}
             )
             deleted_count = result.rowcount
@@ -220,7 +237,7 @@ class PgVectorIngestionService:
         """Delete all vectors for a specific website ingestion"""
         try:
             result = self.db.execute(
-                text("DELETE FROM document_chunks WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id"),
+                text("DELETE FROM vectors.document_chunks WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id"),
                 {"tenant_id": tenant_id, "ingestion_id": ingestion_id}
             )
             deleted_count = result.rowcount
@@ -250,7 +267,7 @@ class PgVectorIngestionService:
         try:
             # Delete all chunks for the tenant
             result = self.db.execute(
-                text("DELETE FROM document_chunks WHERE tenant_id = :tenant_id"),
+                text("DELETE FROM vectors.document_chunks WHERE tenant_id = :tenant_id"),
                 {"tenant_id": tenant_id}
             )
             deleted_count = result.rowcount

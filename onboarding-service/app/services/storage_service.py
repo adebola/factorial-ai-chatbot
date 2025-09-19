@@ -11,14 +11,43 @@ class StorageService:
     """Service for managing file storage using MinIO/S3"""
     
     def __init__(self):
-        self.client = Minio(
-            os.environ.get("MINIO_ENDPOINT"),
-            access_key=os.environ.get("MINIO_ACCESS_KEY"),
-            secret_key=os.environ.get("MINIO_SECRET_KEY"),
-            secure=os.environ.get("MINIO_SECURE", "false").lower() == "true",
-            region=settings.AWS_REGION
-        )
+        # Get configuration from environment
+        endpoint = os.environ.get("MINIO_ENDPOINT")
+        access_key = os.environ.get("MINIO_ACCESS_KEY")
+        secret_key = os.environ.get("MINIO_SECRET_KEY")
+        secure = os.environ.get("MINIO_SECURE", "false").lower() == "true"
+        region = os.environ.get("AWS_REGION", settings.AWS_REGION)
+
+        if not all([endpoint, access_key, secret_key]):
+            raise ValueError("Missing required S3/MinIO configuration: MINIO_ENDPOINT, MINIO_ACCESS_KEY, MINIO_SECRET_KEY")
+
+        # Initialize MinIO client with proper error handling
+        try:
+            # For MinIO (not AWS S3), don't pass region unless explicitly needed
+            if "amazonaws.com" in endpoint.lower():
+                # This is AWS S3, use region
+                self.client = Minio(
+                    endpoint,
+                    access_key=access_key,
+                    secret_key=secret_key,
+                    secure=secure,
+                    region=region if region else None
+                )
+            else:
+                # This is MinIO server, don't use region parameter
+                self.client = Minio(
+                    endpoint,
+                    access_key=access_key,
+                    secret_key=secret_key,
+                    secure=secure
+                )
+        except Exception as e:
+            raise ValueError(f"Failed to initialize S3/MinIO client: {e}")
+
         self.bucket_name = os.environ.get("MINIO_BUCKET_NAME")
+        if not self.bucket_name:
+            raise ValueError("Missing required configuration: MINIO_BUCKET_NAME")
+
         self._ensure_bucket_exists()
     
     def _ensure_bucket_exists(self):
@@ -59,7 +88,21 @@ class StorageService:
             return object_name
             
         except S3Error as e:
-            raise Exception(f"Failed to upload file: {str(e)}")
+            # Log detailed error information for debugging
+            error_details = {
+                "code": e.code,
+                "message": e.message,
+                "resource": getattr(e, 'resource', 'unknown'),
+                "request_id": getattr(e, 'request_id', 'unknown'),
+                "host_id": getattr(e, 'host_id', 'unknown'),
+                "bucket_name": self.bucket_name,
+                "object_name": object_name,
+                "endpoint": os.environ.get("MINIO_ENDPOINT"),
+                "region": os.environ.get("AWS_REGION", settings.AWS_REGION),
+                "secure": os.environ.get("MINIO_SECURE", "false")
+            }
+            print(f"S3 Upload Error Details: {error_details}")
+            raise Exception(f"S3 operation failed; code: {e.code}, message: {e.message}, resource: {getattr(e, 'resource', 'unknown')}, request_id: {getattr(e, 'request_id', 'unknown')}, host_id: {getattr(e, 'host_id', 'unknown')}, bucket_name: {self.bucket_name}, object_name: {object_name}")
     
     def download_file(self, object_name: str) -> bytes:
         """Download file from storage"""

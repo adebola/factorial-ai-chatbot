@@ -29,6 +29,17 @@ class PgVectorStore:
         
         self.logger.info("PgVectorStore initialized successfully")
     
+    def _sanitize_content(self, content: str) -> str:
+        """Remove NUL characters and other problematic characters from content"""
+        if not content:
+            return ""
+        # Remove NUL characters (0x00) that PostgreSQL doesn't allow
+        sanitized = content.replace('\x00', '')
+        # Also remove other control characters except tab, newline, carriage return
+        import re
+        sanitized = re.sub(r'[\x01-\x08\x0b\x0c\x0e-\x1f\x7f]', '', sanitized)
+        return sanitized
+
     def _get_content_hash(self, content: str) -> str:
         """Generate a hash for content deduplication"""
         return hashlib.sha256(content.encode()).hexdigest()
@@ -67,30 +78,32 @@ class PgVectorStore:
                 # Prepare batch insert data
                 insert_data = []
                 for j, (doc, embedding) in enumerate(zip(batch_docs, batch_embeddings)):
-                    content_hash = self._get_content_hash(doc.page_content)
-                    
+                    # Sanitize content to remove NUL characters
+                    sanitized_content = self._sanitize_content(doc.page_content)
+                    content_hash = self._get_content_hash(sanitized_content)
+
                     # Check if chunk already exists
                     existing = session.execute(
-                        text("SELECT id FROM document_chunks WHERE tenant_id = :tenant_id AND content_hash = :hash"),
+                        text("SELECT id FROM vectors.document_chunks WHERE tenant_id = :tenant_id AND content_hash = :hash"),
                         {"tenant_id": tenant_id, "hash": content_hash}
                     ).first()
-                    
+
                     if existing:
                         self.logger.debug(f"Skipping duplicate chunk for tenant {tenant_id}")
                         continue
-                    
-                    # Extract metadata
+
+                    # Extract metadata and sanitize text fields
                     metadata = doc.metadata or {}
                     source_type = metadata.get('source_type', 'document')
-                    source_name = metadata.get('source_name', '')
+                    source_name = self._sanitize_content(metadata.get('source_name', ''))
                     page_number = metadata.get('page', None)
-                    section_title = metadata.get('section_title', None)
-                    
+                    section_title = self._sanitize_content(metadata.get('section_title', '') if metadata.get('section_title') else None)
+
                     insert_data.append({
                         'tenant_id': tenant_id,
                         'document_id': document_id,
                         'ingestion_id': ingestion_id,
-                        'content': doc.page_content,
+                        'content': sanitized_content,
                         'content_hash': content_hash,
                         'chunk_index': i + j,
                         'embedding': embedding,
@@ -104,12 +117,13 @@ class PgVectorStore:
                     # Batch insert
                     session.execute(
                         text("""
-                            INSERT INTO document_chunks 
-                            (id, tenant_id, document_id, ingestion_id, content, content_hash, chunk_index, 
-                             embedding, source_type, source_name, page_number, section_title)
-                            VALUES (gen_random_uuid(), :tenant_id, :document_id, :ingestion_id, :content, 
-                                   :content_hash, :chunk_index, :embedding, :source_type, :source_name, 
-                                   :page_number, :section_title)
+                            INSERT INTO vectors.document_chunks
+                            (id, tenant_id, document_id, ingestion_id, content, content_hash, chunk_index,
+                             embedding, source_type, source_name, page_number, section_title,
+                             category_ids, tag_ids, content_type)
+                            VALUES (gen_random_uuid(), :tenant_id, :document_id, :ingestion_id, :content,
+                                   :content_hash, :chunk_index, :embedding, :source_type, :source_name,
+                                   :page_number, :section_title, '{}', '{}', NULL)
                         """),
                         insert_data
                     )
@@ -118,10 +132,10 @@ class PgVectorStore:
             # Update search index statistics
             session.execute(
                 text("""
-                    INSERT INTO vector_search_indexes (id, tenant_id, total_chunks, last_indexed_at)
+                    INSERT INTO vectors.vector_search_indexes (id, tenant_id, total_chunks, last_indexed_at)
                     VALUES (gen_random_uuid(), :tenant_id, :total_chunks, NOW())
                     ON CONFLICT (tenant_id) DO UPDATE SET
-                        total_chunks = vector_search_indexes.total_chunks + :total_chunks,
+                        total_chunks = vectors.vector_search_indexes.total_chunks + :total_chunks,
                         last_indexed_at = NOW()
                 """),
                 {"tenant_id": tenant_id, "total_chunks": total_inserted}
@@ -151,7 +165,7 @@ class PgVectorStore:
                     text("""
                         SELECT content, source_type, source_name, page_number, section_title,
                                (embedding <=> :query_embedding) as distance
-                        FROM document_chunks
+                        FROM vectors.document_chunks
                         WHERE tenant_id = :tenant_id
                         ORDER BY embedding <=> :query_embedding
                         LIMIT :k
@@ -203,7 +217,7 @@ class PgVectorStore:
                     text("""
                         SELECT content, source_type, source_name, page_number, section_title,
                                (embedding <=> :query_embedding) as distance
-                        FROM document_chunks
+                        FROM vectors.document_chunks
                         WHERE tenant_id = :tenant_id
                         ORDER BY embedding <=> :query_embedding
                         LIMIT :k
@@ -245,13 +259,13 @@ class PgVectorStore:
         try:
             # Delete all chunks for the tenant
             chunks_deleted = session.execute(
-                text("DELETE FROM document_chunks WHERE tenant_id = :tenant_id"),
+                text("DELETE FROM vectors.document_chunks WHERE tenant_id = :tenant_id"),
                 {"tenant_id": tenant_id}
             ).rowcount
             
             # Delete search index
             session.execute(
-                text("DELETE FROM vector_search_indexes WHERE tenant_id = :tenant_id"),
+                text("DELETE FROM vectors.vector_search_indexes WHERE tenant_id = :tenant_id"),
                 {"tenant_id": tenant_id}
             )
             
@@ -271,14 +285,14 @@ class PgVectorStore:
         session = self.SessionLocal()
         try:
             deleted_count = session.execute(
-                text("DELETE FROM document_chunks WHERE tenant_id = :tenant_id AND document_id = :document_id"),
+                text("DELETE FROM vectors.document_chunks WHERE tenant_id = :tenant_id AND document_id = :document_id"),
                 {"tenant_id": tenant_id, "document_id": document_id}
             ).rowcount
             
             # Update search index statistics
             session.execute(
                 text("""
-                    UPDATE vector_search_indexes 
+                    UPDATE vectors.vector_search_indexes 
                     SET total_chunks = GREATEST(0, total_chunks - :deleted_count),
                         last_indexed_at = NOW()
                     WHERE tenant_id = :tenant_id
@@ -302,14 +316,14 @@ class PgVectorStore:
         session = self.SessionLocal()
         try:
             deleted_count = session.execute(
-                text("DELETE FROM document_chunks WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id"),
+                text("DELETE FROM vectors.document_chunks WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id"),
                 {"tenant_id": tenant_id, "ingestion_id": ingestion_id}
             ).rowcount
             
             # Update search index statistics
             session.execute(
                 text("""
-                    UPDATE vector_search_indexes 
+                    UPDATE vectors.vector_search_indexes 
                     SET total_chunks = GREATEST(0, total_chunks - :deleted_count),
                         last_indexed_at = NOW()
                     WHERE tenant_id = :tenant_id
@@ -339,14 +353,14 @@ class PgVectorStore:
                         COUNT(*) as chunk_count,
                         COUNT(DISTINCT document_id) as document_count,
                         COUNT(DISTINCT ingestion_id) as ingestion_count
-                    FROM document_chunks 
+                    FROM vectors.document_chunks
                     WHERE tenant_id = :tenant_id
                 """),
                 {"tenant_id": tenant_id}
             ).first()
             
             search_index = session.execute(
-                text("SELECT * FROM vector_search_indexes WHERE tenant_id = :tenant_id"),
+                text("SELECT * FROM vectors.vector_search_indexes WHERE tenant_id = :tenant_id"),
                 {"tenant_id": tenant_id}
             ).first()
             
