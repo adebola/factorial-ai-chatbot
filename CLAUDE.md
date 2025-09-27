@@ -73,9 +73,9 @@ cd onboarding-service && pip install -r requirements.txt && cd ..
 cd authorization-server && mvn clean install && cd ..
 
 # Copy environment files
-cp chat-service/.env.example chat-service/.env
-cp onboarding-service/.env.example onboarding-service/.env
-cp authorization-server/.env.example authorization-server/.env
+cp chat-service/.env chat-service/.env
+cp onboarding-service/.env onboarding-service/.env
+cp authorization-server/.env authorization-server/.env
 ```
 
 ### Running Services

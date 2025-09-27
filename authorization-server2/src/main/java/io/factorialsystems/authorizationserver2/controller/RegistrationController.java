@@ -56,11 +56,10 @@ public class RegistrationController {
             
             // Prepare success page data
             model.addAttribute("tenant", result.tenant());
-            model.addAttribute("successMessage", 
+            model.addAttribute("successMessage",
                 "Your organization has been successfully registered! " +
-                (request.hasAdminPassword() ? 
-                    "You can now sign in with your credentials." :
-                    "An invitation email has been sent to set up your admin account."));
+                "A verification email has been sent to " + request.getAdminEmail() + ". " +
+                "Please check your email and click the verification link to activate your account.");
             
             return "register/registration-success";
             

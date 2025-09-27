@@ -28,7 +28,7 @@ Copy the entire `docker-build` directory to your production server.
 
 ### 2. Configure environment variables
 ```bash
-cp .env.example .env
+cp .env .env
 nano .env  # Edit with your production values
 ```
 

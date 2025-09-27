@@ -18,6 +18,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configuration.OAuth2AuthorizationServerConfiguration;
 import org.springframework.security.oauth2.server.authorization.config.annotation.web.configurers.OAuth2AuthorizationServerConfigurer;
+import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
 import org.springframework.security.web.SecurityFilterChain;
@@ -91,7 +92,7 @@ public class SecurityConfig {
 		http
 			.cors(withDefaults()) // Enable CORS for default endpoints
 			.authorizeHttpRequests((authorize) -> authorize
-				.requestMatchers("/error", "/login", "/register", "/js/**", "/css/**", "/image/**", "/images/**", "/webjars/**", "/favicon.ico").permitAll()
+				.requestMatchers("/error", "/login", "/register", "/verify-email", "/verify-email-test-success", "/verify-email-test-failure", "/verify-email-test-fallback", "/verification-status", "/js/**", "/css/**", "/image/**", "/images/**", "/webjars/**", "/favicon.ico").permitAll()
 				.anyRequest().authenticated())
 			.formLogin(formLogin -> formLogin
 				.loginPage("/login")
@@ -137,6 +138,13 @@ public class SecurityConfig {
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration); // Apply to all endpoints
         return source;
+    }
+
+    @Bean
+    public AuthorizationServerSettings authorizationServerSettings(AuthorizationProperties authorizationProperties) {
+        return AuthorizationServerSettings.builder()
+                .issuer(authorizationProperties.getLocation())
+                .build();
     }
 
 

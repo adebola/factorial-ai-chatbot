@@ -28,7 +28,7 @@ while [[ $# -gt 0 ]]; do
             PLATFORMS="$2"
             shift 2
             ;;
-        chat-service|onboarding-service|authorization-service|gateway-service|ai-authorization-service|ai-gateway-service)
+        chat-service|onboarding-service|communications-service|authorization-service|gateway-service|ai-authorization-service|ai-gateway-service)
             SERVICE_NAME="$1"
             shift
             ;;
@@ -41,6 +41,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Available services:"
                 echo "  - chat-service"
                 echo "  - onboarding-service"
+                echo "  - communications-service"
                 echo "  - authorization-service (or ai-authorization-service)"
                 echo "  - gateway-service (or ai-gateway-service)"
                 exit 1
@@ -58,6 +59,7 @@ if [[ -z "$SERVICE_NAME" ]]; then
     echo "Available services:"
     echo "  - chat-service"
     echo "  - onboarding-service"
+    echo "  - communications-service"
     echo "  - authorization-service (or ai-authorization-service)"
     echo "  - gateway-service (or ai-gateway-service)"
     exit 1
@@ -73,6 +75,10 @@ case "$SERVICE_NAME" in
         DOCKERFILE="docker-build/dockerfiles/onboarding-service.Dockerfile"
         IMAGE_NAME="${DOCKER_REGISTRY}/onboarding-service:${VERSION}"
         ;;
+    communications-service)
+        DOCKERFILE="docker-build/dockerfiles/communications-service.Dockerfile"
+        IMAGE_NAME="${DOCKER_REGISTRY}/communications-service:${VERSION}"
+        ;;
     authorization-service|ai-authorization-service)
         DOCKERFILE="docker-build/dockerfiles/authorization-service.Dockerfile"
         IMAGE_NAME="${DOCKER_REGISTRY}/ai-authorization-service:${VERSION}"
@@ -83,7 +89,7 @@ case "$SERVICE_NAME" in
         ;;
     *)
         echo -e "${RED}Error: Unknown service: $SERVICE_NAME${NC}"
-        echo "Available services: chat-service, onboarding-service, authorization-service, gateway-service"
+        echo "Available services: chat-service, onboarding-service, communications-service, authorization-service, gateway-service"
         exit 1
         ;;
 esac

@@ -211,6 +211,74 @@ async def list_plans(
         )
 
 
+@router.get("/plans/free-tier", dependencies=[])
+async def get_free_tier_plan(db: Session = Depends(get_db)) -> Dict[str, Any]:
+    """
+    Get the free-tier plan information for tenant creation.
+    This endpoint is used by the authorization server when creating new tenants.
+    PUBLIC ENDPOINT - No authentication required.
+    """
+    from ..services.cache_service import CacheService
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        cache_service = CacheService()
+
+        # Try to get from cache first using the new cache key format
+        cached_plan = await cache_service.get_free_tier_plan()
+        if cached_plan:
+            logger.debug("Retrieved free-tier plan from cache")
+            return cached_plan
+
+        # Not in cache, get from database
+        free_plan = db.query(Plan).filter(
+            Plan.name == "Free",
+            Plan.is_active == True,
+            Plan.is_deleted == False
+        ).first()
+
+        if not free_plan:
+            logger.error("Free-tier plan not found in database")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Free-tier plan not found. Please ensure default plans are created."
+            )
+
+        # Prepare response data
+        plan_data = {
+            "id": free_plan.id,
+            "name": free_plan.name,
+            "description": free_plan.description,
+            "document_limit": free_plan.document_limit,
+            "website_limit": free_plan.website_limit,
+            "daily_chat_limit": free_plan.daily_chat_limit,
+            "monthly_chat_limit": free_plan.monthly_chat_limit,
+            "monthly_plan_cost": str(free_plan.monthly_plan_cost),
+            "yearly_plan_cost": str(free_plan.yearly_plan_cost),
+            "features": free_plan.features,
+            "is_active": free_plan.is_active,
+            "created_at": free_plan.created_at.isoformat(),
+            "updated_at": free_plan.updated_at.isoformat() if free_plan.updated_at else None
+        }
+
+        # Cache using the new cache service method
+        await cache_service.cache_free_tier_plan(plan_data)
+        logger.info("Cached free-tier plan for 1 hour using onboarding service cache manager")
+
+        return plan_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve free-tier plan: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve free-tier plan: {str(e)}"
+        )
+
+
 @router.get("/plans/{plan_id}", response_model=Dict[str, Any])
 async def get_plan(
     plan_id: str,
@@ -743,69 +811,3 @@ async def get_tenant_current_plan(
         )
 
 
-@router.get("/plans/free-tier", dependencies=[])
-async def get_free_tier_plan(db: Session = Depends(get_db)) -> Dict[str, Any]:
-    """
-    Get the free-tier plan information for tenant creation.
-    This endpoint is used by the authorization server when creating new tenants.
-    PUBLIC ENDPOINT - No authentication required.
-    """
-    from ..services.cache_service import CacheService
-    import logging
-    
-    logger = logging.getLogger(__name__)
-    
-    try:
-        cache_service = CacheService()
-
-        # Try to get from cache first using the new cache key format
-        cached_plan = await cache_service.get_free_tier_plan()
-        if cached_plan:
-            logger.debug("Retrieved free-tier plan from cache")
-            return cached_plan
-
-        # Not in cache, get from database
-        free_plan = db.query(Plan).filter(
-            Plan.name == "Free",
-            Plan.is_active == True,
-            Plan.is_deleted == False
-        ).first()
-
-        if not free_plan:
-            logger.error("Free-tier plan not found in database")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Free-tier plan not found. Please ensure default plans are created."
-            )
-
-        # Prepare response data
-        plan_data = {
-            "id": free_plan.id,
-            "name": free_plan.name,
-            "description": free_plan.description,
-            "document_limit": free_plan.document_limit,
-            "website_limit": free_plan.website_limit,
-            "daily_chat_limit": free_plan.daily_chat_limit,
-            "monthly_chat_limit": free_plan.monthly_chat_limit,
-            "monthly_plan_cost": str(free_plan.monthly_plan_cost),
-            "yearly_plan_cost": str(free_plan.yearly_plan_cost),
-            "features": free_plan.features,
-            "is_active": free_plan.is_active,
-            "created_at": free_plan.created_at.isoformat(),
-            "updated_at": free_plan.updated_at.isoformat() if free_plan.updated_at else None
-        }
-
-        # Cache using the new cache service method
-        await cache_service.cache_free_tier_plan(plan_data)
-        logger.info("Cached free-tier plan for 1 hour using onboarding service cache manager")
-
-        return plan_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to retrieve free-tier plan: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve free-tier plan: {str(e)}"
-        )

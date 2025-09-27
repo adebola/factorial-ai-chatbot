@@ -30,8 +30,8 @@ The platform consists of two main microservices:
 ### 1. Setup Environment
 ```bash
 # Copy environment files
-cp chat-service/.env.example chat-service/.env
-cp onboarding-service/.env.example onboarding-service/.env
+cp chat-service/.env chat-service/.env
+cp onboarding-service/.env onboarding-service/.env
 
 # Edit .env files and add your OPENAI_API_KEY
 ```

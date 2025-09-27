@@ -10,6 +10,8 @@ import requests
 from typing import Dict, Any
 
 from ..services.oauth2_client import oauth2_client
+from .auth_cache import token_cache
+from .jwt_validator import jwt_validator
 
 logger = logging.getLogger(__name__)
 # Configure HTTPBearer to return 401 instead of 403 for authentication failures
@@ -53,8 +55,9 @@ async def validate_token(
     token = credentials.credentials
     
     try:
-        # Just validate token - don't fetch user info separately
-        token_info = await oauth2_client.validate_token(token)
+        # Use local JWT validation for low latency
+        # Falls back to introspection if needed
+        token_info = await validate_jwt_locally(token)
         
         # Extract required claims
         tenant_id = token_info.get("tenant_id")
@@ -109,5 +112,61 @@ async def require_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
-    
+
     return claims
+
+
+async def validate_jwt_locally(token: str) -> Dict[str, Any]:
+    """
+    Validate JWT token locally using cached RSA public keys.
+    This provides sub-millisecond latency without network calls.
+    """
+    # Check cache first
+    cached_info = await token_cache.get(token)
+    if cached_info:
+        # Verify token is still active
+        if cached_info.get("active", False):
+            logger.debug("Using cached token validation")
+            return cached_info
+
+    # Cache miss - validate token locally
+    try:
+        # Use local JWT validation with RSA public keys
+        token_info = await jwt_validator.validate_token(token)
+
+        # Cache the validated token info
+        await token_cache.set(token, token_info)
+
+        return token_info
+
+    except jwt.ExpiredSignatureError:
+        logger.warning("Token has expired")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token: {e}")
+        # Try fallback to introspection for resilience
+        try:
+            logger.info("Local validation failed, falling back to introspection")
+            return await oauth2_client.validate_token(token)
+        except Exception:
+            # If introspection also fails, raise the original JWT error
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token",
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+    except Exception as e:
+        logger.error(f"Unexpected error during token validation: {e}")
+        # Try fallback to introspection
+        try:
+            logger.info("Local validation failed unexpectedly, falling back to introspection")
+            return await oauth2_client.validate_token(token)
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Token validation failed"
+            )

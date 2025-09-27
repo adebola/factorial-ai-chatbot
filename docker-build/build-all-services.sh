@@ -148,6 +148,11 @@ build_service "onboarding-service" \
     "docker-build/dockerfiles/onboarding-service.Dockerfile" \
     "."
 
+# Communications Service
+build_service "communications-service" \
+    "docker-build/dockerfiles/communications-service.Dockerfile" \
+    "."
+
 # Build Java services
 echo -e "\n${YELLOW}=== Building Java Services ===${NC}"
 
@@ -179,6 +184,7 @@ if $SAVE_IMAGES; then
 
     docker save -o docker-images/chat-service.tar ${DOCKER_REGISTRY}/chat-service:${VERSION}
     docker save -o docker-images/onboarding-service.tar ${DOCKER_REGISTRY}/onboarding-service:${VERSION}
+    docker save -o docker-images/communications-service.tar ${DOCKER_REGISTRY}/communications-service:${VERSION}
     docker save -o docker-images/authorization-server.tar ${DOCKER_REGISTRY}/ai-authorization-server:${VERSION}
 
     echo -e "${GREEN}Images saved to docker-images/ directory${NC}"

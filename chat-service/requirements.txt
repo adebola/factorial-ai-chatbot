@@ -19,4 +19,4 @@ openai>=1.100.1
 jinja2>=3.1.0
 loguru>=0.7.0
 structlog>=24.0.0
-jwt
+pyjwt>=2.8.0,<3.0.0

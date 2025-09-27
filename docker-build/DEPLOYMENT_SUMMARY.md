@@ -56,7 +56,7 @@ docker-build/
 ```bash
 # 1. Copy docker-build directory to your server
 # 2. Configure environment
-cp .env.example .env
+cp .env .env
 nano .env  # Add your OPENAI_API_KEY, passwords, etc.
 
 # 3. Deploy everything

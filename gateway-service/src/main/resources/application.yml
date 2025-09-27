@@ -25,7 +25,7 @@ spring:
           globalcors:
             cors-configurations:
               '[/**]':
-                  allowedOriginPatterns: "http://localhost:4200"
+                  allowedOriginPatterns: "http://localhost:3000,http://localhost:4200,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:4200"
                   allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                   allowedHeaders: "*"
                   exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
@@ -112,6 +112,42 @@ spring:
                 predicates:
                     - Path=/api/v1/vectors/**
 
+              # Communications Service Routes
+              - id: communications-email
+                uri: http://localhost:8003
+                predicates:
+                    - Path=/api/v1/email/**
+                filters:
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+              - id: communications-sms
+                uri: http://localhost:8003
+                predicates:
+                    - Path=/api/v1/sms/**
+                filters:
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+              - id: communications-whatsapp
+                uri: http://localhost:8003
+                predicates:
+                    - Path=/api/v1/whatsapp/**
+                filters:
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+              - id: communications-templates
+                uri: http://localhost:8003
+                predicates:
+                    - Path=/api/v1/templates/**
+                filters:
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+              - id: communications-notifications
+                uri: http://localhost:8003
+                predicates:
+                    - Path=/api/v1/notifications/**
+                filters:
+                  - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
               # Auth Service Routes
               - id: auth-api
                 uri: http://localhost:9002
@@ -135,6 +171,12 @@ spring:
                 filters:
                     - RewritePath=/health/chat,/health
 
+              - id: communications-health
+                uri: http://localhost:8003
+                predicates:
+                    - Path=/health/communications
+                filters:
+                    - RewritePath=/health/communications,/health
 
               - id: auth-health
                 uri: http://localhost:8000

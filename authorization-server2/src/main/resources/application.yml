@@ -52,9 +52,11 @@ authorization:
       key:
         widget: widget-key
         logo-update: logo.update
+        email-notification: email.notification
       queue:
         widget: widget-queue
         logo-update: logo-update-queue
+        email-notification: email-notification-queue
       exchange:
         name: topic-exchange
     security:
