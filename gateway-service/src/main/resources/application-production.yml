@@ -39,16 +39,22 @@ spring:
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/documents/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: onboarding-categorization
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/categories/**,/api/v1/tags/**,/api/v1/analytics/**,/api/v1/setup/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: onboarding-logo
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/settings-logo/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: auth-tenants
               uri: http://authorization-service:9000
@@ -70,11 +76,15 @@ spring:
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/websites/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: onboarding-ingestions
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/ingestions/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
 
 
@@ -82,53 +92,95 @@ spring:
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/plans/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: onboarding-subscriptions
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/subscriptions/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: onboarding-payments
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/payments/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: onboarding-widgets
               uri: http://onboarding-service:8000
               predicates:
                 - Path=/api/v1/widget/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
               # Chat Service Routes
             - id: chat-api
               uri: http://chat-service:8000
               predicates:
                 - Path=/api/v1/chat/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             # Communications Service Routes
             - id: communications-email
               uri: http://communications-service:8000
               predicates:
                 - Path=/api/v1/email/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: communications-sms
               uri: http://communications-service:8000
               predicates:
                 - Path=/api/v1/sms/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: communications-whatsapp
               uri: http://communications-service:8000
               predicates:
                 - Path=/api/v1/whatsapp/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: communications-templates
               uri: http://communications-service:8000
               predicates:
                 - Path=/api/v1/templates/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             - id: communications-notifications
               uri: http://communications-service:8000
               predicates:
                 - Path=/api/v1/notifications/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Workflow Service Routes
+            - id: workflow-api
+              uri: http://workflow-service:8000
+              predicates:
+                - Path=/api/v1/workflows/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: workflow-executions
+              uri: http://workflow-service:8000
+              predicates:
+                - Path=/api/v1/executions/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: workflow-triggers
+              uri: http://workflow-service:8000
+              predicates:
+                - Path=/api/v1/triggers/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             # Auth Service Routes
             - id: auth-api
@@ -159,3 +211,10 @@ spring:
                 - Path=/health/communications
               filters:
                 - RewritePath=/health/communications,/health
+
+            - id: workflow-health
+              uri: http://workflow-service:8000
+              predicates:
+                - Path=/health/workflow
+              filters:
+                - RewritePath=/health/workflow,/health

@@ -10,7 +10,7 @@ import requests
 from typing import Dict, Any
 
 from ..services.oauth2_client import oauth2_client
-from .auth_cache import token_cache
+from .redis_auth_cache import redis_token_cache
 from .jwt_validator import jwt_validator
 
 logger = logging.getLogger(__name__)
@@ -235,12 +235,12 @@ async def validate_jwt_locally(token: str) -> Dict[str, Any]:
     Validate JWT token locally using cached RSA public keys.
     This provides sub-millisecond latency without network calls.
     """
-    # Check cache first
-    cached_info = await token_cache.get(token)
+    # Check Redis cache first (shared across all services)
+    cached_info = await redis_token_cache.get(token)
     if cached_info:
         # Verify token is still active
         if cached_info.get("active", False):
-            logger.debug("Using cached token validation")
+            logger.debug("Using cached token validation from Redis")
             return cached_info
 
     # Cache miss - validate token locally
@@ -248,8 +248,8 @@ async def validate_jwt_locally(token: str) -> Dict[str, Any]:
         # Use local JWT validation with RSA public keys
         token_info = await jwt_validator.validate_token(token)
 
-        # Cache the validated token info
-        await token_cache.set(token, token_info)
+        # Cache the validated token info in Redis for all services
+        await redis_token_cache.set(token, token_info)
 
         return token_info
 

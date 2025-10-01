@@ -1,3 +1,7 @@
+"""
+Authentication and authorization dependencies for the workflow service.
+Uses shared Redis cache for token validation across all microservices.
+"""
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
@@ -6,14 +10,13 @@ import jwt
 import logging
 import httpx
 import os
-import requests
-from typing import Dict, Any
 
 from ..services.oauth2_client import oauth2_client
 from .redis_auth_cache import redis_token_cache
 from .jwt_validator import jwt_validator
 
 logger = logging.getLogger(__name__)
+
 # Configure HTTPBearer to return 401 instead of 403 for authentication failures
 security = HTTPBearer(auto_error=False)
 
@@ -53,30 +56,30 @@ async def validate_token(
         )
 
     token = credentials.credentials
-    
+
     try:
         # Use local JWT validation for low latency
         # Falls back to introspection if needed
         token_info = await validate_jwt_locally(token)
-        
+
         # Extract required claims
         tenant_id = token_info.get("tenant_id")
         user_id = token_info.get("user_id") or token_info.get("sub")
-        
+
         if not tenant_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token missing tenant_id claim",
                 headers={"WWW-Authenticate": "Bearer"}
             )
-        
+
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token missing user_id claim", 
+                detail="Token missing user_id claim",
                 headers={"WWW-Authenticate": "Bearer"}
             )
-        
+
         # Create a claims object
         claims = TokenClaims(
             tenant_id=tenant_id,
@@ -87,10 +90,10 @@ async def validate_token(
             authorities=token_info.get("authorities", []),
             access_token=token  # Store the raw access token
         )
-        
+
         logger.debug(f"Token validated for tenant: {tenant_id}, user: {user_id}")
         return claims
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -106,7 +109,7 @@ async def require_admin(
     claims: TokenClaims = Depends(validate_token)
 ) -> TokenClaims:
     """Ensure the user has admin privileges"""
-    
+
     if not claims.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -170,3 +173,52 @@ async def validate_jwt_locally(token: str) -> Dict[str, Any]:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Token validation failed"
             )
+
+
+async def get_full_tenant_details(tenant_id: str, access_token: Optional[str] = None) -> Dict[str, Any]:
+    """Fetch full tenant details from the authorization server"""
+
+    auth_server_url = os.environ.get("AUTHORIZATION_SERVER_URL", "http://localhost:9002/auth")
+
+    try:
+        # Prepare headers
+        headers = {"content-type": "application/json"}
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
+
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{auth_server_url}/api/v1/tenants/{tenant_id}",
+                headers=headers,
+                timeout=10.0
+            )
+
+            if response.status_code == 404:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Tenant not found"
+                )
+
+            if response.status_code != 200:
+                logger.error(f"Failed to fetch tenant details: {response.status_code}")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Unable to fetch tenant details"
+                )
+
+            tenant_data = response.json()
+            logger.debug(f"Fetched tenant details from auth server: {tenant_id}")
+            return tenant_data
+
+    except httpx.RequestError as e:
+        logger.error(f"Failed to connect to authorization server: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authorization server unavailable"
+        )
+
+
+# Backward compatibility aliases
+get_current_user = validate_token
+get_current_tenant = validate_token
+get_admin_tenant = require_admin

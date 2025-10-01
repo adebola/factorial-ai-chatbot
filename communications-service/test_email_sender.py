@@ -3,12 +3,12 @@
 Test script to send a RabbitMQ message to the communications service for email testing.
 This script simulates what the authorization server does when sending email verification messages.
 """
-import os
 import json
+import os
 import uuid
-from datetime import datetime
-from dotenv import load_dotenv
+
 import pika
+from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()

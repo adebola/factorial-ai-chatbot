@@ -9,6 +9,7 @@ from ..core.database import get_db
 from ..models.chat_models import ChatSession, ChatMessage
 from ..services.chat_service import ChatService
 from ..services.tenant_client import TenantClient
+from ..services.workflow_client import WorkflowClient
 
 
 class ConnectionManager:
@@ -66,6 +67,7 @@ class ChatWebSocket:
         self.db = db
         self.tenant_client = TenantClient()
         self.chat_service = ChatService(db)
+        self.workflow_client = WorkflowClient()
     
     async def handle_connection(self, websocket: WebSocket, api_key: str = None, tenant_id: str = None, user_identifier: str = None):
         # Identify tenant (no authentication required)
@@ -133,15 +135,86 @@ class ChatWebSocket:
                 self.db.add(user_msg_record)
                 self.db.commit()
                 
-                # Generate AI response
+                # Check if there's an active workflow for this session
                 try:
-                    ai_response = await self.chat_service.generate_response(
+                    workflow_state = await self.workflow_client.get_session_workflow_state(
                         tenant_id=tenant_id,
-                        user_message=user_message,
                         session_id=session_id
                     )
-                    
-                    # Store AI response
+
+                    response_msg = None
+                    ai_response = None
+
+                    if workflow_state and workflow_state.get("workflow_id"):
+                        # Continue with existing workflow
+                        workflow_result = await self.workflow_client.execute_workflow_step(
+                            tenant_id=tenant_id,
+                            session_id=session_id,
+                            user_input=user_message
+                        )
+
+                        if workflow_result.get("error"):
+                            # Workflow execution failed, fall back to AI
+                            ai_response = await self.chat_service.generate_response(
+                                tenant_id=tenant_id,
+                                user_message=user_message,
+                                session_id=session_id
+                            )
+                        else:
+                            # Format workflow response
+                            ai_response = {
+                                "content": workflow_result.get("response", ""),
+                                "metadata": {
+                                    "workflow_step": True,
+                                    "step_type": workflow_result.get("step_type"),
+                                    "workflow_id": workflow_result.get("workflow_id"),
+                                    "completed": workflow_result.get("completed", False)
+                                }
+                            }
+
+                    else:
+                        # Check if message triggers any workflows
+                        trigger_result = await self.workflow_client.check_triggers(
+                            tenant_id=tenant_id,
+                            message=user_message,
+                            session_id=session_id
+                        )
+
+                        if trigger_result.get("triggered"):
+                            # Start workflow execution
+                            execution_result = await self.workflow_client.start_workflow_execution(
+                                tenant_id=tenant_id,
+                                workflow_id=trigger_result["workflow_id"],
+                                session_id=session_id
+                            )
+
+                            if execution_result.get("error"):
+                                # Workflow start failed, fall back to AI
+                                ai_response = await self.chat_service.generate_response(
+                                    tenant_id=tenant_id,
+                                    user_message=user_message,
+                                    session_id=session_id
+                                )
+                            else:
+                                # Format workflow response
+                                ai_response = {
+                                    "content": execution_result.get("response", ""),
+                                    "metadata": {
+                                        "workflow_triggered": True,
+                                        "workflow_id": trigger_result["workflow_id"],
+                                        "workflow_name": trigger_result.get("workflow_name"),
+                                        "execution_id": execution_result.get("execution_id")
+                                    }
+                                }
+                        else:
+                            # No workflow triggered, use AI response
+                            ai_response = await self.chat_service.generate_response(
+                                tenant_id=tenant_id,
+                                user_message=user_message,
+                                session_id=session_id
+                            )
+
+                    # Store AI/workflow response
                     ai_msg_record = ChatMessage(
                         tenant_id=tenant_id,
                         session_id=session_id,
@@ -151,13 +224,14 @@ class ChatWebSocket:
                     )
                     self.db.add(ai_msg_record)
                     self.db.commit()
-                    
-                    # Send a response to a client
+
+                    # Send response to client
                     response_msg = {
                         "type": "message",
                         "role": "assistant",
                         "content": ai_response["content"],
                         "sources": ai_response.get("sources", []),
+                        "metadata": ai_response.get("metadata", {}),
                         "timestamp": datetime.now().isoformat()
                     }
                     await websocket.send_text(json.dumps(response_msg))

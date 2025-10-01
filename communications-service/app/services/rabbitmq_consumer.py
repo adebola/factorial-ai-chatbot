@@ -303,12 +303,25 @@ class RabbitMQConsumer:
 
     def start_consuming(self):
         """Start consuming messages from RabbitMQ"""
-        while True:
+        retry_count = 0
+        max_retries = 5
+        retry_delay = 5
+
+        while retry_count < max_retries:
             try:
                 if not self._connect():
-                    logger.error("Failed to connect to RabbitMQ, retrying in 5 seconds...")
-                    asyncio.sleep(5)
+                    retry_count += 1
+                    logger.error(f"Failed to connect to RabbitMQ (attempt {retry_count}/{max_retries})")
+                    if retry_count >= max_retries:
+                        logger.error("Maximum connection attempts reached. RabbitMQ consumer will not start.")
+                        return
+                    logger.info(f"Retrying in {retry_delay} seconds...")
+                    import time
+                    time.sleep(retry_delay)
                     continue
+
+                # Reset retry count on successful connection
+                retry_count = 0
 
                 # Set up consumers
                 self.channel.basic_consume(
@@ -331,16 +344,28 @@ class RabbitMQConsumer:
                 break
 
             except AMQPConnectionError as e:
+                retry_count += 1
                 logger.error(f"Connection error: {e}")
                 self._disconnect()
-                logger.info("Retrying in 5 seconds...")
-                asyncio.sleep(5)
+                if retry_count >= max_retries:
+                    logger.error("Maximum connection attempts reached. RabbitMQ consumer stopped.")
+                    break
+                logger.info(f"Retrying in {retry_delay} seconds... (attempt {retry_count}/{max_retries})")
+                import time
+                time.sleep(retry_delay)
 
             except Exception as e:
+                retry_count += 1
                 logger.error(f"Unexpected error: {e}")
                 self._disconnect()
-                logger.info("Retrying in 5 seconds...")
-                asyncio.sleep(5)
+                if retry_count >= max_retries:
+                    logger.error("Maximum retry attempts reached. RabbitMQ consumer stopped.")
+                    break
+                logger.info(f"Retrying in {retry_delay} seconds... (attempt {retry_count}/{max_retries})")
+                import time
+                time.sleep(retry_delay)
+
+        logger.warning("RabbitMQ consumer stopped. The service will continue without message queue functionality.")
 
     def stop_consuming(self):
         """Stop consuming messages"""
