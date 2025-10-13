@@ -51,6 +51,16 @@ def setup_logging():
         cache_logger_on_first_use=True,
     )
 
+    # Suppress SQLAlchemy verbose logging
+    # To enable SQL query logging for debugging, set SQLALCHEMY_LOG_LEVEL environment variable
+    # or change logging.WARNING to logging.DEBUG below
+    import logging
+    sqlalchemy_log_level = os.environ.get("SQLALCHEMY_LOG_LEVEL", "WARNING")
+    logging.getLogger('sqlalchemy.engine').setLevel(sqlalchemy_log_level)
+    logging.getLogger('sqlalchemy.pool').setLevel(sqlalchemy_log_level)
+    logging.getLogger('sqlalchemy.dialects').setLevel(sqlalchemy_log_level)
+    logging.getLogger('sqlalchemy.orm').setLevel(sqlalchemy_log_level)
+
 def get_logger(name: str):
     """Get a logger with the given name"""
     return structlog.get_logger(name)

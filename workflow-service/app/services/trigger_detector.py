@@ -2,11 +2,52 @@ import re
 from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 
-from ..models.workflow import Workflow, TriggerType
-from ..schemas.workflow import TriggerCheckResponse
+from ..models.workflow_model import Workflow, TriggerType
+from ..schemas.workflow_schema import TriggerCheckResponse
 from ..core.logging_config import get_logger, log_workflow_trigger
 
 logger = get_logger("trigger_detector")
+
+
+def _check_message_trigger(workflow: Workflow, message: str) -> float:
+    """
+    Check message-based triggers
+
+    Message triggers check for phrase/substring matches in the user's message.
+    They look in both 'conditions' and 'keywords' arrays for backward compatibility.
+    """
+    trigger_config = workflow.trigger_config or {}
+    conditions = trigger_config.get("conditions", [])
+    keywords = trigger_config.get("keywords", [])
+
+    # Combine both conditions and keywords for checking
+    phrases_to_check = conditions + keywords
+
+    if not phrases_to_check:
+        return 0.0
+
+    message_lower = message.lower().strip()
+    matches = 0
+    total_phrases = len(phrases_to_check)
+
+    for phrase in phrases_to_check:
+        if isinstance(phrase, str):
+            phrase_lower = phrase.lower().strip()
+            # Check if phrase exists in message (substring or exact match)
+            if phrase_lower in message_lower or message_lower in phrase_lower:
+                matches += 1
+
+    if matches == 0:
+        return 0.0
+
+    # Calculate confidence based on match ratio and message length
+    match_ratio = matches / total_phrases
+
+    # Bonus for multiple matches in shorter messages
+    message_length_factor = min(1.0, 50 / len(message)) if len(message) > 0 else 0.0
+
+    confidence = (match_ratio * 0.7) + (message_length_factor * 0.3)
+    return min(1.0, confidence)
 
 
 class TriggerDetector:
@@ -95,7 +136,7 @@ class TriggerDetector:
         """Calculate confidence score for workflow trigger (0.0 to 1.0)"""
 
         if workflow.trigger_type == TriggerType.MESSAGE:
-            return self._check_message_trigger(workflow, message)
+            return _check_message_trigger(workflow, message)
         elif workflow.trigger_type == TriggerType.KEYWORD:
             return self._check_keyword_trigger(workflow, message)
         elif workflow.trigger_type == TriggerType.INTENT:
@@ -105,36 +146,9 @@ class TriggerDetector:
         else:
             return 0.0
 
-    def _check_message_trigger(self, workflow: Workflow, message: str) -> float:
-        """Check message-based triggers"""
-        trigger_config = workflow.trigger_config or {}
-        conditions = trigger_config.get("conditions", [])
-
-        if not conditions:
-            return 0.0
-
-        message_lower = message.lower()
-        matches = 0
-        total_conditions = len(conditions)
-
-        for condition in conditions:
-            if isinstance(condition, str) and condition.lower() in message_lower:
-                matches += 1
-
-        if matches == 0:
-            return 0.0
-
-        # Calculate confidence based on match ratio and message length
-        match_ratio = matches / total_conditions
-
-        # Bonus for multiple matches in shorter messages
-        message_length_factor = min(1.0, 50 / len(message)) if len(message) > 0 else 0.0
-
-        confidence = (match_ratio * 0.7) + (message_length_factor * 0.3)
-        return min(1.0, confidence)
-
-    def _check_keyword_trigger(self, workflow: Workflow, message: str) -> float:
-        """Check keyword-based triggers"""
+    @staticmethod
+    def _check_keyword_trigger(workflow: Workflow, message: str) -> float:
+        """Check keyword-based triggers, search for the keyword in the message"""
         trigger_config = workflow.trigger_config or {}
         keywords = trigger_config.get("keywords", [])
 
@@ -158,8 +172,8 @@ class TriggerDetector:
         confidence = min(1.0, matches / len(keywords) * 1.2)
         return confidence
 
+    @staticmethod
     def _check_intent_trigger(
-        self,
         workflow: Workflow,
         message: str,
         user_context: Optional[Dict[str, Any]] = None
@@ -220,6 +234,7 @@ class TriggerDetector:
             } if triggered else None
         )
 
+    @staticmethod
     def get_trigger_analytics(self, tenant_id: str, days: int = 30) -> Dict[str, Any]:
         """Get analytics about trigger performance"""
         # TODO: Implement trigger analytics

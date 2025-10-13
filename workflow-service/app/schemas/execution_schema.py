@@ -76,6 +76,7 @@ class WorkflowExecutionResponse(BaseModel):
     error_message: Optional[str]
     steps_completed: int
     total_steps: Optional[int]
+    first_step_result: Optional['StepExecutionResult'] = None  # Result from first step execution
 
     class Config:
         from_attributes = True
@@ -105,6 +106,7 @@ class StepExecutionResult(BaseModel):
     success: bool
     step_id: str
     step_type: StepType
+    workflow_id: Optional[str] = None  # Added for chat service context
 
     # Response to send to user
     message: Optional[str] = None

@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
-from ..models.execution import WorkflowState, WorkflowExecution
+from ..models.execution_model import WorkflowState, WorkflowExecution
 from ..core.exceptions import WorkflowStateError
 from ..core.logging_config import get_logger
 from .redis_auth_cache import redis_token_cache  # Reuse Redis connection
@@ -63,6 +63,7 @@ class StateManager:
             expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
 
             # Prepare state data
+            now = datetime.utcnow()
             state_data = {
                 "session_id": session_id,
                 "execution_id": execution_id,
@@ -74,8 +75,9 @@ class StateManager:
                 "waiting_for_input": waiting_for_input,
                 "last_user_message": last_user_message,
                 "last_bot_message": last_bot_message,
+                "created_at": now.isoformat(),
                 "expires_at": expires_at.isoformat(),
-                "updated_at": datetime.utcnow().isoformat()
+                "updated_at": now.isoformat()
             }
 
             # Save to Redis for fast access
@@ -196,7 +198,8 @@ class StateManager:
         session_id: str,
         new_step_id: str,
         step_context: Optional[Dict[str, Any]] = None,
-        waiting_for_input: Optional[str] = None
+        waiting_for_input: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
         Advance workflow to the next step.
@@ -206,6 +209,7 @@ class StateManager:
             new_step_id: ID of the next step
             step_context: Context for the new step
             waiting_for_input: Type of input expected
+            variables: Updated variables to save (if None, will use current state variables)
 
         Returns:
             True if advanced successfully
@@ -215,6 +219,9 @@ class StateManager:
             if not current_state:
                 raise WorkflowStateError(f"No state found for session {session_id}")
 
+            # Use provided variables or fall back to current state variables
+            variables_to_save = variables if variables is not None else current_state.get("variables", {})
+
             # Update the state
             await self.save_state(
                 session_id=session_id,
@@ -222,7 +229,7 @@ class StateManager:
                 workflow_id=current_state["workflow_id"],
                 tenant_id=current_state["tenant_id"],
                 current_step_id=new_step_id,
-                variables=current_state.get("variables", {}),
+                variables=variables_to_save,
                 step_context=step_context or {},
                 waiting_for_input=waiting_for_input,
                 last_user_message=current_state.get("last_user_message"),
@@ -234,6 +241,48 @@ class StateManager:
 
         except Exception as e:
             logger.error(f"Failed to advance step for session {session_id}: {e}")
+            return False
+
+    async def mark_completed(self, session_id: str) -> bool:
+        """
+        Mark workflow state as completed instead of deleting it.
+        The state will expire naturally based on TTL.
+
+        Args:
+            session_id: Chat session ID
+
+        Returns:
+            True if marked successfully
+        """
+        try:
+            current_state = await self.get_state(session_id)
+            if not current_state:
+                logger.warning(f"No state found to mark as completed for session {session_id}")
+                return False
+
+            # Add completion flag to variables
+            variables = current_state.get("variables", {})
+            variables["__workflow_completed"] = True
+
+            # Update the state with completion flag
+            await self.save_state(
+                session_id=session_id,
+                execution_id=current_state["execution_id"],
+                workflow_id=current_state["workflow_id"],
+                tenant_id=current_state["tenant_id"],
+                current_step_id=current_state["current_step_id"],
+                variables=variables,
+                step_context=current_state.get("step_context"),
+                waiting_for_input=None,  # Clear waiting state
+                last_user_message=current_state.get("last_user_message"),
+                last_bot_message=current_state.get("last_bot_message")
+            )
+
+            logger.debug(f"State marked as completed for session {session_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to mark state as completed for session {session_id}: {e}")
             return False
 
     async def delete_state(self, session_id: str) -> bool:
@@ -267,7 +316,7 @@ class StateManager:
 
     async def cleanup_expired_states(self) -> int:
         """
-        Clean up expired workflow states.
+        Clean up expired workflow states from database.
 
         Returns:
             Number of states cleaned up
@@ -283,12 +332,54 @@ class StateManager:
             ).delete()
             self.db.commit()
 
-            logger.info(f"Cleaned up {count} expired workflow states")
+            logger.info(f"Cleaned up {count} expired workflow states from database")
             return count
 
         except Exception as e:
             logger.error(f"Failed to cleanup expired states: {e}")
             self.db.rollback()
+            return 0
+
+    async def cleanup_orphaned_redis_states(self) -> int:
+        """
+        Clean up orphaned Redis workflow states that have no corresponding database record.
+        This can happen when Redis TTL expires but workflow wasn't properly cleaned up,
+        or when database records are deleted but Redis keys remain.
+
+        Returns:
+            Number of orphaned Redis states cleaned up
+        """
+        try:
+            pattern = f"{self.state_prefix}*"
+            # Get all workflow state keys from Redis
+            redis_keys = self.redis_client.keys(pattern)
+
+            if not redis_keys:
+                return 0
+
+            orphaned = 0
+            for key in redis_keys:
+                # Extract session_id from Redis key
+                session_id = key.replace(self.state_prefix, "")
+
+                # Check if database state exists
+                state = self.db.query(WorkflowState).filter(
+                    WorkflowState.session_id == session_id
+                ).first()
+
+                if not state:
+                    # No database state found, this is an orphaned Redis key
+                    self.redis_client.delete(key)
+                    orphaned += 1
+                    logger.debug(f"Removed orphaned Redis state: {session_id}")
+
+            if orphaned > 0:
+                logger.info(f"Cleaned up {orphaned} orphaned Redis workflow states")
+
+            return orphaned
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup orphaned Redis states: {e}")
             return 0
 
     async def get_active_sessions_for_tenant(self, tenant_id: str) -> list:
@@ -407,6 +498,7 @@ class StateManager:
                 "waiting_for_input": state.waiting_for_input,
                 "last_user_message": state.last_user_message,
                 "last_bot_message": state.last_bot_message,
+                "created_at": state.created_at.isoformat() if state.created_at else None,
                 "expires_at": state.expires_at.isoformat() if state.expires_at else None,
                 "updated_at": state.updated_at.isoformat() if state.updated_at else None
             }

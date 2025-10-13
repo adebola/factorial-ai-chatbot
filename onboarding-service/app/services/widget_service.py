@@ -441,7 +441,35 @@ class WidgetService:
                     background: ${CONFIG.colors.lightGray};
                     cursor: not-allowed;
                 }
-                
+
+                .factorial-chat-choices {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                    padding: 10px;
+                    margin: 5px 0;
+                }
+
+                .factorial-chat-choice-button {
+                    padding: 12px 20px;
+                    background: ${CONFIG.colors.white};
+                    border: 2px solid ${CONFIG.colors.primary};
+                    color: ${CONFIG.colors.primary};
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 500;
+                    transition: all 0.2s;
+                    text-align: left;
+                }
+
+                .factorial-chat-choice-button:hover {
+                    background: ${CONFIG.colors.primary};
+                    color: ${CONFIG.colors.white};
+                    transform: translateY(-1px);
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                }
+
                 .factorial-chat-footer {
                     padding: 12px 20px;
                     background: ${CONFIG.colors.white};
@@ -649,6 +677,12 @@ class WidgetService:
                     const data = JSON.parse(event.data);
                     if (data.type === 'message' && data.role === 'assistant') {
                         this.addMessage('bot', data.content);
+
+                        // Handle choices if present (for workflow choice steps)
+                        if (data.choices && data.choices.length > 0) {
+                            this.addChoices(data.choices);
+                        }
+
                         this.hideTypingIndicator();
                         this.enableSendButton();
                     } else if (data.type === 'connection') {
@@ -709,15 +743,44 @@ class WidgetService:
         addMessage(sender, content) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `factorial-chat-message ${sender}`;
-            
+
             const contentDiv = document.createElement('div');
             contentDiv.className = 'factorial-chat-message-content';
             contentDiv.textContent = content;
-            
+
             messageDiv.appendChild(contentDiv);
             this.messagesContainer.appendChild(messageDiv);
-            
+
             // Auto-scroll to bottom
+            this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        }
+
+        addChoices(choices) {
+            const choicesDiv = document.createElement('div');
+            choicesDiv.className = 'factorial-chat-choices';
+
+            choices.forEach(choice => {
+                const button = document.createElement('button');
+                button.className = 'factorial-chat-choice-button';
+                button.textContent = choice;
+                button.onclick = () => {
+                    // Remove all choice buttons after selection
+                    document.querySelectorAll('.factorial-chat-choices').forEach(el => el.remove());
+
+                    // Send the selected choice as a message
+                    this.addMessage('user', choice);
+                    document.getElementById('factorial-chat-send').disabled = true;
+                    this.showTypingIndicator();
+
+                    this.socket.send(JSON.stringify({
+                        type: 'message',
+                        message: choice
+                    }));
+                };
+                choicesDiv.appendChild(button);
+            });
+
+            this.messagesContainer.appendChild(choicesDiv);
             this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
         }
         

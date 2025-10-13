@@ -10,13 +10,14 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 # Import your models here
 from app.core.database import Base
-from app.models.workflow import Workflow, WorkflowVersion, WorkflowTemplate
-from app.models.execution import (
+from app.models.workflow_model import Workflow, WorkflowVersion, WorkflowTemplate
+from app.models.execution_model import (
     WorkflowExecution,
     WorkflowState,
     StepExecution,
     WorkflowAnalytics
 )
+from app.models.action_data_model import WorkflowActionData
 
 # This is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

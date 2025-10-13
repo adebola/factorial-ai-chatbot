@@ -18,7 +18,7 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 from app.services.workflow_parser import WorkflowParser, EXAMPLE_LEAD_QUALIFICATION
 from app.services.variable_resolver import VariableResolver
 from app.services.action_service import ActionService
-from app.schemas.workflow import WorkflowCreate, TriggerType
+from app.schemas.workflow_schema import WorkflowCreate, TriggerType
 
 
 async def test_workflow_system():

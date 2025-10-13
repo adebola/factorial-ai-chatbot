@@ -24,11 +24,7 @@ class OAuth2ServiceClient:
         self.token_introspection_endpoint = f"{base_url}/oauth2/introspect"
         self.userinfo_endpoint = f"{base_url}/userinfo"
         self.token_endpoint = f"{base_url}/oauth2/token"
-        
-        logger.info(f"OAuth2 client initialized with server: {self.auth_server_url}")
-        logger.debug(f"Token introspection endpoint: {self.token_introspection_endpoint}")
-        logger.debug(f"UserInfo endpoint: {self.userinfo_endpoint}")
-        logger.debug(f"Token endpoint: {self.token_endpoint}")
+
     
     async def validate_token(self, token: str) -> Dict[str, Any]:
         """

@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
-from ..services.dependencies import TokenClaims, validate_token
+from ..services.dependencies import TokenClaims, validate_token, validate_token_or_api_key
 from ..services.trigger_detector import TriggerDetector
-from ..schemas.workflow import TriggerCheckRequest, TriggerCheckResponse
+from ..schemas.workflow_schema import TriggerCheckRequest, TriggerCheckResponse
 
 router = APIRouter()
 
@@ -13,12 +13,14 @@ router = APIRouter()
 async def check_triggers(
     request: TriggerCheckRequest,
     db: Session = Depends(get_db),
-    claims: TokenClaims = Depends(validate_token)
+    claims: TokenClaims = Depends(validate_token_or_api_key)
 ):
     """Check if a message should trigger any workflows
 
     This endpoint is called by the chat service to determine
     if a user message should start a workflow.
+
+    Authentication: Accepts either JWT Bearer token OR X-API-Key header
     """
     try:
         detector = TriggerDetector(db)

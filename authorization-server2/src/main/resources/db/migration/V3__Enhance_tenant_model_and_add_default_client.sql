@@ -1,4 +1,4 @@
--- Migration to enhance tenant model and add default OAuth2 client
+-- Migration to enhance a tenant model and add default OAuth2 client
 -- V3__Enhance_tenant_model_and_add_default_client.sql
 
 -- First, enhance the tenants table with missing fields to match onboarding service

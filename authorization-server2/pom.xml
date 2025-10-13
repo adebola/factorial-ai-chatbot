@@ -141,7 +141,7 @@
                 <configuration>
                     <user>postgres</user>
                     <password>password</password>
-                    <url>jdbc:postgresql://localhost:5432/authorization_db</url>
+                    <url>jdbc:postgresql://localhost:5432/authorization_db2</url>
                     <schemas>
                         <schema>public</schema>
                     </schemas>

@@ -71,12 +71,14 @@ class RabbitMQConsumer:
                 queue=self.email_queue,
                 routing_key="email.send"
             )
-            # Also bind to email.notification routing key for authorization server
+
+            # Also bind to email.notification routing key for the authorization server
             self.channel.queue_bind(
                 exchange=self.exchange,
                 queue=self.email_queue,
                 routing_key="email.notification"
             )
+
             self.channel.queue_bind(
                 exchange=self.exchange,
                 queue=self.sms_queue,
@@ -129,12 +131,16 @@ class RabbitMQConsumer:
 
             logger.info(f"Processing email message: {message_data.get('message_id', 'unknown')}")
 
-            # Map field names from authorization server format
+            # Map field names from the authorization server format
             tenant_id = message_data.get("tenantId") or message_data.get("tenant_id")
             to_email = message_data.get("toEmail") or message_data.get("to_email")
             to_name = message_data.get("toName") or message_data.get("to_name")
             html_content = message_data.get("htmlContent") or message_data.get("html_content")
             text_content = message_data.get("textContent") or message_data.get("text_content")
+
+            logger.info(f"Sending Mail for Tenant {tenant_id}")
+            logger.info(f"Sending mail to {to_email}")
+            logger.info(f"Sending content {html_content}")
 
             # Set request context
             set_request_context(

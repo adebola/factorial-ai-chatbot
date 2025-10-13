@@ -3,12 +3,12 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from ..core.database import get_db
-from ..services.dependencies import TokenClaims, validate_token
+from ..services.dependencies import TokenClaims, validate_token, validate_token_or_api_key
 from ..services.execution_service import ExecutionService
 from ..core.exceptions import (
     WorkflowExecutionError, StepExecutionError, WorkflowNotFoundError, WorkflowStateError
 )
-from ..schemas.execution import (
+from ..schemas.execution_schema import (
     ExecutionStartRequest,
     ExecutionStepRequest,
     WorkflowExecutionResponse,
@@ -63,9 +63,12 @@ async def get_execution(
 async def start_execution(
     request: ExecutionStartRequest,
     db: Session = Depends(get_db),
-    claims: TokenClaims = Depends(validate_token)
+    claims: TokenClaims = Depends(validate_token_or_api_key)
 ):
-    """Start a new workflow execution"""
+    """Start a new workflow execution
+
+    Authentication: Accepts either JWT Bearer token OR X-API-Key header
+    """
     try:
         service = ExecutionService(db)
         return await service.start_execution(
@@ -85,9 +88,12 @@ async def start_execution(
 async def execute_step(
     request: ExecutionStepRequest,
     db: Session = Depends(get_db),
-    claims: TokenClaims = Depends(validate_token)
+    claims: TokenClaims = Depends(validate_token_or_api_key)
 ):
-    """Execute the next step in a workflow"""
+    """Execute the next step in a workflow
+
+    Authentication: Accepts either JWT Bearer token OR X-API-Key header
+    """
     try:
         service = ExecutionService(db)
         return await service.execute_step(
@@ -108,20 +114,34 @@ async def execute_step(
 async def get_session_state(
     session_id: str,
     db: Session = Depends(get_db),
-    claims: TokenClaims = Depends(validate_token)
+    claims: TokenClaims = Depends(validate_token_or_api_key)
 ):
-    """Get the current workflow state for a session"""
+    """Get the current workflow state for a session
+
+    Authentication: Accepts either JWT Bearer token OR X-API-Key header
+    """
+    from ..core.logging_config import get_logger
+    logger = get_logger("executions_api")
+
     try:
         from ..services.state_manager import StateManager
         state_manager = StateManager(db)
         state = await state_manager.get_state(session_id)
 
         if not state:
+            logger.warning(f"Session state not found for session_id={session_id}")
             raise HTTPException(status_code=404, detail="Session state not found")
 
         # Verify tenant access
         if state.get("tenant_id") != claims.tenant_id:
+            logger.warning(f"Access denied for session_id={session_id}, tenant_id mismatch")
             raise HTTPException(status_code=403, detail="Access denied")
+
+        # Parse datetime strings to datetime objects
+        from datetime import datetime
+        created_at = datetime.fromisoformat(state["created_at"]) if state.get("created_at") else datetime.utcnow()
+        updated_at = datetime.fromisoformat(state["updated_at"]) if state.get("updated_at") else datetime.utcnow()
+        expires_at = datetime.fromisoformat(state["expires_at"]) if state.get("expires_at") else None
 
         return WorkflowStateResponse(
             session_id=state["session_id"],
@@ -133,13 +153,14 @@ async def get_session_state(
             waiting_for_input=state.get("waiting_for_input"),
             last_user_message=state.get("last_user_message"),
             last_bot_message=state.get("last_bot_message"),
-            created_at=state.get("created_at"),
-            updated_at=state.get("updated_at"),
-            expires_at=state.get("expires_at")
+            created_at=created_at,
+            updated_at=updated_at,
+            expires_at=expires_at
         )
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Failed to get session state for session_id={session_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -3,14 +3,18 @@ Action service for executing workflow actions.
 Handles various action types like sending emails, webhooks, data operations, etc.
 """
 import httpx
-import json
+# import json
 import os
+import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
+from sqlalchemy.orm import Session
 
 from ..core.exceptions import ActionExecutionError
 from ..core.logging_config import get_logger
 from .variable_resolver import VariableResolver
+from ..models.action_data_model import WorkflowActionData
+from .rabbitmq_publisher import get_rabbitmq_publisher
 
 logger = get_logger("action_service")
 
@@ -18,7 +22,10 @@ logger = get_logger("action_service")
 class ActionService:
     """Service for executing workflow actions"""
 
-    def __init__(self):
+    def __init__(self, db: Optional[Session] = None):
+        self.db = db
+        self.rabbitmq_publisher = get_rabbitmq_publisher()
+        # Keep communications_url for backwards compatibility (webhooks still use HTTP)
         self.communications_url = os.environ.get("COMMUNICATIONS_SERVICE_URL", "http://localhost:8003")
         self.timeout = 30.0
 
@@ -45,17 +52,27 @@ class ActionService:
         """
         try:
             # Resolve variables in action parameters
+            logger.info(f"===== ACTION VARIABLE RESOLUTION =====")
+            logger.info(f"Action type: {action_type}")
+            logger.info(f"BEFORE resolution - params: {action_params}")
+            logger.info(f"Available variables: {variables}")
+
             resolved_params = self._resolve_action_params(action_params, variables)
+
+            logger.info(f"AFTER resolution - params: {resolved_params}")
+            logger.info(f"===== END VARIABLE RESOLUTION =====")
 
             logger.info(f"Executing action {action_type} for execution {execution_id}")
 
-            # Route to appropriate action handler
+            # Route to the appropriate action handler
             if action_type == "send_email":
                 return await self._send_email(resolved_params, tenant_id, execution_id)
             elif action_type == "send_sms":
                 return await self._send_sms(resolved_params, tenant_id, execution_id)
             elif action_type == "webhook":
                 return await self._call_webhook(resolved_params, tenant_id, execution_id)
+            elif action_type == "save_to_database":
+                return await self._save_to_database(resolved_params, tenant_id, execution_id, variables)
             elif action_type == "set_variable":
                 return await self._set_variable(resolved_params, variables)
             elif action_type == "delay":
@@ -79,44 +96,40 @@ class ActionService:
         tenant_id: str,
         execution_id: str
     ) -> Dict[str, Any]:
-        """Send email using communications service"""
+        """Send email via RabbitMQ (asynchronous, non-blocking)"""
         try:
             required_fields = ["to", "subject", "content"]
             for field in required_fields:
                 if field not in params:
                     raise ActionExecutionError("send_email", f"Missing required field: {field}")
 
-            email_data = {
-                "to": params["to"],
-                "subject": params["subject"],
-                "content": params["content"],
-                "tenant_id": tenant_id,
-                "source": f"workflow_execution_{execution_id}",
-                "template": params.get("template"),
-                "variables": params.get("variables", {})
-            }
+            # Publish to RabbitMQ queue (async, returns immediately)
+            result = await self.rabbitmq_publisher.publish_email(
+                tenant_id=tenant_id,
+                to_email=params["to"],
+                subject=params["subject"],
+                html_content=params["content"],
+                text_content=params.get("text_content"),
+                to_name=params.get("to_name"),
+                template_id=params.get("template"),
+                template_data=params.get("variables", {})
+            )
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.communications_url}/api/v1/email/send",
-                    json=email_data,
-                    headers={"Content-Type": "application/json"}
-                )
+            if result["success"]:
+                logger.info(f"Email queued successfully: {result['message_id']}")
+                return {
+                    "success": True,
+                    "message_id": result["message_id"],
+                    "recipient": params["to"],
+                    "queued": True  # Indicates async processing
+                }
+            else:
+                raise ActionExecutionError("send_email", f"Failed to queue email: {result.get('error')}")
 
-                if response.status_code == 200:
-                    result = response.json()
-                    logger.info(f"Email sent successfully: {result.get('message_id')}")
-                    return {
-                        "success": True,
-                        "message_id": result.get("message_id"),
-                        "recipient": params["to"]
-                    }
-                else:
-                    error_detail = response.text
-                    raise ActionExecutionError("send_email", f"Email service error: {error_detail}")
-
-        except httpx.RequestError as e:
-            raise ActionExecutionError("send_email", f"Failed to connect to email service: {e}")
+        except ActionExecutionError:
+            raise
+        except Exception as e:
+            raise ActionExecutionError("send_email", f"Failed to queue email message: {e}")
 
     async def _send_sms(
         self,
@@ -124,41 +137,38 @@ class ActionService:
         tenant_id: str,
         execution_id: str
     ) -> Dict[str, Any]:
-        """Send SMS using communications service"""
+        """Send SMS via RabbitMQ (asynchronous, non-blocking)"""
         try:
             required_fields = ["to", "message"]
             for field in required_fields:
                 if field not in params:
                     raise ActionExecutionError("send_sms", f"Missing required field: {field}")
 
-            sms_data = {
-                "to": params["to"],
-                "message": params["message"],
-                "tenant_id": tenant_id,
-                "source": f"workflow_execution_{execution_id}"
-            }
+            # Publish to RabbitMQ queue (async, returns immediately)
+            result = await self.rabbitmq_publisher.publish_sms(
+                tenant_id=tenant_id,
+                to_phone=params["to"],
+                message=params["message"],
+                from_phone=params.get("from_phone"),
+                template_id=params.get("template"),
+                template_data=params.get("variables", {})
+            )
 
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.communications_url}/api/v1/sms/send",
-                    json=sms_data,
-                    headers={"Content-Type": "application/json"}
-                )
+            if result["success"]:
+                logger.info(f"SMS queued successfully: {result['message_id']}")
+                return {
+                    "success": True,
+                    "message_id": result["message_id"],
+                    "recipient": params["to"],
+                    "queued": True  # Indicates async processing
+                }
+            else:
+                raise ActionExecutionError("send_sms", f"Failed to queue SMS: {result.get('error')}")
 
-                if response.status_code == 200:
-                    result = response.json()
-                    logger.info(f"SMS sent successfully: {result.get('message_id')}")
-                    return {
-                        "success": True,
-                        "message_id": result.get("message_id"),
-                        "recipient": params["to"]
-                    }
-                else:
-                    error_detail = response.text
-                    raise ActionExecutionError("send_sms", f"SMS service error: {error_detail}")
-
-        except httpx.RequestError as e:
-            raise ActionExecutionError("send_sms", f"Failed to connect to SMS service: {e}")
+        except ActionExecutionError:
+            raise
+        except Exception as e:
+            raise ActionExecutionError("send_sms", f"Failed to queue SMS message: {e}")
 
     async def _call_webhook(
         self,
@@ -212,6 +222,58 @@ class ActionService:
 
         except httpx.RequestError as e:
             raise ActionExecutionError("webhook", f"Failed to call webhook: {e}")
+
+    async def _save_to_database(
+        self,
+        params: Dict[str, Any],
+        tenant_id: str,
+        execution_id: str,
+        variables: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Save workflow data to database"""
+        try:
+            if not self.db:
+                raise ActionExecutionError("save_to_database", "Database session not available")
+
+            # Get required fields
+            data = params.get("data")
+            if not data:
+                raise ActionExecutionError("save_to_database", "Missing required field: data")
+
+            # Get optional fields
+            action_name = params.get("action_name", "workflow_data")
+            workflow_id = variables.get("workflow_id", "unknown")
+
+            # Create database record
+            action_data = WorkflowActionData(
+                id=str(uuid.uuid4()),
+                tenant_id=tenant_id,
+                workflow_id=workflow_id,
+                execution_id=execution_id,
+                action_name=action_name,
+                data=data
+            )
+
+            self.db.add(action_data)
+            self.db.commit()
+            self.db.refresh(action_data)
+
+            logger.info(f"Saved workflow data: {action_data.id} for execution {execution_id}")
+
+            return {
+                "success": True,
+                "record_id": action_data.id,
+                "action_name": action_name,
+                "data_keys": list(data.keys()) if isinstance(data, dict) else None
+            }
+
+        except ActionExecutionError:
+            raise
+        except Exception as e:
+            if self.db:
+                self.db.rollback()
+            logger.error(f"Failed to save to database: {e}")
+            raise ActionExecutionError("save_to_database", f"Database error: {e}")
 
     async def _set_variable(
         self,
@@ -376,28 +438,30 @@ class ActionService:
         """
         return {
             "send_email": {
-                "description": "Send an email message",
+                "description": "Send an email message via communications service",
                 "required_params": ["to", "subject", "content"],
-                "optional_params": ["template", "variables"],
+                "optional_params": ["to_name", "text_content", "template", "variables"],
                 "example": {
                     "to": "{{email}}",
                     "subject": "Welcome to our service",
                     "content": "Hello {{name}}, welcome!",
+                    "to_name": "{{user_name}}",
                     "template": "welcome_email",
                     "variables": {"name": "{{user_name}}"}
                 }
             },
             "send_sms": {
-                "description": "Send an SMS message",
+                "description": "Send an SMS message via communications service",
                 "required_params": ["to", "message"],
-                "optional_params": [],
+                "optional_params": ["from_phone", "template", "variables"],
                 "example": {
                     "to": "{{phone}}",
-                    "message": "Your verification code is {{code}}"
+                    "message": "Your verification code is {{code}}",
+                    "from_phone": "+1234567890"
                 }
             },
             "webhook": {
-                "description": "Call an external webhook",
+                "description": "Call an external webhook or API endpoint",
                 "required_params": ["url"],
                 "optional_params": ["method", "headers", "data"],
                 "example": {
@@ -405,6 +469,21 @@ class ActionService:
                     "method": "POST",
                     "headers": {"Authorization": "Bearer token"},
                     "data": {"user_id": "{{user_id}}", "event": "workflow_completed"}
+                }
+            },
+            "save_to_database": {
+                "description": "Save workflow data to database for later retrieval",
+                "required_params": ["data"],
+                "optional_params": ["action_name"],
+                "example": {
+                    "action_name": "lead_qualification",
+                    "data": {
+                        "email": "{{email}}",
+                        "company_size": "{{company_size}}",
+                        "use_case": "{{use_case}}",
+                        "qualified": "{{qualified}}",
+                        "timestamp": "{{_system.timestamp}}"
+                    }
                 }
             },
             "set_variable": {

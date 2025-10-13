@@ -3,7 +3,7 @@ import json
 from typing import Dict, Any, List, Optional
 from pydantic import ValidationError
 
-from ..schemas.workflow import WorkflowDefinition, WorkflowStep, WorkflowTrigger
+from ..schemas.workflow_schema import WorkflowDefinition, WorkflowStep, WorkflowTrigger
 from ..core.logging_config import get_logger
 
 logger = get_logger("workflow_parser")
@@ -58,7 +58,8 @@ class WorkflowParser:
 
         # Validate step references
         for step in definition.steps:
-            if step.next_step and step.next_step not in step_ids:
+            # Validate Next Steps for all steps, ensure it is in available steps and not pointing to itself
+            if step.next_step and step.next_step not in step_ids and step.next_step != step.id:
                 errors.append(f"Step '{step.id}' references non-existent step '{step.next_step}'")
 
             # Validate condition steps have conditions
@@ -68,6 +69,12 @@ class WorkflowParser:
             # Validate choice steps have options
             if step.type == "choice" and (not step.options or len(step.options) == 0):
                 errors.append(f"Choice step '{step.id}' missing options")
+
+            # Validate a choice option next_step references
+            if step.type == "choice" and step.options:
+                for idx, option in enumerate(step.options):
+                    if option.next_step and option.next_step not in step_ids:
+                        errors.append(f"Choice step '{step.id}' option {idx} references non-existent step '{option.next_step}'")
 
             # Validate action steps have action type
             if step.type == "action" and not step.action:
@@ -79,8 +86,15 @@ class WorkflowParser:
             referenced_steps = set()
 
             for step in definition.steps:
+                # Collect step-level next_step references
                 if step.next_step:
                     referenced_steps.add(step.next_step)
+
+                # Collect next_step references from choice options
+                if step.type == "choice" and step.options:
+                    for option in step.options:
+                        if option.next_step:
+                            referenced_steps.add(option.next_step)
 
             # Find steps that are not the first step and not referenced by any other step
             unreachable = []
@@ -139,6 +153,12 @@ EXAMPLE_LEAD_QUALIFICATION = {
         "type": "message",
         "conditions": ["pricing", "demo", "trial", "cost"]
     },
+    "variables": {
+        "company_size": "",
+        "use_case": "",
+        "email": "",
+        "qualified": False
+    },
     "steps": [
         {
             "id": "greeting",
@@ -152,9 +172,29 @@ EXAMPLE_LEAD_QUALIFICATION = {
             "type": "choice",
             "name": "Company Size",
             "content": "What's your company size?",
-            "options": ["1-10 employees", "11-50 employees", "51-200 employees", "200+ employees"],
-            "variable": "company_size",
-            "next_step": "use_case"
+            "options": [
+                {
+                    "text": "1-10 employees",
+                    "value": "small",
+                    "next_step": "use_case"
+                },
+                {
+                    "text": "11-50 employees",
+                    "value": "medium",
+                    "next_step": "use_case"
+                },
+                {
+                    "text": "51-200 employees",
+                    "value": "large",
+                    "next_step": "use_case"
+                },
+                {
+                    "text": "200+ employees",
+                    "value": "enterprise",
+                    "next_step": "use_case"
+                }
+            ],
+            "variable": "company_size"
         },
         {
             "id": "use_case",
@@ -162,13 +202,13 @@ EXAMPLE_LEAD_QUALIFICATION = {
             "name": "Use Case",
             "content": "What's your primary use case for our platform?",
             "variable": "use_case",
-            "next_step": "contact_check"
+            "next_step": "check_qualified"
         },
         {
-            "id": "contact_check",
+            "id": "check_qualified",
             "type": "condition",
             "name": "Check if qualified",
-            "condition": "company_size != '1-10 employees'",
+            "condition": "company_size != 'small'",
             "next_step": "collect_email"
         },
         {
@@ -185,20 +225,12 @@ EXAMPLE_LEAD_QUALIFICATION = {
             "name": "Send Pricing Email",
             "action": "send_email",
             "params": {
-                "template": "pricing_info",
                 "to": "{{email}}",
-                "variables": {
-                    "company_size": "{{company_size}}",
-                    "use_case": "{{use_case}}"
-                }
+                "subject": "Pricing for {{company_size}} companies",
+                "body": "Thanks for your interest in {{use_case}}!"
             }
         }
-    ],
-    "variables": {
-        "company_size": "",
-        "use_case": "",
-        "email": ""
-    }
+    ]
 }
 
 EXAMPLE_SUPPORT_ESCALATION = {

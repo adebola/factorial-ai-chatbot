@@ -69,7 +69,7 @@ class EmailService:
         # Get tenant settings for rate limiting
         tenant_settings = self._get_tenant_settings(tenant_id)
 
-        # Create email record in database
+        # Create an email record in the database
         email_record = EmailMessage(
             tenant_id=tenant_id,
             to_email=to_email,

@@ -3,6 +3,10 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/backend.iml" filepath="$PROJECT_DIR$/.idea/backend.iml" />
+      <module fileurl="file://$PROJECT_DIR$/chat-service/chat-modue/chat-module.iml" filepath="$PROJECT_DIR$/chat-service/chat-modue/chat-module.iml" />
+      <module fileurl="file://$PROJECT_DIR$/communications-service/communications-module.iml" filepath="$PROJECT_DIR$/communications-service/communications-module.iml" />
+      <module fileurl="file://$PROJECT_DIR$/onboarding-service/onboarding-module.iml" filepath="$PROJECT_DIR$/onboarding-service/onboarding-module.iml" />
+      <module fileurl="file://$PROJECT_DIR$/workflow-service/workflow-module.iml" filepath="$PROJECT_DIR$/workflow-service/workflow-module.iml" />
     </modules>
   </component>
 </project>

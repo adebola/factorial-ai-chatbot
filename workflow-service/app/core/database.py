@@ -8,9 +8,11 @@ from sqlalchemy.pool import StaticPool
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:password@localhost:5432/workflow_db")
 
 # Create SQLAlchemy engine
+# Note: Set echo=True to enable SQL query logging for debugging
+# Or use environment variable: echo=True if os.environ.get("SQL_DEBUG") == "true" else False
 engine = create_engine(
     DATABASE_URL,
-    echo=True if os.environ.get("ENVIRONMENT") == "development" else False,
+    echo=False,  # Disabled to reduce log verbosity
     poolclass=StaticPool,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
 )

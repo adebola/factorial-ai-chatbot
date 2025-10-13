@@ -7,8 +7,8 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
-from ..models.workflow import Workflow, WorkflowVersion, WorkflowTemplate, WorkflowStatus, TriggerType
-from ..schemas.workflow import (
+from ..models.workflow_model import Workflow, WorkflowVersion, WorkflowTemplate, WorkflowStatus, TriggerType
+from ..schemas.workflow_schema import (
     WorkflowCreate, WorkflowUpdate, WorkflowResponse, WorkflowSummary, WorkflowList,
     WorkflowTemplateCreate, WorkflowTemplateResponse
 )
@@ -48,6 +48,7 @@ class WorkflowService:
             # Validate workflow definition
             errors = WorkflowParser.validate_workflow(workflow_data.definition)
             if errors:
+                logger.error(f"Workflow create validation failed: {', '.join(errors)}")
                 raise WorkflowValidationError(f"Workflow validation failed: {', '.join(errors)}")
 
             # Create workflow
@@ -193,6 +194,7 @@ class WorkflowService:
                 # Validate new definition
                 errors = WorkflowParser.validate_workflow(workflow_data.definition)
                 if errors:
+                    logger.error(f"Workflow update validation failed: {', '.join(errors)}")
                     raise WorkflowValidationError(f"Workflow validation failed: {', '.join(errors)}")
 
                 workflow.definition = WorkflowParser.to_dict(workflow_data.definition)
@@ -216,7 +218,7 @@ class WorkflowService:
             self.db.commit()
             self.db.refresh(workflow)
 
-            # Create new version if definition changed
+            # Create a new version if definition changed
             if definition_changed:
                 self._create_version(workflow, "Updated workflow definition", user_id)
 
@@ -383,6 +385,7 @@ class WorkflowService:
             # Validate workflow definition
             errors = WorkflowParser.validate_workflow(template_data.definition)
             if errors:
+                logger.error(f"Workflow Template validation failed: {', '.join(errors)}")
                 raise WorkflowValidationError(f"Template validation failed: {', '.join(errors)}")
 
             template = WorkflowTemplate(
