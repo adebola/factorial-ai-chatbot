@@ -91,22 +91,23 @@ spring:
 #                filters:
 #                  - RewritePath=/health/auth,/auth/health
 
-              - id: onboarding-plans
-                uri: http://localhost:8001
+              # Billing Service Routes (extracted from onboarding)
+              - id: billing-plans
+                uri: http://localhost:8004
                 predicates:
                     - Path=/api/v1/plans/**
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
-              - id: onboarding-subscriptions
-                uri: http://localhost:8001
+              - id: billing-subscriptions
+                uri: http://localhost:8004
                 predicates:
                     - Path=/api/v1/subscriptions/**
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
-              - id: onboarding-payments
-                uri: http://localhost:8001
+              - id: billing-payments
+                uri: http://localhost:8004
                 predicates:
                     - Path=/api/v1/payments/**
                 filters:
@@ -228,6 +229,13 @@ spring:
                     - Path=/health/workflow
                 filters:
                     - RewritePath=/health/workflow,/health
+
+              - id: billing-health
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/health/billing
+                filters:
+                    - RewritePath=/health/billing,/health
 
               - id: auth-health
                 uri: http://localhost:8000

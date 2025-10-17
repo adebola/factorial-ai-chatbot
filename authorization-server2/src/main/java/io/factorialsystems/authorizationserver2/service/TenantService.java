@@ -186,24 +186,56 @@ public class TenantService {
                 log.warn("Cannot update plan for non-existent tenant: {}", tenantId);
                 return false;
             }
-            
+
             // Update plan_id in database
             int rowsUpdated = tenantMapper.updatePlanId(tenantId, planId);
-            
+
             if (rowsUpdated > 0) {
                 // Clear cache to ensure fresh data on next access
                 cacheService.evictTenant(tenantId);
-                
-                log.info("Successfully updated tenant {} plan from {} to {}", 
+
+                log.info("Successfully updated tenant {} plan from {} to {}",
                         tenantId, existingTenant.getPlanId(), planId);
                 return true;
             } else {
                 log.warn("Failed to update tenant {} plan - no rows affected", tenantId);
                 return false;
             }
-            
+
         } catch (Exception e) {
             log.error("Error updating tenant {} plan to {}: {}", tenantId, planId, e.getMessage(), e);
+            return false;
+        }
+    }
+
+    @Transactional
+    public boolean updateTenantSubscription(String tenantId, String subscriptionId, String planId) {
+        try {
+            // Validate tenant exists
+            Tenant existingTenant = findById(tenantId);
+            if (existingTenant == null) {
+                log.warn("Cannot update subscription for non-existent tenant: {}", tenantId);
+                return false;
+            }
+
+            // Update subscription_id and plan_id in database
+            int rowsUpdated = tenantMapper.updateSubscriptionAndPlan(tenantId, subscriptionId, planId);
+
+            if (rowsUpdated > 0) {
+                // Clear cache to ensure fresh data on next access
+                cacheService.evictTenant(tenantId);
+
+                log.info("Successfully updated tenant {} subscription to {} and plan to {}",
+                        tenantId, subscriptionId, planId);
+                return true;
+            } else {
+                log.warn("Failed to update tenant {} subscription and plan - no rows affected", tenantId);
+                return false;
+            }
+
+        } catch (Exception e) {
+            log.error("Error updating tenant {} subscription to {} and plan to {}: {}",
+                    tenantId, subscriptionId, planId, e.getMessage(), e);
             return false;
         }
     }

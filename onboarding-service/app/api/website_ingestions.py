@@ -6,12 +6,15 @@ import asyncio
 from datetime import datetime
 
 from ..core.database import get_db, get_vector_db
-from ..services.website_scraper import WebsiteScraper
+from ..core.config import settings
+from ..services.website_scraper import WebsiteScraper, ScrapingStrategy
 from ..services.pg_vector_ingestion import PgVectorIngestionService
 from ..services.dependencies import get_current_tenant, TokenClaims, validate_token, get_full_tenant_details
 from ..models.tenant import IngestionStatus, WebsitePage
+from ..core.logging_config import get_logger
 
 router = APIRouter()
+logger = get_logger("website_ingestions")
 
 
 @router.post("/websites/ingest")
@@ -31,7 +34,7 @@ async def ingest_website(
     
     try:
         # Start scraping in the background
-        scraper = WebsiteScraper(db)
+        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
         ingestion = scraper.start_website_ingestion(claims.tenant_id, website_url)
         
         # Process in the background (in a real app, use Celery)
@@ -39,12 +42,12 @@ async def ingest_website(
         import os
         openai_key = os.environ.get("OPENAI_API_KEY")
         asyncio.create_task(
-            background_website_ingestion(claims.tenant_id, website_url, ingestion.id, db, openai_key)
+            background_website_ingestion(claims.tenant_id, website_url, ingestion.id, openai_key)
         )
 
         # Get tenant details if needed
-        tenant_details = await get_full_tenant_details(claims.tenant_id)
-        
+        tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
+
         return {
             "message": "Website ingestion started",
             "ingestion_id": ingestion.id,
@@ -68,8 +71,8 @@ async def get_ingestion_status(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get website ingestion status (requires Bearer token authentication)"""
-    
-    scraper = WebsiteScraper(db)
+
+    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
@@ -79,8 +82,8 @@ async def get_ingestion_status(
         )
 
     # Get tenant details if needed
-    tenant_details = await get_full_tenant_details(claims.tenant_id)
-    
+    tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
+
     return {
         "ingestion_id": ingestion.id,
         "base_url": ingestion.base_url,
@@ -103,12 +106,12 @@ async def list_tenant_ingestions(
 ) -> Dict[str, Any]:
     """List all website ingestions for a tenant (requires Bearer token authentication)"""
     
-    scraper = WebsiteScraper(db)
+    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
     ingestions = scraper.get_tenant_ingestions(claims.tenant_id)
 
     # Get tenant details if needed
-    tenant_details = await get_full_tenant_details(claims.tenant_id)
-    
+    tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
+
     return {
         "ingestions": [
             {
@@ -139,8 +142,8 @@ async def delete_ingestion(
     """Delete a website ingestion record (requires Bearer token authentication)"""
     
     try:
-        scraper = WebsiteScraper(db)
-        
+        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+
         # Verify ingestion exists and belongs to a tenant
         ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
         if not ingestion:
@@ -183,8 +186,8 @@ async def retry_ingestion(
     """Retry a failed website ingestion (requires Bearer token authentication)"""
     
     try:
-        scraper = WebsiteScraper(db)
-        
+        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+
         # Get existing ingestion
         ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
         if not ingestion:
@@ -207,7 +210,7 @@ async def retry_ingestion(
         import os
         openai_key = os.environ.get("OPENAI_API_KEY")
         asyncio.create_task(
-            background_website_ingestion(claims.tenant_id, ingestion.base_url, ingestion_id, db, openai_key)
+            background_website_ingestion(claims.tenant_id, ingestion.base_url, ingestion_id, openai_key)
         )
         
         return {
@@ -227,27 +230,49 @@ async def retry_ingestion(
         )
 
 
-async def background_website_ingestion(tenant_id: str, website_url: str, ingestion_id: str, db: Session, openai_api_key: str = None):
-    """Background task for website ingestion"""
+async def background_website_ingestion(tenant_id: str, website_url: str, ingestion_id: str, openai_api_key: str = None):
+    """Background task for website ingestion - creates its own database session"""
+    logger.info(
+        "Background ingestion task started",
+        tenant_id=tenant_id,
+        ingestion_id=ingestion_id,
+        website_url=website_url
+    )
+
+    # Create FRESH database session for this background task
+    # This prevents session staleness during long-running operations (hours)
+    db = next(get_db())
+
     try:
         # Ensure environment variables are loaded
         import os
         from dotenv import load_dotenv
         load_dotenv()
-        
+
         # Set the OPENAI_API_KEY explicitly in the background task environment
         if openai_api_key:
             os.environ["OPENAI_API_KEY"] = openai_api_key
-            print(f"✅ OPENAI_API_KEY set in background task (length: {len(openai_api_key)})")
-        
+            logger.debug(
+                "OPENAI_API_KEY set in background task",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                key_length=len(openai_api_key)
+            )
+
         # Check if OPENAI_API_KEY is available
         current_key = os.environ.get("OPENAI_API_KEY")
         if not current_key:
             error_msg = "OPENAI_API_KEY environment variable not found in background task"
-            print(f"❌ Background ingestion failed: {error_msg}")
-            
+            logger.error(
+                "Background ingestion failed - Missing OPENAI_API_KEY",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                error=error_msg
+            )
+
             # Update ingestion status to failed
-            scraper = WebsiteScraper(db)
+            from ..core.config import settings
+            scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
             ingestion = scraper.get_ingestion_status(tenant_id, ingestion_id)
             if ingestion:
                 ingestion.status = IngestionStatus.FAILED
@@ -255,41 +280,109 @@ async def background_website_ingestion(tenant_id: str, website_url: str, ingesti
                 ingestion.completed_at = datetime.now()
                 db.commit()
             return
-        else:
-            print(f"✅ OPENAI_API_KEY available in background task (length: {len(current_key)})")
-        
-        scraper = WebsiteScraper(db)
-        
+
+        logger.debug(
+            "OPENAI_API_KEY confirmed available",
+            tenant_id=tenant_id,
+            ingestion_id=ingestion_id,
+            key_length=len(current_key)
+        )
+
+        from ..core.config import settings
+        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+
         # Get the existing ingestion record instead of creating a new one
         ingestion = scraper.get_ingestion_status(tenant_id, ingestion_id)
         if not ingestion:
-            print(f"Ingestion {ingestion_id} not found")
+            logger.error(
+                "Ingestion record not found",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id
+            )
             return
-            
-        documents = scraper.process_existing_ingestion(ingestion)
-        
+
+        logger.info(
+            "Starting website scraping process",
+            tenant_id=tenant_id,
+            ingestion_id=ingestion_id,
+            website_url=website_url
+        )
+
+        documents = await scraper.process_existing_ingestion(ingestion)
+
         # Ingest into vector store
         if documents:
+            logger.info(
+                "Ingesting documents into vector store",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                document_count=len(documents)
+            )
+
             # Get a fresh vector database session for the background task
             from ..core.database import get_vector_db
             vector_db = next(get_vector_db())
             vector_service = PgVectorIngestionService(vector_db)
             vector_service.ingest_documents(tenant_id, documents, ingestion_id=ingestion_id)
             vector_db.close()
-            
+
+            logger.info(
+                "✅ Background ingestion completed successfully",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                document_count=len(documents)
+            )
+        else:
+            logger.warning(
+                "No documents extracted from website",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id
+            )
+
     except Exception as e:
-        print(f"Background ingestion failed: {e}")
+        logger.error(
+            "❌ Background ingestion failed with exception",
+            tenant_id=tenant_id,
+            ingestion_id=ingestion_id,
+            website_url=website_url,
+            error=str(e),
+            error_type=type(e).__name__,
+            exc_info=True
+        )
+
         # Update ingestion status to failed
         try:
-            scraper = WebsiteScraper(db)
+            from ..core.config import settings
+            scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
             ingestion = scraper.get_ingestion_status(tenant_id, ingestion_id)
             if ingestion:
                 ingestion.status = IngestionStatus.FAILED
                 ingestion.error_message = str(e)
                 ingestion.completed_at = datetime.now()
                 db.commit()
+
+                logger.info(
+                    "Updated ingestion status to FAILED",
+                    tenant_id=tenant_id,
+                    ingestion_id=ingestion_id
+                )
         except Exception as update_error:
-            print(f"Failed to update ingestion status: {update_error}")
+            logger.error(
+                "Failed to update ingestion status after failure",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                error=str(update_error),
+                error_type=type(update_error).__name__,
+                exc_info=True
+            )
+    finally:
+        # Always close the database session to prevent connection leaks
+        db.close()
+        logger.debug(
+            "Database session closed",
+            tenant_id=tenant_id,
+            ingestion_id=ingestion_id
+        )
 
 
 @router.get("/ingestions/{ingestion_id}/pages")
@@ -301,9 +394,9 @@ async def get_ingestion_pages(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get individual pages for website ingestion with pagination (requires Bearer token authentication)"""
-    
+
     # Verify ingestion belongs to tenant
-    scraper = WebsiteScraper(db)
+    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
@@ -360,9 +453,9 @@ async def get_ingestion_stats(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get detailed statistics for a website ingestion (requires Bearer token authentication)"""
-    
+
     # Verify ingestion belongs to tenant
-    scraper = WebsiteScraper(db)
+    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
@@ -447,9 +540,9 @@ async def get_page_content_preview(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get content preview for a specific page (requires Bearer token authentication)"""
-    
+
     # Verify ingestion belongs to tenant
-    scraper = WebsiteScraper(db)
+    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:

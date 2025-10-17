@@ -56,7 +56,7 @@ async def upload_document_with_categorization(
         vector_service.ingest_documents(claims.tenant_id, documents, document_id)
 
         # Get tenant details
-        tenant_details = await get_full_tenant_details(claims.tenant_id)
+        tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
 
         return {
             "message": "Document uploaded and categorized successfully",
@@ -172,7 +172,7 @@ async def replace_document(
         vector_service.ingest_documents(claims.tenant_id, new_documents, document_id)
         
         # Get tenant details if needed
-        tenant_details = await get_full_tenant_details(claims.tenant_id)
+        tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
         
         return {
             "message": "Document replaced successfully",
@@ -381,7 +381,7 @@ async def view_document(
                 content_preview = "Preview not available"
         
         # Get tenant details if needed
-        tenant_details = await get_full_tenant_details(claims.tenant_id)
+        tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
         
         return {
             "document_id": existing_doc.id,

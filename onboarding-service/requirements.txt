@@ -34,3 +34,4 @@ pypdf
 pika>=1.3.0
 pyjwt>=2.8.0,<3.0.0
 httpx>=0.25.2,<1.0.0
+playwright>=1.55.0

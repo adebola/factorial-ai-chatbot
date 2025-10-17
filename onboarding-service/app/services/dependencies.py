@@ -53,6 +53,15 @@ async def validate_token(
         )
 
     token = credentials.credentials
+
+    # Check for invalid token values (null, undefined, empty strings)
+    if not token or token in ["null", "undefined", "none", "None"]:
+        logger.warning(f"Invalid token value received: '{token}'")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
     
     try:
         # Use local JWT validation for low latency
@@ -87,8 +96,7 @@ async def validate_token(
             authorities=token_info.get("authorities", []),
             access_token=token  # Store the raw access token
         )
-        
-        logger.debug(f"Token validated for tenant: {tenant_id}, user: {user_id}")
+
         return claims
         
     except HTTPException:
@@ -235,6 +243,10 @@ async def validate_jwt_locally(token: str) -> Dict[str, Any]:
     Validate JWT token locally using cached RSA public keys.
     This provides sub-millisecond latency without network calls.
     """
+    # DEBUG: Log token format for troubleshooting
+    token_preview = token[:50] if token and len(token) > 50 else token
+    logger.debug(f"validate_jwt_locally called with token type: {type(token).__name__}, starts with: '{token_preview}'")
+
     # Check Redis cache first (shared across all services)
     cached_info = await redis_token_cache.get(token)
     if cached_info:
@@ -246,6 +258,7 @@ async def validate_jwt_locally(token: str) -> Dict[str, Any]:
     # Cache miss - validate token locally
     try:
         # Use local JWT validation with RSA public keys
+        logger.debug(f"Cache miss, validating token locally")
         token_info = await jwt_validator.validate_token(token)
 
         # Cache the validated token info in Redis for all services

@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     # Scraping Defaults (non-sensitive)
     MAX_PAGES_PER_SITE: int = 100
     SCRAPING_DELAY: float = 1.0
+
+    # Scraping Strategy Configuration
+    SCRAPING_STRATEGY: str = "auto"  # auto | requests_first | playwright_only | requests_only
+    ENABLE_FALLBACK: bool = True  # Enable fallback to alternative scraper if primary fails
+    PLAYWRIGHT_TIMEOUT: int = 30000  # Playwright timeout in milliseconds (30 seconds)
+    REQUESTS_TIMEOUT: int = 10  # Requests timeout in seconds
+
+    # Deprecated (kept for backward compatibility)
+    USE_JAVASCRIPT_SCRAPING: bool = True
     
     # Password Policy (non-sensitive)
     PASSWORD_MIN_LENGTH: int = 8

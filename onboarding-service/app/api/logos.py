@@ -196,46 +196,72 @@ async def download_logo(
         )
 
 
+def _serve_tenant_logo(tenant_id: str, db: Session) -> Response:
+    """Helper function to serve tenant logo from MinIO storage"""
+    settings_service = SettingsService(db)
+    settings = settings_service.get_tenant_settings(tenant_id)
+
+    if not settings or not settings.company_logo_object_name:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Logo not found"
+        )
+
+    # Download logo from storage and serve it
+    logo_data = settings_service.storage_service.download_file(settings.company_logo_object_name)
+
+    # Determine content type based on file extension
+    _, ext = os.path.splitext(settings.company_logo_object_name)
+    content_type_map = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+        '.svg': 'image/svg+xml'
+    }
+    content_type = content_type_map.get(ext.lower(), 'image/jpeg')
+
+    return Response(
+        content=logo_data,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+            "ETag": f'"{tenant_id}-logo"'
+        }
+    )
+
+
 @router.get("/settings-logo/{tenant_id}")
 async def get_public_logo(
     tenant_id: str,
     db: Session = Depends(get_db)
 ) -> Response:
     """Public endpoint to serve logo files (no authentication required)"""
-    
+
     try:
-        settings_service = SettingsService(db)
-        settings = settings_service.get_tenant_settings(tenant_id)
-        
-        if not settings or not settings.company_logo_object_name:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Logo not found"
-            )
-        
-        # Download logo from storage and serve it
-        logo_data = settings_service.storage_service.download_file(settings.company_logo_object_name)
-        
-        # Determine content type based on file extension
-        _, ext = os.path.splitext(settings.company_logo_object_name)
-        content_type_map = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg', 
-            '.png': 'image/png',
-            '.webp': 'image/webp',
-            '.svg': 'image/svg+xml'
-        }
-        content_type = content_type_map.get(ext.lower(), 'image/jpeg')
-        
-        return Response(
-            content=logo_data,
-            media_type=content_type,
-            headers={
-                "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
-                "ETag": f'"{tenant_id}-logo"'
-            }
+        return _serve_tenant_logo(tenant_id, db)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to serve logo file: {str(e)}"
         )
-        
+
+
+@router.get("/public/logos/{tenant_id}")
+async def get_public_logo_alias(
+    tenant_id: str,
+    db: Session = Depends(get_db)
+) -> Response:
+    """
+    Public endpoint to serve logo files - alias for auth server proxy compatibility.
+    This endpoint matches the path expected by the auth server's LogoProxyController.
+    No authentication required.
+    """
+
+    try:
+        return _serve_tenant_logo(tenant_id, db)
     except HTTPException:
         raise
     except Exception as e:

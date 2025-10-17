@@ -20,7 +20,8 @@ public class Tenant {
     private String apiKey;
     private JsonNode config; // JSON configuration as JsonNode
     private String planId;
-    
+    private String subscriptionId; // Billing service subscription ID
+
     private Boolean isActive;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;

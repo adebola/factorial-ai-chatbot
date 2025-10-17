@@ -48,9 +48,12 @@ build_and_push() {
 }
 
 # Build and push all services
-build_and_push "gateway-service" "Dockerfile.gateway-service"
-build_and_push "chat-service" "Dockerfile.chat-service"
-build_and_push "onboarding-service" "Dockerfile.onboarding-service"
+build_and_push "gateway-service" "dockerfiles/gateway-service.Dockerfile"
+build_and_push "chat-service" "dockerfiles/chat-service.Dockerfile"
+build_and_push "onboarding-service" "dockerfiles/onboarding-service.Dockerfile"
+build_and_push "communications-service" "dockerfiles/communications-service.Dockerfile"
+build_and_push "billing-service" "dockerfiles/billing-service.Dockerfile"
+build_and_push "workflow-service" "dockerfiles/workflow-service.Dockerfile"
 
 echo ""
 echo "🎉 All images built and pushed successfully!"
@@ -59,5 +62,8 @@ echo "📋 Images created:"
 echo "   - $DOCKER_USERNAME/gateway-service:$VERSION"
 echo "   - $DOCKER_USERNAME/chat-service:$VERSION"
 echo "   - $DOCKER_USERNAME/onboarding-service:$VERSION"
+echo "   - $DOCKER_USERNAME/communications-service:$VERSION"
+echo "   - $DOCKER_USERNAME/billing-service:$VERSION"
+echo "   - $DOCKER_USERNAME/workflow-service:$VERSION"
 echo ""
 echo "🚀 Ready for deployment with: docker-compose up -d"

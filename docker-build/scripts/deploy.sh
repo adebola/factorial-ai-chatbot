@@ -94,12 +94,12 @@ sleep 10
 
 # Step 7: Run database migrations
 info "Running database migrations..."
-docker-compose -f "$COMPOSE_FILE" up chat-migration onboarding-migration
+docker-compose -f "$COMPOSE_FILE" up chat-migration onboarding-migration billing-migration
 success "Database migrations completed"
 
 # Step 8: Start application services
 info "Starting application services..."
-docker-compose -f "$COMPOSE_FILE" up -d chat-service onboarding-service
+docker-compose -f "$COMPOSE_FILE" up -d chat-service onboarding-service communications-service billing-service workflow-service
 success "Application services started"
 
 # Wait for services to be ready
@@ -152,6 +152,29 @@ else
     services_healthy=false
 fi
 
+# Check Communications Service
+if curl -f -s http://localhost:8003/health > /dev/null 2>&1; then
+    success "Communications Service is healthy"
+else
+    warning "Communications Service health check failed"
+fi
+
+# Check Billing Service
+if curl -f -s http://localhost:8004/health > /dev/null 2>&1; then
+    success "Billing Service is healthy"
+else
+    error "Billing Service health check failed"
+    services_healthy=false
+fi
+
+# Check Workflow Service
+if curl -f -s http://localhost:8002/health > /dev/null 2>&1; then
+    success "Workflow Service is healthy"
+else
+    error "Workflow Service health check failed"
+    services_healthy=false
+fi
+
 # Check Gateway Service
 if curl -f -s http://localhost:8080/actuator/health > /dev/null 2>&1; then
     success "Gateway Service is healthy"
@@ -166,6 +189,10 @@ if [ "$services_healthy" = true ]; then
     echo "   🌐 Main Application: http://localhost:8080"
     echo "   💬 Chat Service: http://localhost:8000"
     echo "   📝 Onboarding Service: http://localhost:8001"
+    echo "   🔄 Workflow Service: http://localhost:8002"
+    echo "   📧 Communications Service: http://localhost:8003"
+    echo "   💳 Billing Service: http://localhost:8004"
+    echo "   🔐 Authorization Server: http://localhost:9000"
     echo "   📁 MinIO Console: http://localhost:9001"
     echo ""
     info "📋 Useful commands:"
