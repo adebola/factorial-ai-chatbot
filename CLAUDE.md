@@ -472,7 +472,7 @@ echo "redis==5.0.1" >> onboarding-service/requirements.txt
 **CRITICAL**: Only clean up processes that Claude Code starts during testing:
 
 1. **Before Testing**: Note any running services on target ports (8000, 8001, 9000) - these belong to the user
-2. **During Testing**: 
+2. **During Testing**:
    - If you need to kill user processes to run tests, that's acceptable
    - Keep track of which processes YOU start during testing
 3. **After Testing**: **ONLY** kill processes that YOU started during the exercise
@@ -492,6 +492,46 @@ echo "redis==5.0.1" >> onboarding-service/requirements.txt
 - ✅ Temporary Kill: User processes needed for testing (they can restart them)
 
 **Why this matters**: The user needs to manage their own development workflow. Only clean up what you created.
+
+### Test File Management for FastAPI Projects
+**CRITICAL - NEVER DELETE TEST FILES**: When creating test files for FastAPI projects:
+
+1. **Always create test files in the `tests/` folder** of the appropriate service
+2. **NEVER delete test files after creation** - the user will decide which tests to keep or remove
+3. **Keep all test files permanently** - even after testing is complete
+
+**Test File Organization**:
+```
+service-name/
+├── app/
+│   ├── api/
+│   ├── models/
+│   └── services/
+└── tests/
+    ├── test_api_plans.py          # Keep forever
+    ├── test_api_subscriptions.py  # Keep forever
+    ├── test_service_plan.py       # Keep forever
+    └── test_integration.py        # Keep forever
+```
+
+**Why this is critical**:
+- Test files are valuable documentation of expected behavior
+- They serve as regression tests for future changes
+- The user maintains the test suite and decides what to keep
+- Deleting tests removes valuable coverage and documentation
+- Tests can be run repeatedly during development
+
+**What NOT to do**:
+- ❌ Delete test files after running them
+- ❌ Delete test files to "clean up" after implementation
+- ❌ Remove tests that are "no longer needed"
+- ❌ Delete tests because the feature is complete
+
+**What TO do**:
+- ✅ Create test files in `tests/` directory
+- ✅ Leave all test files in place after creation
+- ✅ Let the user decide which tests to keep or delete
+- ✅ Add new tests as features are added
 
 ## Spring Boot Development Guidelines
 
