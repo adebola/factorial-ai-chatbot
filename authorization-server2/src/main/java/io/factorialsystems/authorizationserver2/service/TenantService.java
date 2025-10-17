@@ -22,6 +22,7 @@ public class TenantService {
     private final RedisCacheService cacheService;
     private final OnboardingServiceClient onboardingServiceClient;
     private final TenantSettingsService tenantSettingsService;
+    private final UserCreationPublisher userCreationPublisher;
     private static final SecureRandom secureRandom = new SecureRandom();
     private static final String ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -148,7 +149,18 @@ public class TenantService {
             log.error("Failed to create default settings for tenant: {} - {}", tenant.getId(), e.getMessage());
             throw new RuntimeException("Failed to create default tenant settings: " + e.getMessage(), e);
         }
-        
+
+        // Publish user creation event to billing service for automatic subscription creation
+        try {
+            boolean published = userCreationPublisher.publishUserCreated(tenant.getId(), tenant.getCreatedAt());
+            if (!published) {
+                log.warn("Failed to publish user.created event for tenant {} - subscription may need to be created manually", tenant.getId());
+            }
+        } catch (Exception e) {
+            log.error("Error publishing user.created event for tenant {}: {}", tenant.getId(), e.getMessage());
+            // Don't fail tenant creation if event publishing fails
+        }
+
         return tenant;
     }
     
