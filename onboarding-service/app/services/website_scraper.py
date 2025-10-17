@@ -260,7 +260,8 @@ class WebsiteScraper:
                     )
 
                     # Update database with progress for UI polling
-                    ingestion.pages_discovered = len(visited_urls)
+                    # pages_discovered = total unique URLs found (visited + still in queue)
+                    ingestion.pages_discovered = len(visited_urls) + len(urls_to_visit)
                     ingestion.pages_processed = pages_processed
                     ingestion.pages_failed = pages_failed
                     self.db.commit()
@@ -271,7 +272,8 @@ class WebsiteScraper:
             # Final update
             total_duration = time.time() - start_time
             ingestion.status = IngestionStatus.COMPLETED
-            ingestion.pages_discovered = len(visited_urls)
+            # pages_discovered = total unique URLs found (visited + any remaining in queue)
+            ingestion.pages_discovered = len(visited_urls) + len(urls_to_visit)
             ingestion.pages_processed = pages_processed
             ingestion.pages_failed = pages_failed
             ingestion.completed_at = datetime.now()
