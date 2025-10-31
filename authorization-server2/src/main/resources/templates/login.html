@@ -29,13 +29,26 @@
             </div>
 
             <!-- Success Message -->
-            <div th:if="${successMessage}" class="alert alert-success" role="alert">
+            <div th:if="${successMessage}" class="alert alert-success" role="alert" id="successAlert">
                 <span th:text="${successMessage}">Success message</span>
             </div>
 
             <!-- Error Message -->
-            <div th:if="${errorMessage}" class="alert alert-danger" role="alert">
+            <div th:if="${errorMessage}" class="alert alert-danger" role="alert" id="errorAlert">
                 <span th:text="${errorMessage}">Error message</span>
+
+                <!-- Resend Verification Button for Unverified Users -->
+                <div th:if="${errorType == 'unverified' and unverifiedUserId != null}" class="mt-3">
+                    <button type="button"
+                            class="btn btn-secondary btn-block"
+                            id="resendVerificationBtn"
+                            th:attr="data-user-id=${unverifiedUserId}">
+                        Resend Verification Email
+                    </button>
+                    <p class="text-muted mt-2 small">
+                        <span th:if="${unverifiedEmail}">We'll send a new verification link to <strong th:text="${unverifiedEmail}"></strong></span>
+                    </p>
+                </div>
             </div>
 
             <!-- Login Form -->
@@ -52,6 +65,7 @@
                            class="form-control"
                            id="username"
                            name="username"
+                           th:value="${username}"
                            required
                            autocomplete="username"
                            placeholder="Enter your username or email">
@@ -108,6 +122,78 @@
             btn.classList.add('btn-loading');
             btn.disabled = true;
         });
+
+        // Handle resend verification button
+        const resendBtn = document.getElementById('resendVerificationBtn');
+        if (resendBtn) {
+            resendBtn.addEventListener('click', async function() {
+                const userId = this.getAttribute('data-user-id');
+                const originalText = this.textContent;
+
+                // Disable button and show loading state
+                this.disabled = true;
+                this.textContent = 'Sending...';
+
+                try {
+                    // Get CSRF token
+                    const csrfToken = document.querySelector('input[name="_csrf"]').value;
+
+                    // Send request to resend verification
+                    const response = await fetch('/resend-verification?userId=' + encodeURIComponent(userId), {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-CSRF-TOKEN': csrfToken
+                        }
+                    });
+
+                    const result = await response.json();
+
+                    // Remove error alert if it exists
+                    const errorAlert = document.getElementById('errorAlert');
+                    if (errorAlert) {
+                        errorAlert.remove();
+                    }
+
+                    // Show success message
+                    if (result.success) {
+                        const successDiv = document.createElement('div');
+                        successDiv.className = 'alert alert-success';
+                        successDiv.role = 'alert';
+                        successDiv.textContent = result.message;
+                        document.querySelector('.auth-card-header').after(successDiv);
+
+                        // Hide the resend button after successful send
+                        this.style.display = 'none';
+                    } else {
+                        // Show error message
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'alert alert-danger';
+                        errorDiv.role = 'alert';
+                        errorDiv.textContent = result.message;
+                        document.querySelector('.auth-card-header').after(errorDiv);
+
+                        // Re-enable button
+                        this.disabled = false;
+                        this.textContent = originalText;
+                    }
+                } catch (error) {
+                    console.error('Error resending verification:', error);
+
+                    // Show error message
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'alert alert-danger';
+                    errorDiv.role = 'alert';
+                    errorDiv.textContent = 'An error occurred. Please try again later.';
+                    document.querySelector('.auth-card-header').after(errorDiv);
+
+                    // Re-enable button
+                    this.disabled = false;
+                    this.textContent = originalText;
+                }
+            });
+        }
+
         // Focus first input
         document.getElementById('username').focus();
     </script>

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="${pageTitle != null ? pageTitle + ' - ChatCraft Auth' : 'Email Verification - ChatCraft Auth'}">Email Verification - ChatCraft Auth</title>
+
+    <!-- Inline CSS to ensure styling always works -->
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #333;
+        }
+
+        .verification-container {
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        .verification-icon {
+            margin: 0 auto 24px auto;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .success-icon {
+            background: #d4edda;
+            border-radius: 50%;
+        }
+
+        .error-icon {
+            background: #f8d7da;
+            border-radius: 50%;
+        }
+
+        .warning-icon {
+            background: #fff3cd;
+            border-radius: 50%;
+        }
+
+        h1 {
+            font-size: 1.8rem;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }
+
+        .text-success {
+            color: #155724;
+        }
+
+        .text-danger {
+            color: #721c24;
+        }
+
+        .text-warning {
+            color: #856404;
+        }
+
+        .message {
+            font-size: 1.1rem;
+            line-height: 1.6;
+            margin-bottom: 32px;
+            color: #6c757d;
+        }
+
+        .verification-actions {
+            margin-top: 24px;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 14px 28px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            border: none;
+            cursor: pointer;
+            margin: 0 8px 8px 0;
+        }
+
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #545b62;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(108, 117, 125, 0.3);
+        }
+
+        .btn-lg {
+            padding: 16px 32px;
+            font-size: 1.1rem;
+        }
+
+        .help-text {
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .help-text p {
+            color: #6c757d;
+            font-size: 0.95rem;
+            margin-bottom: 8px;
+        }
+
+        .help-text small {
+            color: #6c757d;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
+        .success-message {
+            margin-top: 16px;
+            color: #28a745;
+            font-weight: 500;
+        }
+
+        /* Responsive design */
+        @media (max-width: 480px) {
+            .verification-container {
+                padding: 30px 20px;
+            }
+
+            h1 {
+                font-size: 1.5rem;
+            }
+
+            .btn {
+                display: block;
+                width: 100%;
+                margin: 8px 0;
+            }
+        }
+
+        /* Animation for icons */
+        .verification-icon {
+            animation: fadeInScale 0.6s ease-out;
+        }
+
+        @keyframes fadeInScale {
+            0% {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        /* Default fallback styles */
+        .fallback-message {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="verification-container">
+        <!-- Success State -->
+        <div th:if="${success == true}">
+            <div class="verification-icon success-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="#28a745"/>
+                </svg>
+            </div>
+
+            <h1 class="text-success">Email Verified Successfully!</h1>
+            <p class="message" th:text="${message != null ? message : 'Your email has been verified and your account is now active.'}">
+                Your email has been verified and your account is now active.
+            </p>
+
+            <div class="verification-actions">
+                <a th:href="@{/login}" href="/login" class="btn btn-primary btn-lg">
+                    Sign In to Your Account
+                </a>
+                <p class="success-message">
+                    🎉 Welcome to ChatCraft! Your account is ready to use.
+                </p>
+            </div>
+        </div>
+
+        <!-- Error State -->
+        <div th:if="${success == false}">
+            <div class="verification-icon error-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="#dc3545"/>
+                </svg>
+            </div>
+
+            <h1 class="text-danger">Email Verification Failed</h1>
+            <p class="message" th:text="${message != null ? message : 'We could not verify your email. The link may have expired or already been used.'}">
+                We could not verify your email. The link may have expired or already been used.
+            </p>
+
+            <div class="verification-actions">
+                <a th:href="@{/register}" href="/register" class="btn btn-primary">
+                    Register Again
+                </a>
+                <a th:href="@{/}" href="/" class="btn btn-secondary">
+                    Go to Home
+                </a>
+            </div>
+
+            <div class="help-text">
+                <p><strong>Need help?</strong></p>
+                <small>
+                    If you continue to have issues with email verification, please contact our support team.
+                    Common issues include expired links, already verified accounts, or technical problems.
+                </small>
+            </div>
+        </div>
+
+        <!-- Fallback State (if no success attribute is set or null) -->
+        <div th:if="${success != true and success != false}">
+            <div class="verification-icon warning-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z" fill="#ffc107"/>
+                </svg>
+            </div>
+
+            <h1 class="text-warning">Email Verification</h1>
+            <div class="fallback-message">
+                <p><strong>Processing your verification request...</strong></p>
+                <p th:text="${message != null ? message : 'There was an issue processing your email verification. Please try again or contact support if the problem persists.'}">
+                    There was an issue processing your email verification. Please try again or contact support if the problem persists.
+                </p>
+            </div>
+
+            <div class="verification-actions">
+                <a th:href="@{/register}" href="/register" class="btn btn-primary">
+                    Try Registration Again
+                </a>
+                <a th:href="@{/}" href="/" class="btn btn-secondary">
+                    Go to Home
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

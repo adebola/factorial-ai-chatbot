@@ -62,9 +62,13 @@ authorization:
         - https://app.chatcraft.cc
         - https://factorai-370af.web.app
         - http://gateway-service:8080
-      location: https://ai.factorialsystems.io/auth
+      location: https://api.chatcraft.cc/auth
 
 # External service URLs
 onboarding:
   service:
     url: http://onboarding-service:8001
+
+billing:
+  service:
+    url: http://billing-service:8000

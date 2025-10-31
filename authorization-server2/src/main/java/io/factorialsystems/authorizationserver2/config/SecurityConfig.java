@@ -1,6 +1,7 @@
 package io.factorialsystems.authorizationserver2.config;
 
 import io.factorialsystems.authorizationserver2.model.Role;
+import io.factorialsystems.authorizationserver2.security.CustomAuthenticationFailureHandler;
 import io.factorialsystems.authorizationserver2.service.DatabaseUserDetailsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,11 +9,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.ProviderManager;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.authorization.OAuth2TokenType;
@@ -85,17 +90,22 @@ public class SecurityConfig {
 		return http.build();
 	}
 
-	@Bean 
+	@Bean
 	@Order(3)
-	SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http)
+	SecurityFilterChain defaultSecurityFilterChain(
+			HttpSecurity http,
+			AuthenticationManager authenticationManager,
+			CustomAuthenticationFailureHandler customAuthenticationFailureHandler)
 			throws Exception {
 		http
 			.cors(withDefaults()) // Enable CORS for default endpoints
 			.authorizeHttpRequests((authorize) -> authorize
-				.requestMatchers("/error", "/login", "/register", "/verify-email", "/verify-email-test-success", "/verify-email-test-failure", "/verify-email-test-fallback", "/verification-status", "/js/**", "/css/**", "/image/**", "/images/**", "/webjars/**", "/favicon.ico").permitAll()
+				.requestMatchers("/error", "/login", "/register", "/resend-verification", "/verify-email", "/verify-email-test-success", "/verify-email-test-failure", "/verify-email-test-fallback", "/verification-status", "/js/**", "/css/**", "/image/**", "/images/**", "/webjars/**", "/favicon.ico").permitAll()
 				.anyRequest().authenticated())
+			.authenticationManager(authenticationManager) // Use configured AuthenticationManager
 			.formLogin(formLogin -> formLogin
 				.loginPage("/login")
+				.failureHandler(customAuthenticationFailureHandler) // Use custom failure handler
 				.permitAll()
 			);
 		return http.build();
@@ -111,6 +121,19 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return PasswordEncoderFactories.createDelegatingPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(
+            UserDetailsService userDetailsService,
+            PasswordEncoder passwordEncoder) {
+        DaoAuthenticationProvider authenticationProvider = new DaoAuthenticationProvider();
+        authenticationProvider.setUserDetailsService(userDetailsService);
+        authenticationProvider.setPasswordEncoder(passwordEncoder);
+
+        log.info("Configured AuthenticationManager with DatabaseUserDetailsService and DelegatingPasswordEncoder");
+
+        return new ProviderManager(authenticationProvider);
     }
 
     @Bean

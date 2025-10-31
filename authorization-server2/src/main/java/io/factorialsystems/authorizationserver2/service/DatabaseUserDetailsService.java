@@ -1,5 +1,6 @@
 package io.factorialsystems.authorizationserver2.service;
 
+import io.factorialsystems.authorizationserver2.exception.UserNotVerifiedException;
 import io.factorialsystems.authorizationserver2.mapper.UserMapper;
 import io.factorialsystems.authorizationserver2.model.Role;
 import io.factorialsystems.authorizationserver2.model.User;
@@ -37,6 +38,17 @@ public class DatabaseUserDetailsService implements UserDetailsService {
             throw new UsernameNotFoundException("User not found with username: " + username);
         }
 
+        // Check if email is verified
+        if (!user.getIsEmailVerified()) {
+            log.warn("Login attempt with unverified email for user: {} ({})", username, user.getId());
+            throw new UserNotVerifiedException(
+                "Your email address has not been verified. Please check your email for the verification link.",
+                user.getId(),
+                user.getEmail(),
+                user.getUsername()
+            );
+        }
+
         if (!user.getIsActive()) {
             log.error("User account is disabled: {}", username);
             throw new UsernameNotFoundException("User account is disabled: " + username);
@@ -56,6 +68,17 @@ public class DatabaseUserDetailsService implements UserDetailsService {
      */
     public record CustomUserPrincipal(User user) implements UserDetails {
 
+        /**
+         * Convert user roles to Spring Security authorities.
+         * Roles are prefixed with "ROLE_" for Spring Security conventions.
+         *
+         * Current roles:
+         * - TENANT_ADMIN → ROLE_TENANT_ADMIN (tenant/organization admin)
+         *
+         * Future roles:
+         * - SYSTEM_ADMIN → ROLE_SYSTEM_ADMIN (system-wide admin, not yet implemented)
+         *   ROLE_SYSTEM_ADMIN will provide oversight across all tenants in the system.
+         */
         @Override
         public Collection<? extends GrantedAuthority> getAuthorities() {
             if (user.getRoles() == null || user.getRoles().isEmpty()) {

@@ -1,9 +1,9 @@
 /* FactorialBot Authorization Server Styles */
 
 :root {
-    --primary-color: #2B55FF;
-    --primary-hover: #1A3FCC;
-    --secondary-color: #CDF547;
+    --primary-color: #5D3EC1;
+    --primary-hover: #4A31A0;
+    --secondary-color: #C15D3E;
     --success-color: #3EC15D;
     --danger-color: #dc3545;
     --warning-color: #ffc107;
@@ -127,7 +127,7 @@ body {
 .form-control:focus {
     border-color: var(--primary-color);
     outline: 0;
-    box-shadow: 0 0 0 0.2rem rgba(43, 85, 255, 0.25);
+    box-shadow: 0 0 0 0.2rem rgba(93, 62, 193, 0.25);
 }
 
 .form-control.is-invalid {

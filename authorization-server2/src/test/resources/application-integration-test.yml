@@ -1,0 +1,60 @@
+# Integration Test Configuration
+# This configuration is used for integration tests that send real emails
+
+spring:
+  # RabbitMQ Configuration (using default guest credentials)
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+    connection-timeout: 5000
+    template:
+      retry:
+        enabled: true
+        initial-interval: 1000
+        max-attempts: 3
+        max-interval: 10000
+        multiplier: 2
+
+# Authorization Server Configuration
+authorization:
+  config:
+    rabbitmq:
+      exchange:
+        name: topic-exchange
+        type: topic
+        durable: true
+        auto-delete: false
+      queue:
+        name: email-notification-queue
+        durable: true
+        exclusive: false
+        auto-delete: false
+      key:
+        email-notification: email.notification
+    security:
+      # Update this to match your environment
+      location: https://api.chatcraft.cc/auth
+      # For local testing, use:
+      # location: http://localhost:9002/auth
+
+# Logging Configuration for Integration Tests
+logging:
+  level:
+    io.factorialsystems.authorizationserver2.service: DEBUG
+    org.springframework.amqp: DEBUG
+    org.springframework.amqp.rabbit: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+
+# Test Email Configuration
+test:
+  email:
+    # Default recipient for test emails (override in test if needed)
+    recipient: adebola@factorialsystems.io
+    # Whether to actually send emails (set to false to just log)
+    send-enabled: true
+    # Delay between multiple email sends (milliseconds)
+    send-delay: 1000

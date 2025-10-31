@@ -69,3 +69,7 @@ authorization:
 onboarding:
   service:
     url: http://localhost:8001
+
+billing:
+  service:
+    url: http://localhost:8004

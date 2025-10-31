@@ -20,7 +20,7 @@ public class TenantService {
     private final RabbitTemplate rabbitTemplate;
     private final TenantMapper tenantMapper;
     private final RedisCacheService cacheService;
-    private final OnboardingServiceClient onboardingServiceClient;
+    private final BillingServiceClient billingServiceClient;
     private final TenantSettingsService tenantSettingsService;
     private final UserCreationPublisher userCreationPublisher;
     private static final SecureRandom secureRandom = new SecureRandom();
@@ -104,13 +104,13 @@ public class TenantService {
             apiKey = generateApiKey();
         }
         
-        // Get free-tier plan ID from onboarding service
+        // Get free-tier plan ID from billing service
         String freePlanId = null;
         try {
-            freePlanId = onboardingServiceClient.getFreeTierPlanId();
-            log.info("Retrieved free-tier plan ID: {} for new tenant", freePlanId);
+            freePlanId = billingServiceClient.getFreeTierPlanId();
+            log.info("Retrieved free-tier plan ID from billing service: {} for new tenant", freePlanId);
         } catch (Exception e) {
-            log.warn("Failed to retrieve free-tier plan ID, tenant will be created without plan: {}", e.getMessage());
+            log.warn("Failed to retrieve free-tier plan ID from billing service, tenant will be created without plan: {}", e.getMessage());
             // Continue creating tenant without plan - plan can be assigned later
         }
         
