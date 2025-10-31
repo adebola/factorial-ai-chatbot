@@ -10,6 +10,7 @@ from ..services.document_processor import DocumentProcessor
 from ..services.pg_vector_ingestion import PgVectorIngestionService
 from ..services.categorized_vector_store import CategorizedVectorStore
 from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
+from ..services.billing_client import BillingClient
 
 router = APIRouter()
 
@@ -38,6 +39,20 @@ async def upload_document_with_categorization(
             detail=f"Unsupported file type: {file.content_type}"
         )
 
+    # Check document upload limit via Billing Service API
+    # This happens BEFORE processing to avoid wasted resources
+    billing_client = BillingClient(claims.access_token)
+    limit_check = await billing_client.check_usage_limit("documents")
+
+    if not limit_check.get("allowed", False):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=limit_check.get(
+                "reason",
+                "Document upload limit exceeded. Please upgrade your plan to upload more documents."
+            )
+        )
+
     try:
         # Process document with categorization
         doc_processor = DocumentProcessor(db)
@@ -57,6 +72,9 @@ async def upload_document_with_categorization(
 
         # Get tenant details
         tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
+
+        # Note: Usage tracking events are now published by the Billing Service
+        # The billing service monitors document creation through its own mechanisms
 
         return {
             "message": "Document uploaded and categorized successfully",
@@ -216,13 +234,26 @@ async def delete_document(
         
         # Delete document (this also removes from storage)
         success = doc_processor.delete_document(claims.tenant_id, document_id)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete document"
             )
-        
+
+        # Publish usage event for document deletion (fire-and-forget)
+        try:
+            usage_publisher.connect()
+            usage_publisher.publish_document_deleted(
+                tenant_id=claims.tenant_id,
+                document_id=document_id
+            )
+        except Exception as e:
+            # Log but don't fail the request
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to publish document deleted event: {e}")
+
         return {
             "message": "Document deleted successfully",
             "document_id": document_id,
@@ -269,13 +300,29 @@ async def delete_multiple_documents(
         # Delete all documents
         deleted_count = 0
         failed_ids = []
-        
+        successfully_deleted_ids = []
+
         for document_id in document_ids:
             success = doc_processor.delete_document(claims.tenant_id, document_id)
             if success:
                 deleted_count += 1
+                successfully_deleted_ids.append(document_id)
             else:
                 failed_ids.append(document_id)
+
+        # Publish usage events for all successfully deleted documents (fire-and-forget)
+        try:
+            usage_publisher.connect()
+            for document_id in successfully_deleted_ids:
+                usage_publisher.publish_document_deleted(
+                    tenant_id=claims.tenant_id,
+                    document_id=document_id
+                )
+        except Exception as e:
+            # Log but don't fail the request
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to publish document deleted events: {e}")
         
         result = {
             "message": f"Deleted {deleted_count} of {len(document_ids)} documents",

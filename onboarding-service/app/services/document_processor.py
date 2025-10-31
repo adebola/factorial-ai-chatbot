@@ -3,8 +3,8 @@ from langchain_community.document_loaders import (
     TextLoader,
     Docx2txtLoader
 )
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.docstore.document import Document
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 from typing import List, BinaryIO, Tuple, Optional, Dict
 import tempfile

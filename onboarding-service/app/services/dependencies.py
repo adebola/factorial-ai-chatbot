@@ -31,11 +31,15 @@ class TokenClaims:
 
     @property
     def is_admin(self) -> bool:
-        """Check if user has admin privileges"""
+        """
+        Check if user has tenant admin privileges.
+
+        Current role: ROLE_TENANT_ADMIN (tenant/organization admin)
+        Future role: ROLE_SYSTEM_ADMIN (system-wide admin, not yet implemented)
+        """
         if not self.authorities:
             return False
-        return any(role in ["ROLE_ADMIN", "ADMIN", "ROLE_TENANT_ADMIN", "TENANT_ADMIN"]
-                  for role in self.authorities)
+        return "ROLE_TENANT_ADMIN" in self.authorities
 
 
 async def validate_token(

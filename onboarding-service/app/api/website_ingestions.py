@@ -12,6 +12,7 @@ from ..services.pg_vector_ingestion import PgVectorIngestionService
 from ..services.dependencies import get_current_tenant, TokenClaims, validate_token, get_full_tenant_details
 from ..models.tenant import IngestionStatus, WebsitePage
 from ..core.logging_config import get_logger
+from ..services.billing_client import BillingClient
 
 router = APIRouter()
 logger = get_logger("website_ingestions")
@@ -24,14 +25,28 @@ async def ingest_website(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Start the website ingestion process (requires Bearer token authentication)"""
-    
+
     # Validate URL
     if not website_url.startswith(('http://', 'https://')):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid URL format"
         )
-    
+
+    # Check website ingestion limit via Billing Service API
+    # This happens BEFORE starting the expensive scraping process
+    billing_client = BillingClient(claims.access_token)
+    limit_check = await billing_client.check_usage_limit("websites")
+
+    if not limit_check.get("allowed", False):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=limit_check.get(
+                "reason",
+                "Website ingestion limit exceeded. Please upgrade your plan to ingest more websites."
+            )
+        )
+
     try:
         # Start scraping in the background
         scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
@@ -154,13 +169,24 @@ async def delete_ingestion(
         
         # Delete ingestion record (this could also clean up related pages)
         success = scraper.delete_ingestion(claims.tenant_id, ingestion_id)
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete ingestion"
             )
-        
+
+        # Publish usage event for website deletion (fire-and-forget)
+        try:
+            usage_publisher.connect()
+            usage_publisher.publish_website_deleted(
+                tenant_id=claims.tenant_id,
+                website_id=ingestion_id
+            )
+        except Exception as e:
+            # Log but don't fail the request
+            logger.warning(f"Failed to publish website deleted event: {e}")
+
         return {
             "message": "Website ingestion deleted successfully",
             "ingestion_id": ingestion_id,
@@ -332,6 +358,24 @@ async def background_website_ingestion(tenant_id: str, website_url: str, ingesti
                 ingestion_id=ingestion_id,
                 document_count=len(documents)
             )
+
+            # Publish usage event for website creation (fire-and-forget)
+            try:
+                usage_publisher.connect()
+                usage_publisher.publish_website_created(
+                    tenant_id=tenant_id,
+                    website_id=ingestion_id,
+                    url=website_url,
+                    pages_scraped=ingestion.pages_processed
+                )
+                logger.debug(
+                    "Published website created event",
+                    tenant_id=tenant_id,
+                    ingestion_id=ingestion_id
+                )
+            except Exception as e:
+                # Log but don't fail the ingestion
+                logger.warning(f"Failed to publish website created event: {e}")
         else:
             logger.warning(
                 "No documents extracted from website",

@@ -3,6 +3,7 @@ import base64
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from jinja2 import Template
+from jsmin import jsmin
 from ..services.dependencies import get_full_tenant_details, get_tenant_settings
 
 # Note: Tenant model removed - tenant management now in OAuth2 server
@@ -51,15 +52,15 @@ class WidgetService:
 
         # Determine environment and set appropriate URLs
         environment = os.getenv("ENVIRONMENT", "development").lower()
-        production_domain = os.getenv("PRODUCTION_DOMAIN", "ai.factorialsystems.io")
+        production_domain = os.getenv("PRODUCTION_DOMAIN", "api.chatcraft.cc")
 
         if environment == "production" or environment == "prod":
             # Production URLs
             backend_url = f"https://{production_domain}"
             chat_service_url = f"https://{production_domain}"
         else:
-            # Development URLs (fallback to existing behavior)
-            backend_url = os.getenv("BACKEND_URL", "http://localhost:8001")
+            # Development URLs - use gateway for backend requests
+            backend_url = os.getenv("BACKEND_URL", "http://localhost:8080")
             chat_service_url = os.getenv("CHAT_SERVICE_URL", "http://localhost:8000")
 
         context = {
@@ -82,8 +83,12 @@ class WidgetService:
             "production_domain": production_domain
         }
         
+        # Generate JavaScript
+        js_content = self._generate_javascript(context)
+
         return {
-            "chat-widget.js": self._generate_javascript(context),
+            "chat-widget.js": js_content,
+            "chat-widget.min.js": self._minify_javascript(js_content),
             "chat-widget.css": self._generate_css(context),
             "chat-widget.html": self._generate_html(context),
             "integration-guide.html": self._generate_integration_guide(context)
@@ -174,7 +179,24 @@ class WidgetService:
             "is_custom": False,
             "initials": initials
         }
-    
+
+    def _minify_javascript(self, js_code: str) -> str:
+        """
+        Minify JavaScript code to reduce file size
+
+        Args:
+            js_code: The JavaScript code to minify
+
+        Returns:
+            Minified JavaScript code
+        """
+        try:
+            return jsmin(js_code)
+        except Exception as e:
+            # If minification fails, return original code with a warning comment
+            print(f"Warning: JavaScript minification failed: {e}")
+            return f"/* Minification failed: {e} */\n{js_code}"
+
     def _generate_javascript(self, context: Dict[str, Any]) -> str:
         """Generate the main chat widget JavaScript"""
         js_template = """
@@ -221,7 +243,9 @@ class WidgetService:
             this.chatContainer = null;
             this.messagesContainer = null;
             this.inputField = null;
-            
+            this.sessionId = null;
+            this.feedbackSubmitted = new Set();
+
             this.init();
         }
         
@@ -543,7 +567,79 @@ class WidgetService:
                     0%, 60%, 100% { opacity: 0.3; }
                     30% { opacity: 1; }
                 }
-                
+
+                .factorial-feedback-container {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    margin-top: 8px;
+                    padding-top: 8px;
+                    border-top: 1px solid ${CONFIG.colors.lightGray};
+                }
+
+                .factorial-feedback-label {
+                    font-size: 12px;
+                    color: ${CONFIG.colors.darkGray};
+                    opacity: 0.7;
+                }
+
+                .factorial-feedback-btn {
+                    background: none;
+                    border: 1px solid ${CONFIG.colors.lightGray};
+                    border-radius: 50%;
+                    width: 28px;
+                    height: 28px;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all 0.2s ease;
+                    padding: 0;
+                }
+
+                .factorial-feedback-btn:hover:not(:disabled) {
+                    background: ${CONFIG.colors.gray};
+                    transform: scale(1.1);
+                }
+
+                .factorial-feedback-btn:disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+
+                .factorial-feedback-btn.helpful.active {
+                    background: #dcfce7;
+                    border-color: #16a34a;
+                }
+
+                .factorial-feedback-btn.not-helpful.active {
+                    background: #fee2e2;
+                    border-color: #dc2626;
+                }
+
+                .factorial-feedback-icon {
+                    width: 14px;
+                    height: 14px;
+                    fill: ${CONFIG.colors.darkGray};
+                }
+
+                .factorial-feedback-btn.helpful.active .factorial-feedback-icon {
+                    fill: #16a34a;
+                }
+
+                .factorial-feedback-btn.not-helpful.active .factorial-feedback-icon {
+                    fill: #dc2626;
+                }
+
+                .factorial-feedback-thanks {
+                    font-size: 11px;
+                    color: #16a34a;
+                    font-weight: 500;
+                    display: flex;
+                    align-items: center;
+                    gap: 4px;
+                }
+
                 @media (max-width: 480px) {
                     .factorial-chat-window {
                         width: calc(100vw - 40px);
@@ -676,7 +772,13 @@ class WidgetService:
                 this.socket.onmessage = (event) => {
                     const data = JSON.parse(event.data);
                     if (data.type === 'message' && data.role === 'assistant') {
-                        this.addMessage('bot', data.content);
+                        // Store session_id if provided
+                        if (data.session_id && !this.sessionId) {
+                            this.sessionId = data.session_id;
+                        }
+
+                        // Add message with messageId for feedback
+                        this.addMessage('bot', data.content, data.message_id);
 
                         // Handle choices if present (for workflow choice steps)
                         if (data.choices && data.choices.length > 0) {
@@ -687,6 +789,10 @@ class WidgetService:
                         this.enableSendButton();
                     } else if (data.type === 'connection') {
                         console.log('Connected to chat service:', data.message);
+                        // Extract session_id from connection message
+                        if (data.session_id) {
+                            this.sessionId = data.session_id;
+                        }
                     } else if (data.type === 'error') {
                         console.error('Chat service error:', data.message);
                         this.addMessage('bot', 'Sorry, I encountered an error. Please try again later.');
@@ -740,7 +846,7 @@ class WidgetService:
             }));
         }
         
-        addMessage(sender, content) {
+        addMessage(sender, content, messageId = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `factorial-chat-message ${sender}`;
 
@@ -749,6 +855,51 @@ class WidgetService:
             contentDiv.textContent = content;
 
             messageDiv.appendChild(contentDiv);
+
+            // Add feedback buttons for bot messages with messageId
+            if (sender === 'bot' && messageId && this.sessionId) {
+                const feedbackContainer = document.createElement('div');
+                feedbackContainer.className = 'factorial-feedback-container';
+                feedbackContainer.id = `feedback-${messageId}`;
+
+                // Check if feedback already submitted
+                const alreadySubmitted = this.feedbackSubmitted.has(messageId);
+
+                feedbackContainer.innerHTML = `
+                    <span class="factorial-feedback-label">Was this helpful?</span>
+                    <button class="factorial-feedback-btn helpful"
+                            data-message-id="${messageId}"
+                            data-feedback="helpful"
+                            ${alreadySubmitted ? 'disabled' : ''}>
+                        <svg class="factorial-feedback-icon" viewBox="0 0 24 24">
+                            <path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/>
+                        </svg>
+                    </button>
+                    <button class="factorial-feedback-btn not-helpful"
+                            data-message-id="${messageId}"
+                            data-feedback="not_helpful"
+                            ${alreadySubmitted ? 'disabled' : ''}>
+                        <svg class="factorial-feedback-icon" viewBox="0 0 24 24">
+                            <path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/>
+                        </svg>
+                    </button>
+                `;
+
+                // Add click handlers
+                const helpfulBtn = feedbackContainer.querySelector('.helpful');
+                const notHelpfulBtn = feedbackContainer.querySelector('.not-helpful');
+
+                helpfulBtn.addEventListener('click', (e) => {
+                    this.submitFeedback(messageId, 'helpful', feedbackContainer);
+                });
+
+                notHelpfulBtn.addEventListener('click', (e) => {
+                    this.submitFeedback(messageId, 'not_helpful', feedbackContainer);
+                });
+
+                contentDiv.appendChild(feedbackContainer);
+            }
+
             this.messagesContainer.appendChild(messageDiv);
 
             // Auto-scroll to bottom
@@ -820,8 +971,83 @@ class WidgetService:
                 sendButton.disabled = false;
             }
         }
+
+        submitFeedback(messageId, feedbackType, feedbackContainer) {
+            // Prevent duplicate submissions
+            if (!this.sessionId || !messageId || this.feedbackSubmitted.has(messageId)) {
+                return;
+            }
+
+            // Mark as submitted
+            this.feedbackSubmitted.add(messageId);
+
+            // Disable both buttons immediately
+            const buttons = feedbackContainer.querySelectorAll('.factorial-feedback-btn');
+            buttons.forEach(btn => btn.disabled = true);
+
+            // Determine which button was clicked for visual feedback
+            const clickedButton = feedbackContainer.querySelector(`.${feedbackType}`);
+            if (clickedButton) {
+                clickedButton.classList.add('active');
+            }
+
+            // Submit feedback to API (widget-specific endpoint)
+            fetch(`${CONFIG.backendUrl}/api/v1/feedback/widget/submit`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': CONFIG.apiKey
+                },
+                body: JSON.stringify({
+                    message_id: messageId,
+                    session_id: this.sessionId,
+                    feedback_type: feedbackType
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log('Feedback submitted successfully:', data);
+
+                // Replace buttons with thank you message
+                feedbackContainer.innerHTML = `
+                    <span class="factorial-feedback-thanks">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="#16a34a">
+                            <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                        </svg>
+                        Thank you for your feedback!
+                    </span>
+                `;
+            })
+            .catch(error => {
+                console.error('Error submitting feedback:', error);
+
+                // Re-enable buttons on error
+                this.feedbackSubmitted.delete(messageId);
+                buttons.forEach(btn => btn.disabled = false);
+                if (clickedButton) {
+                    clickedButton.classList.remove('active');
+                }
+
+                // Show error message
+                const label = feedbackContainer.querySelector('.factorial-feedback-label');
+                if (label) {
+                    const originalText = label.textContent;
+                    label.textContent = 'Failed to submit. Please try again.';
+                    label.style.color = '#dc2626';
+                    setTimeout(() => {
+                        label.textContent = originalText;
+                        label.style.color = '';
+                    }, 3000);
+                }
+            });
+        }
     }
-    
+
     // Initialize widget when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
@@ -1134,16 +1360,46 @@ class WidgetService:
     </div>
     
     <div class="section">
-        <h2>📋 Quick Start</h2>
-        <p>Follow these simple steps to add the FactorialBot chat widget to your website:</p>
-        
+        <h2>📋 Quick Start (Hosted Version - Recommended)</h2>
+        <p><strong>The easiest way to integrate!</strong> Load the widget directly from our servers - no files to download or maintain:</p>
+
+        <div class="highlight">
+            <strong>✨ Simply add this one line before your closing &lt;/body&gt; tag:</strong>
+        </div>
+
+        <div class="code-block">
+&lt;!-- FactorialBot Chat Widget (Hosted & Minified) --&gt;
+&lt;script src="{{ backend_url }}/api/v1/widget/js/{{ tenant_id }}"&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;
+        </div>
+
+        <div class="highlight">
+            <strong>Benefits of hosted version:</strong>
+            <ul>
+                <li>✅ Always up-to-date with latest features and fixes</li>
+                <li>✅ Minified for optimal performance (~15KB)</li>
+                <li>✅ Cached for fast loading (1 hour TTL)</li>
+                <li>✅ No files to download or maintain</li>
+                <li>✅ Works immediately - just paste and go!</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>📦 Alternative: Self-Hosted Version</h2>
+        <p>If you prefer to host the widget yourself, follow these steps:</p>
+
         <div class="steps">
             <div class="step">
                 <h3>Download the Widget Files</h3>
                 <p>Download the generated widget files for your organization:</p>
                 <div class="download-section">
                     <a href="/api/v1/widget/chat-widget.js" class="download-button" download>
-                        📄 chat-widget.js
+                        📄 chat-widget.js (Full)
+                    </a>
+                    <a href="/api/v1/widget/chat-widget.min.js" class="download-button" download>
+                        📄 chat-widget.min.js (Minified)
                     </a>
                     <a href="/api/v1/widget/chat-widget.css" class="download-button" download>
                         🎨 chat-widget.css
@@ -1153,24 +1409,24 @@ class WidgetService:
                     </a>
                 </div>
             </div>
-            
+
             <div class="step">
                 <h3>Upload to Your Website</h3>
-                <p>Upload the <code>chat-widget.js</code> file to your website's public directory (e.g., in a <code>/js/</code> or <code>/assets/</code> folder).</p>
+                <p>Upload the <code>chat-widget.min.js</code> file to your website's public directory (e.g., in a <code>/js/</code> or <code>/assets/</code> folder).</p>
             </div>
-            
+
             <div class="step">
                 <h3>Add the Script Tag</h3>
                 <p>Add the following script tag just before the closing <code>&lt;/body&gt;</code> tag of your HTML pages:</p>
-                
+
                 <div class="code-block">
-&lt;!-- FactorialBot Chat Widget --&gt;
-&lt;script src="/path/to/chat-widget.js"&gt;&lt;/script&gt;
+&lt;!-- FactorialBot Chat Widget (Self-Hosted) --&gt;
+&lt;script src="/path/to/chat-widget.min.js"&gt;&lt;/script&gt;
 &lt;/body&gt;
 &lt;/html&gt;
                 </div>
             </div>
-            
+
             <div class="step">
                 <h3>Test the Integration</h3>
                 <p>Refresh your website and look for the chat button in the bottom-right corner. Click it to test the chat functionality!</p>

@@ -369,7 +369,7 @@ async def classify_document(
         if classification_request.auto_categorize:
             # Get document content for AI classification
             from ..services.storage_service import StorageService
-            from langchain.docstore.document import Document
+            from langchain_core.documents import Document
 
             storage_service = StorageService()
             file_content = storage_service.download_file(document.file_path)

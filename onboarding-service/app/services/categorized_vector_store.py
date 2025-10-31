@@ -7,7 +7,7 @@ from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 
 import numpy as np
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 from sqlalchemy import text, and_, or_
 import openai

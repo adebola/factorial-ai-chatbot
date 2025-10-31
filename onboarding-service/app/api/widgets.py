@@ -28,6 +28,17 @@ async def generate_widget_files(
         widget_service = WidgetService(db)
         files = await widget_service.generate_widget_files(claims.tenant_id, claims.access_token)
         
+        # Determine backend URL for hosted integration
+        environment = os.getenv("ENVIRONMENT", "development").lower()
+        production_domain = os.getenv("PRODUCTION_DOMAIN", "api.chatcraft.cc")
+
+        if environment == "production" or environment == "prod":
+            backend_url = f"https://{production_domain}"
+        else:
+            backend_url = os.getenv("BACKEND_URL", "http://localhost:8080")
+
+        hosted_widget_url = f"{backend_url}/api/v1/widget/js/{claims.tenant_id}"
+
         return {
             "message": "Widget files generated successfully",
             "tenant_id": claims.tenant_id,
@@ -36,19 +47,23 @@ async def generate_widget_files(
             "generated_at": datetime.utcnow().isoformat(),
             "download_urls": {
                 "javascript": f"/api/v1/widget/chat-widget.js",
-                "css": f"/api/v1/widget/chat-widget.css", 
+                "javascript_minified": f"/api/v1/widget/chat-widget.min.js",
+                "css": f"/api/v1/widget/chat-widget.css",
                 "demo_html": f"/api/v1/widget/chat-widget.html",
                 "integration_guide": f"/api/v1/widget/integration-guide.html",
                 "download_all": f"/api/v1/widget/download-all"
             },
-            "integration_snippet": f'<script src="https://your-domain.com/path/to/chat-widget.js"></script>',
+            "hosted_widget_url": hosted_widget_url,
+            "integration_snippet_hosted": f'<script src="{hosted_widget_url}"></script>',
+            "integration_snippet_download": f'<script src="https://your-domain.com/path/to/chat-widget.js"></script>',
             "widget_features": [
                 "Real-time AI chat",
                 "Mobile responsive design",
                 "Custom branding with your colors",
                 "Secure WebSocket connection",
                 "Dark mode support",
-                "Lightweight and fast loading"
+                "Lightweight and fast loading",
+                "Minified for optimal performance"
             ]
         }
         
@@ -88,17 +103,46 @@ async def download_widget_javascript(
         )
 
 
+@router.get("/widget/chat-widget.min.js")
+async def download_widget_javascript_minified(
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db)
+):
+    """Download the minified chat widget JavaScript file"""
+
+    try:
+        widget_service = WidgetService(db)
+        files = await widget_service.generate_widget_files(claims.tenant_id, claims.access_token)
+
+        return Response(
+            content=files["chat-widget.min.js"],
+            media_type="application/javascript",
+            headers={
+                "Content-Disposition": f"attachment; filename=chat-widget-{claims.tenant_id[:8]}.min.js",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate minified JavaScript file: {str(e)}"
+        )
+
+
 @router.get("/widget/chat-widget.css")
 async def download_widget_css(
     claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ):
     """Download the chat widget CSS file"""
-    
+
     try:
         widget_service = WidgetService(db)
         files = await widget_service.generate_widget_files(claims.tenant_id, claims.access_token)
-        
+
         return Response(
             content=files["chat-widget.css"],
             media_type="text/css",
@@ -107,7 +151,7 @@ async def download_widget_css(
                 "Cache-Control": "no-cache, no-store, must-revalidate"
             }
         )
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -301,6 +345,52 @@ async def get_widget_status(
             "preview": f"/api/v1/widget/preview"
         }
     }
+
+
+@router.get("/widget/js/{tenant_id}")
+async def serve_hosted_widget_javascript(
+    tenant_id: str,
+    minified: bool = True,
+    db: Session = Depends(get_db)
+):
+    """
+    Serve hosted minified widget JavaScript for a specific tenant
+
+    This endpoint allows tenants to load the widget directly from the server
+    without downloading and hosting it themselves.
+
+    Usage:
+        <script src="https://api.chatcraft.cc/api/v1/widget/js/{tenant_id}"></script>
+
+    Query Parameters:
+        minified: Whether to serve minified version (default: True)
+    """
+
+    try:
+        widget_service = WidgetService(db)
+
+        # Generate widget files for the tenant (without authentication for public access)
+        # Note: This uses tenant_id directly, so no token validation required
+        files = await widget_service.generate_widget_files(tenant_id, access_token=None)
+
+        # Choose minified or full version
+        js_content = files["chat-widget.min.js"] if minified else files["chat-widget.js"]
+
+        return Response(
+            content=js_content,
+            media_type="application/javascript",
+            headers={
+                "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+                "Content-Type": "application/javascript; charset=utf-8",
+                "X-Content-Type-Options": "nosniff"
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to serve widget JavaScript: {str(e)}"
+        )
 
 
 @router.get("/widget/static/{filename}")

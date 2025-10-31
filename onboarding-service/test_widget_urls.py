@@ -4,7 +4,7 @@ Test script to verify widget URL generation for different environments.
 
 This script tests that the widget service generates correct URLs for:
 1. Development environment (localhost URLs)
-2. Production environment (ai.factorialsystems.io URLs)
+2. Production environment (api.chatcraft.cc URLs)
 """
 
 import os
@@ -89,7 +89,7 @@ def test_widget_url_generation():
 
         # Set production environment variables
         os.environ["ENVIRONMENT"] = "production"
-        os.environ["PRODUCTION_DOMAIN"] = "ai.factorialsystems.io"
+        os.environ["PRODUCTION_DOMAIN"] = "api.chatcraft.cc"
 
         # Generate widget files for production
         prod_files = asyncio.run(widget_service.generate_widget_files("test-tenant-123"))
@@ -98,13 +98,13 @@ def test_widget_url_generation():
         js_content = prod_files["chat-widget.js"]
 
         print("✅ Production URLs found:")
-        if "https://ai.factorialsystems.io" in js_content:
-            print("   📦 Backend URL: https://ai.factorialsystems.io")
-            print("   🔌 Chat Service URL: https://ai.factorialsystems.io")
-        if "wss://ai.factorialsystems.io/ws/chat" in js_content:
-            print("   🌐 WebSocket URL: wss://ai.factorialsystems.io/ws/chat")
-        if "https://ai.factorialsystems.io/api/v1/widget/static/chatcraft-logo2.png" in js_content:
-            print("   🖼️  Logo URL: https://ai.factorialsystems.io/api/v1/widget/static/chatcraft-logo2.png")
+        if "https://api.chatcraft.cc" in js_content:
+            print("   📦 Backend URL: https://api.chatcraft.cc")
+            print("   🔌 Chat Service URL: https://api.chatcraft.cc")
+        if "wss://api.chatcraft.cc/ws/chat" in js_content:
+            print("   🌐 WebSocket URL: wss://api.chatcraft.cc/ws/chat")
+        if "https://api.chatcraft.cc/api/v1/widget/static/chatcraft-logo2.png" in js_content:
+            print("   🖼️  Logo URL: https://api.chatcraft.cc/api/v1/widget/static/chatcraft-logo2.png")
 
         print()
 
@@ -118,7 +118,7 @@ def test_widget_url_generation():
         # Count localhost vs production URLs
         dev_localhost_count = dev_js.count("localhost")
         prod_localhost_count = prod_js.count("localhost")
-        prod_domain_count = prod_js.count("ai.factorialsystems.io")
+        prod_domain_count = prod_js.count("api.chatcraft.cc")
 
         print(f"📊 Development environment:")
         print(f"   🏠 Localhost references: {dev_localhost_count}")
@@ -156,8 +156,8 @@ def test_widget_url_generation():
             # Show key configuration differences
             print("\n📋 Key Configuration Differences:")
             print("Development vs Production:")
-            print(f"   Backend URL: localhost:8001 → ai.factorialsystems.io")
-            print(f"   Chat URL: localhost:8000 → ai.factorialsystems.io")
+            print(f"   Backend URL: localhost:8001 → api.chatcraft.cc")
+            print(f"   Chat URL: localhost:8000 → api.chatcraft.cc")
             print(f"   WebSocket: ws:// → wss://")
             print(f"   Protocol: HTTP → HTTPS")
 
@@ -191,13 +191,13 @@ def print_summary():
     print("")
     print("🔧 Environment Variables for Production:")
     print("   ENVIRONMENT=production")
-    print("   PRODUCTION_DOMAIN=ai.factorialsystems.io")
+    print("   PRODUCTION_DOMAIN=api.chatcraft.cc")
     print("")
     print("🌐 Production URLs Generated:")
-    print("   Backend: https://ai.factorialsystems.io")
-    print("   Chat Service: https://ai.factorialsystems.io")
-    print("   WebSocket: wss://ai.factorialsystems.io/ws/chat")
-    print("   Logo: https://ai.factorialsystems.io/api/v1/widget/static/chatcraft-logo2.png")
+    print("   Backend: https://api.chatcraft.cc")
+    print("   Chat Service: https://api.chatcraft.cc")
+    print("   WebSocket: wss://api.chatcraft.cc/ws/chat")
+    print("   Logo: https://api.chatcraft.cc/api/v1/widget/static/chatcraft-logo2.png")
     print("")
     print("🧪 To test manually:")
     print("   1. Set ENVIRONMENT=production in .env")

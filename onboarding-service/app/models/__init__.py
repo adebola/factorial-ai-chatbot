@@ -1,5 +1,6 @@
 # Import all models to ensure they are registered with SQLAlchemy
 # Note: Tenant and TenantSettings models have been migrated to OAuth2 Authorization Server
+# Note: Billing models (Subscription, Payment, etc.) have been migrated to Billing Service
 from .tenant import Base, Plan, Document, WebsiteIngestion, WebsitePage
 from .categorization import (
     DocumentCategory,
@@ -18,7 +19,6 @@ from .categorization import (
     CategoryStatistics,
     DocumentSearchFilters
 )
-from .subscription import *
 
 __all__ = [
     "Base",

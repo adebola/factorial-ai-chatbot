@@ -26,11 +26,8 @@ class Settings(BaseSettings):
     
     # Password Policy (non-sensitive)
     PASSWORD_MIN_LENGTH: int = 8
-    
-    # Billing Defaults (non-sensitive)
-    DEFAULT_CURRENCY: str = "NGN"
-    SUBSCRIPTION_GRACE_PERIOD_DAYS: int = 3
-    TRIAL_PERIOD_DAYS: int = 14
+
+    # Note: Billing configuration has been moved to the Billing Service
 
     # Database Pool Defaults (non-sensitive)
     POOL_SIZE: int = 10

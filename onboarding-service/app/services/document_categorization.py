@@ -9,7 +9,7 @@ from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 
 import openai
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 

@@ -10,10 +10,7 @@ load_dotenv()
 
 from .api.documents import router as documents_router
 from .api.website_ingestions import router as website_ingestions_router
-from .api.plans import router as plans_router
 from .api.widgets import router as widgets_router
-from .api.payments import router as payments_router
-from .api.subscriptions import router as subscriptions_router
 from .api.logos import router as logos_router
 from .api.categorization import router as categorization_router
 from .core.config import settings
@@ -135,10 +132,7 @@ if os.path.exists(static_dir):
 # Include routers
 app.include_router(documents_router, prefix=settings.API_V1_STR, tags=["documents"])
 app.include_router(website_ingestions_router, prefix=settings.API_V1_STR, tags=["website-ingestions"])
-app.include_router(plans_router, prefix=settings.API_V1_STR, tags=["plans"])
 app.include_router(widgets_router, prefix=settings.API_V1_STR, tags=["chat-widgets"])
-app.include_router(payments_router, prefix=settings.API_V1_STR, tags=["payments"])
-app.include_router(subscriptions_router, prefix=settings.API_V1_STR, tags=["subscriptions"])
 app.include_router(logos_router, prefix=settings.API_V1_STR, tags=["logos"])
 app.include_router(categorization_router, prefix=settings.API_V1_STR, tags=["categorization"])
 
@@ -198,37 +192,5 @@ async def get_public_info():
     }
 
 
-@app.get("/plan-management")
-async def serve_plan_management():
-    """Serve the plan management UI"""
-    from fastapi.responses import FileResponse
-    import os
-    
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-    plan_management_path = os.path.join(static_dir, "plan-management.html")
-    
-    if os.path.exists(plan_management_path):
-        return FileResponse(plan_management_path, media_type="text/html")
-    else:
-        raise HTTPException(
-            status_code=404, 
-            detail="Plan management UI not found"
-        )
-
-
-@app.get("/payment")
-async def serve_payment_page():
-    """Serve the payment integration UI"""
-    from fastapi.responses import FileResponse
-    import os
-    
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-    payment_page_path = os.path.join(static_dir, "payment-integration.html")
-    
-    if os.path.exists(payment_page_path):
-        return FileResponse(payment_page_path, media_type="text/html")
-    else:
-        raise HTTPException(
-            status_code=404, 
-            detail="Payment page not found"
-        )
+# Billing-related endpoints have been removed
+# Plans, payments, and subscriptions are now handled by the Billing Service

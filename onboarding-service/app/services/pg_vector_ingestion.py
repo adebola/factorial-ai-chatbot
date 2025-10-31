@@ -1,6 +1,6 @@
 import httpx
 import hashlib
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List
