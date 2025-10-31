@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-DOMAIN="https://ai.factorialsystems.io"
+DOMAIN="https://api.chatcraft.cc"
 AUTH_URL="${DOMAIN}/auth"
 
 # 1. Check current CORS configuration in container
@@ -31,7 +31,7 @@ echo -e "${YELLOW}2. Testing OPTIONS Preflight Request${NC}"
 echo "----------------------------------------"
 echo "Testing: OPTIONS ${AUTH_URL}/oauth2/authorize"
 curl -v -X OPTIONS "${AUTH_URL}/oauth2/authorize" \
-  -H "Origin: https://ai.factorialsystems.io" \
+  -H "Origin: https://api.chatcraft.cc" \
   -H "Access-Control-Request-Method: GET" \
   -H "Access-Control-Request-Headers: Content-Type" \
   2>&1 | grep -E "(< HTTP|< Access-Control|CORS)" || echo "No CORS headers found"
@@ -42,15 +42,15 @@ echo -e "${YELLOW}3. Testing Login Page with Origin Header${NC}"
 echo "----------------------------------------"
 echo "Testing: GET ${AUTH_URL}/login"
 curl -v "${AUTH_URL}/login" \
-  -H "Origin: https://ai.factorialsystems.io" \
-  -H "Referer: https://ai.factorialsystems.io/" \
+  -H "Origin: https://api.chatcraft.cc" \
+  -H "Referer: https://api.chatcraft.cc/" \
   2>&1 | grep -E "(< HTTP|< Access-Control|< X-Frame)" | head -10
 echo ""
 
 # 4. Test from different origins
 echo -e "${YELLOW}4. Testing Different Origins${NC}"
 echo "----------------------------------------"
-for origin in "https://ai.factorialsystems.io" "http://localhost:3000" "https://app.chatcraft.cc"; do
+for origin in "https://api.chatcraft.cc" "http://localhost:3000" "https://app.chatcraft.cc"; do
     echo -e "${BLUE}Testing origin: $origin${NC}"
     response=$(curl -s -I -X OPTIONS "${AUTH_URL}/oauth2/authorize" \
       -H "Origin: $origin" \
@@ -76,8 +76,8 @@ echo "Simulating: fetch('${AUTH_URL}/login')"
 curl -v "${AUTH_URL}/login" \
   -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8" \
   -H "Accept-Language: en-US,en;q=0.5" \
-  -H "Origin: https://ai.factorialsystems.io" \
-  -H "Referer: https://ai.factorialsystems.io/" \
+  -H "Origin: https://api.chatcraft.cc" \
+  -H "Referer: https://api.chatcraft.cc/" \
   -H "Sec-Fetch-Dest: document" \
   -H "Sec-Fetch-Mode: navigate" \
   -H "Sec-Fetch-Site: same-origin" \
@@ -91,12 +91,12 @@ echo "Testing if nginx is adding/modifying CORS headers:"
 # Direct to authorization server (if accessible)
 echo "Direct to container (port 9002):"
 curl -I -X OPTIONS http://127.0.0.1:9002/auth/login \
-  -H "Origin: https://ai.factorialsystems.io" \
+  -H "Origin: https://api.chatcraft.cc" \
   2>&1 | grep -i "access-control" || echo "No CORS headers from direct connection"
 echo ""
 echo "Through nginx proxy:"
 curl -I -X OPTIONS "${AUTH_URL}/login" \
-  -H "Origin: https://ai.factorialsystems.io" \
+  -H "Origin: https://api.chatcraft.cc" \
   2>&1 | grep -i "access-control" || echo "No CORS headers through nginx"
 echo ""
 
@@ -110,12 +110,12 @@ if [ -n "$container_id" ]; then
     if [ -z "$cors_env" ]; then
         echo -e "${RED}CRITICAL: AUTHORIZATION_CONFIG_SECURITY_ALLOWEDORIGINS not set${NC}"
         echo "Fix: Add this to docker-compose environment:"
-        echo '  AUTHORIZATION_CONFIG_SECURITY_ALLOWEDORIGINS: "https://ai.factorialsystems.io,http://localhost:3000"'
+        echo '  AUTHORIZATION_CONFIG_SECURITY_ALLOWEDORIGINS: "https://api.chatcraft.cc,http://localhost:3000"'
     else
         echo -e "${GREEN}✓ CORS environment variable is set${NC}"
         echo "Current value: $cors_env"
-        if [[ ! "$cors_env" == *"https://ai.factorialsystems.io"* ]]; then
-            echo -e "${RED}WARNING: https://ai.factorialsystems.io is not in allowed origins${NC}"
+        if [[ ! "$cors_env" == *"https://api.chatcraft.cc"* ]]; then
+            echo -e "${RED}WARNING: https://api.chatcraft.cc is not in allowed origins${NC}"
         fi
     fi
 fi

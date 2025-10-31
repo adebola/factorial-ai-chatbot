@@ -21,15 +21,24 @@ RUN apt-get update && apt-get install -y \
 COPY onboarding-service/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Note: Playwright browser installation moved to runtime (entrypoint script)
+# This reduces image size from 2GB to ~600MB
+# Installation happens on container startup in background
+
 # Copy application code
 COPY onboarding-service/app /app/app
 COPY onboarding-service/onboarding_migrations /app/onboarding_migrations
 COPY onboarding-service/alembic.ini /app/alembic.ini
 COPY onboarding-service/static /app/static
 
+# Copy entrypoint script for runtime Playwright installation
+COPY docker-build/entrypoints/onboarding-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
 # Create non-root user
 RUN adduser --disabled-password --gecos '' appuser && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    chown appuser:appuser /entrypoint.sh
 USER appuser
 
 # Health check
@@ -39,5 +48,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Run the application
+# Set entrypoint for runtime setup (Playwright installation)
+ENTRYPOINT ["/entrypoint.sh"]
+
+# Run the application (passed to entrypoint script)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
