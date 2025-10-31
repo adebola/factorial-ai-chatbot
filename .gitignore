@@ -41,3 +41,6 @@ logs/
 secrets/
 *.key
 *.pem
+/answer-quality-service/venv/
+/billing-service/venv/
+/onboarding-service/venv.backup.old/

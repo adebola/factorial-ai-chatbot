@@ -17,10 +17,10 @@ The widget service now detects the environment and generates appropriate URLs:
 - Logo URL: `http://localhost:8001/api/v1/widget/static/chatcraft-logo2.png`
 
 **Production Environment:**
-- Backend URL: `https://ai.factorialsystems.io`
-- Chat Service URL: `https://ai.factorialsystems.io`
-- WebSocket URL: `wss://ai.factorialsystems.io/ws/chat`
-- Logo URL: `https://ai.factorialsystems.io/api/v1/widget/static/chatcraft-logo2.png`
+- Backend URL: `https://api.chatcraft.cc`
+- Chat Service URL: `https://api.chatcraft.cc`
+- WebSocket URL: `wss://api.chatcraft.cc/ws/chat`
+- Logo URL: `https://api.chatcraft.cc/api/v1/widget/static/chatcraft-logo2.png`
 
 ### 2. Static Asset Serving
 
@@ -37,7 +37,7 @@ The widget service now reads these environment variables:
 ```env
 # Required for production
 ENVIRONMENT=production
-PRODUCTION_DOMAIN=ai.factorialsystems.io
+PRODUCTION_DOMAIN=api.chatcraft.cc
 
 # Optional - fallbacks to localhost in development
 BACKEND_URL=http://localhost:8001
@@ -52,7 +52,7 @@ In your production environment, ensure these variables are set:
 
 ```env
 ENVIRONMENT=production
-PRODUCTION_DOMAIN=ai.factorialsystems.io
+PRODUCTION_DOMAIN=api.chatcraft.cc
 ```
 
 ### 2. Verify Widget Generation
@@ -61,11 +61,11 @@ After deployment, test widget generation:
 
 ```bash
 # Generate a widget for a tenant
-curl -X GET "https://ai.factorialsystems.io/api/v1/widget/generate" \
+curl -X GET "https://api.chatcraft.cc/api/v1/widget/generate" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # Download the generated JavaScript
-curl -X GET "https://ai.factorialsystems.io/api/v1/widget/chat-widget.js" \
+curl -X GET "https://api.chatcraft.cc/api/v1/widget/chat-widget.js" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 
 # Verify URLs in the JavaScript file
@@ -77,7 +77,7 @@ grep -E "(backend_url|chat_service_url|wss://)" downloaded-widget.js
 Verify the logo loads correctly:
 
 ```bash
-curl -X GET "https://ai.factorialsystems.io/api/v1/widget/static/chatcraft-logo2.png" \
+curl -X GET "https://api.chatcraft.cc/api/v1/widget/static/chatcraft-logo2.png" \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
@@ -88,7 +88,7 @@ curl -X GET "https://ai.factorialsystems.io/api/v1/widget/static/chatcraft-logo2
 ```python
 # Environment detection and URL generation
 environment = os.getenv("ENVIRONMENT", "development").lower()
-production_domain = os.getenv("PRODUCTION_DOMAIN", "ai.factorialsystems.io")
+production_domain = os.getenv("PRODUCTION_DOMAIN", "api.chatcraft.cc")
 
 if environment == "production" or environment == "prod":
     backend_url = f"https://{production_domain}"
@@ -126,16 +126,16 @@ When `ENVIRONMENT=production`, the generated widget will contain:
 
 ```javascript
 const CONFIG = {
-    backendUrl: 'https://ai.factorialsystems.io',
-    chatServiceUrl: 'https://ai.factorialsystems.io',
+    backendUrl: 'https://api.chatcraft.cc',
+    chatServiceUrl: 'https://api.chatcraft.cc',
     // ... other config
 };
 
 // WebSocket connection will use:
-// wss://ai.factorialsystems.io/ws/chat?api_key=...
+// wss://api.chatcraft.cc/ws/chat?api_key=...
 
 // Logo will load from:
-// https://ai.factorialsystems.io/api/v1/widget/static/chatcraft-logo2.png
+// https://api.chatcraft.cc/api/v1/widget/static/chatcraft-logo2.png
 ```
 
 ## Testing
@@ -170,7 +170,7 @@ echo $ENVIRONMENT
 
 # Set for production
 export ENVIRONMENT=production
-export PRODUCTION_DOMAIN=ai.factorialsystems.io
+export PRODUCTION_DOMAIN=api.chatcraft.cc
 
 # Restart the service
 ```

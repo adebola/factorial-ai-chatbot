@@ -106,13 +106,15 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         docs_url=f"{settings.API_V1_STR}/docs",
         redoc_url=f"{settings.API_V1_STR}/redoc",
-        lifespan=lifespan
+        lifespan=lifespan,
+        redirect_slashes=False  # Disable automatic 307 redirects for trailing slashes
     )
 
     # CORS is now handled by the Spring Cloud Gateway
     # No need for CORS middleware in the backend service
 
     # Include routers
+    # Note: redirect_slashes=False prevents 307 redirects when trailing slash is missing
     app.include_router(
         workflows.router,
         prefix=f"{settings.API_V1_STR}/workflows",
