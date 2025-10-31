@@ -54,6 +54,28 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+              - id: onboarding-websites
+                uri: http://localhost:8001
+                predicates:
+                  - Path=/api/v1/websites/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: onboarding-ingestions
+                uri: http://localhost:8001
+                predicates:
+                  - Path=/api/v1/ingestions/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: onboarding-widgets
+                uri: http://localhost:8001
+                predicates:
+                  - Path=/api/v1/widget/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              # Auth Service Business Routes
               - id: auth-tenants
                 uri: http://localhost:9002
                 predicates:
@@ -69,27 +91,6 @@ spring:
                 filters:
                   - RewritePath=/api/v1/users/(?<segment>.*),/auth/api/v1/users/$\{segment}
                   - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
-
-              - id: onboarding-websites
-                uri: http://localhost:8001
-                predicates:
-                    - Path=/api/v1/websites/**
-                filters:
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-
-              - id: onboarding-ingestions
-                uri: http://localhost:8001
-                predicates:
-                    - Path=/api/v1/ingestions/**
-                filters:
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-
-#              - id: onboarding-auth
-#                uri: http://localhost:8001
-#                predicates:
-#                    - Path=/api/v1/auth/**
-#                filters:
-#                  - RewritePath=/health/auth,/auth/health
 
               # Billing Service Routes (extracted from onboarding)
               - id: billing-plans
@@ -110,13 +111,6 @@ spring:
                 uri: http://localhost:8004
                 predicates:
                     - Path=/api/v1/payments/**
-                filters:
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-
-              - id: onboarding-widgets
-                uri: http://localhost:8001
-                predicates:
-                    - Path=/api/v1/widget/**
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
@@ -193,6 +187,35 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+              # Answer Quality Service Routes
+              - id: quality-feedback
+                uri: http://localhost:8005
+                predicates:
+                    - Path=/api/v1/feedback/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: quality-admin
+                uri: http://localhost:8005
+                predicates:
+                    - Path=/api/v1/admin/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: quality-alerts
+                uri: http://localhost:8005
+                predicates:
+                    - Path=/api/v1/alerts/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: quality-service
+                uri: http://localhost:8005
+                predicates:
+                    - Path=/api/v1/quality/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
               # Auth Service Routes
               - id: auth-api
                 uri: http://localhost:9002
@@ -236,6 +259,13 @@ spring:
                     - Path=/health/billing
                 filters:
                     - RewritePath=/health/billing,/health
+
+              - id: quality-health
+                uri: http://localhost:8005
+                predicates:
+                    - Path=/health/quality
+                filters:
+                    - RewritePath=/health/quality,/api/v1/health
 
               - id: auth-health
                 uri: http://localhost:8000

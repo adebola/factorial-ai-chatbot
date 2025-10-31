@@ -88,22 +88,23 @@ spring:
 
 
 
-            - id: onboarding-plans
-              uri: http://onboarding-service:8000
+            # Billing Service Routes (extracted from onboarding)
+            - id: billing-plans
+              uri: http://billing-service:8000
               predicates:
                 - Path=/api/v1/plans/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
-            - id: onboarding-subscriptions
-              uri: http://onboarding-service:8000
+            - id: billing-subscriptions
+              uri: http://billing-service:8000
               predicates:
                 - Path=/api/v1/subscriptions/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
-            - id: onboarding-payments
-              uri: http://onboarding-service:8000
+            - id: billing-payments
+              uri: http://billing-service:8000
               predicates:
                 - Path=/api/v1/payments/**
               filters:
@@ -121,6 +122,13 @@ spring:
               uri: http://chat-service:8000
               predicates:
                 - Path=/api/v1/chat/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: chat-vectors
+              uri: http://chat-service:8000
+              predicates:
+                - Path=/api/v1/vectors/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
@@ -182,6 +190,35 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            # Answer Quality Service Routes
+            - id: quality-feedback
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/feedback/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: quality-admin
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/admin/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: quality-alerts
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/alerts/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: quality-service
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/quality/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             # Auth Service Routes
             - id: auth-api
               uri: http://authorization-service:9000
@@ -218,3 +255,24 @@ spring:
                 - Path=/health/workflow
               filters:
                 - RewritePath=/health/workflow,/health
+
+            - id: billing-health
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/health/billing
+              filters:
+                - RewritePath=/health/billing,/health
+
+            - id: quality-health
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/health/quality
+              filters:
+                - RewritePath=/health/quality,/api/v1/health
+
+            - id: auth-health
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/health/auth
+              filters:
+                - RewritePath=/health/auth,/auth/health
