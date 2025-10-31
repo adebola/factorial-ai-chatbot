@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -70,14 +70,18 @@ async def get_current_usage(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get current usage statistics for the tenant"""
-    
+
     try:
+        # Get current time at the beginning to avoid scope issues
+        # Use timezone-aware datetime to match database timestamps
+        now = datetime.now(timezone.utc)
+
         subscription_service = SubscriptionService(db)
         plan_service = PlanService(db)
-        
+
         # Get the current subscription (fallback to the Free plan if none exists)
         subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
-        
+
         if subscription:
             # Get plan limits from subscription
             plan = plan_service.get_plan_by_id(subscription.plan_id)
@@ -87,7 +91,7 @@ async def get_current_usage(
         else:
             # No subscription - use Free plan limits
             plan = plan_service.get_plan_by_name("Free")
-        
+
         if not plan:
             # Create default plan limits if the Free plan doesn't exist
             class DefaultPlan:
@@ -98,25 +102,28 @@ async def get_current_usage(
                 name = "Free"
                 id = "default"
             plan = DefaultPlan()
-        
-        # Get current usage tracking (only if a subscription exists)
+
+        # Get usage tracking record from local database
+        # This data is built from async messages received from other services
         usage = None
         if subscription:
             usage = db.query(UsageTracking).filter(
                 UsageTracking.subscription_id == subscription.id
             ).first()
-            
+
             if not usage:
                 # Initialize usage tracking if not exists
                 subscription_service._initialize_usage_tracking(subscription)
                 usage = db.query(UsageTracking).filter(
                     UsageTracking.subscription_id == subscription.id
                 ).first()
-        
-        # If no subscription or usage tracking, use zero values
+
+            # Check and reset usage periods if needed (daily/monthly resets)
+            if usage:
+                usage = subscription_service.check_and_reset_usage_periods(usage)
+
+        # If no subscription exists, create a default usage object for display
         if not usage:
-            from datetime import datetime, timedelta
-            now = datetime.utcnow()
             class DefaultUsage:
                 documents_used = 0
                 websites_used = 0
@@ -126,7 +133,7 @@ async def get_current_usage(
                 daily_reset_at = None
                 monthly_reset_at = None
                 period_start = now
-                period_end = now + timedelta(days=30)  # Default 30-day period
+                period_end = now + timedelta(days=30)
             usage = DefaultUsage()
 
         # Helper function to calculate percentage for non-unlimited limits
@@ -190,7 +197,7 @@ async def get_current_usage(
             "billing_period": {
                 "start": usage.period_start.isoformat(),
                 "end": usage.period_end.isoformat(),
-                "days_remaining": (usage.period_end - datetime.utcnow()).days
+                "days_remaining": (usage.period_end - now).days
             },
             "subscription": {
                 "id": subscription.id if subscription else None,
@@ -454,10 +461,11 @@ async def create_subscription(
             metadata=subscription_data.metadata
         )
         
-        # Send message to auth server to update tenant's plan_id
+        # Send message to auth server to update tenant's plan_id and subscription_id
         try:
             rabbitmq_service.publish_plan_update(
                 tenant_id=claims.tenant_id,
+                subscription_id=subscription.id,
                 plan_id=subscription_data.plan_id,
                 action="subscription_created"
             )

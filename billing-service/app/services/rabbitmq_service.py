@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import time
 from datetime import datetime
 from typing import Dict, Any, Optional
 import pika
@@ -25,37 +26,70 @@ class RabbitMQService:
         self.connection = None
         self.channel = None
         
-    def _connect(self) -> bool:
-        """Establish connection to RabbitMQ"""
+    def _connect(self, max_retries: int = 3, initial_delay: float = 0.5) -> bool:
+        """
+        Establish connection to RabbitMQ with retry logic.
+
+        Args:
+            max_retries: Maximum number of connection attempts
+            initial_delay: Initial delay in seconds before first retry
+
+        Returns:
+            True if connection successful, False otherwise
+        """
         try:
             if self.connection and not self.connection.is_closed:
                 return True
-                
-            credentials = pika.PlainCredentials(self.username, self.password)
-            parameters = pika.ConnectionParameters(
-                host=self.host,
-                port=self.port,
-                credentials=credentials,
-                heartbeat=600,
-                blocked_connection_timeout=300
-            )
-            
-            self.connection = pika.BlockingConnection(parameters)
-            self.channel = self.connection.channel()
-            
-            # Declare the exchange (should match auth server configuration)
-            self.channel.exchange_declare(
-                exchange=self.exchange,
-                exchange_type='topic',
-                durable=True
-            )
-            
-            logger.info(f"Connected to RabbitMQ at {self.host}:{self.port}")
-            return True
-            
-        except AMQPConnectionError as e:
-            logger.error(f"Failed to connect to RabbitMQ: {e}")
+
+            retry_count = 0
+            delay = initial_delay
+
+            while retry_count < max_retries:
+                try:
+                    credentials = pika.PlainCredentials(self.username, self.password)
+                    parameters = pika.ConnectionParameters(
+                        host=self.host,
+                        port=self.port,
+                        credentials=credentials,
+                        heartbeat=600,
+                        blocked_connection_timeout=300,
+                        connection_attempts=2,
+                        retry_delay=1
+                    )
+
+                    self.connection = pika.BlockingConnection(parameters)
+                    self.channel = self.connection.channel()
+
+                    # Declare the exchange (should match auth server configuration)
+                    self.channel.exchange_declare(
+                        exchange=self.exchange,
+                        exchange_type='topic',
+                        durable=True
+                    )
+
+                    logger.info(
+                        f"Connected to RabbitMQ at {self.host}:{self.port}",
+                        extra={"retry_count": retry_count}
+                    )
+                    return True
+
+                except (AMQPConnectionError, ConnectionRefusedError) as e:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        logger.error(
+                            f"Failed to connect to RabbitMQ after {max_retries} attempts: {e}"
+                        )
+                        return False
+
+                    logger.warning(
+                        f"Failed to connect to RabbitMQ (attempt {retry_count}/{max_retries}): {e}. "
+                        f"Retrying in {delay:.1f} seconds..."
+                    )
+                    time.sleep(delay)
+                    delay *= 2  # Exponential backoff
+
             return False
+
         except Exception as e:
             logger.error(f"Unexpected error connecting to RabbitMQ: {e}")
             return False

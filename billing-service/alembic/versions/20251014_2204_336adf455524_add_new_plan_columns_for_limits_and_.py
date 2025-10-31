@@ -1,7 +1,7 @@
 """Add new plan columns for limits and features
 
 Revision ID: 336adf455524
-Revises: 
+Revises: 20251001_0000
 Create Date: 2025-10-14 22:04:03.770674
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '336adf455524'
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = '20251001_0000'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

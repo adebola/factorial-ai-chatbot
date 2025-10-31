@@ -456,15 +456,51 @@ class SubscriptionService:
 
     def _initialize_usage_tracking(self, subscription: Subscription) -> None:
         """Initialize usage tracking for a new subscription"""
+        now = datetime.utcnow()
         usage_tracking = UsageTracking(
             tenant_id=subscription.tenant_id,
             subscription_id=subscription.id,
             period_start=subscription.current_period_start,
-            period_end=subscription.current_period_end
+            period_end=subscription.current_period_end,
+            daily_reset_at=now + timedelta(days=1),
+            monthly_reset_at=now + timedelta(days=30)
         )
 
         self.db.add(usage_tracking)
         self.db.commit()
+
+    def check_and_reset_usage_periods(self, usage: UsageTracking) -> UsageTracking:
+        """Check if usage periods need to be reset and apply resets if needed"""
+        from datetime import timezone as tz
+        now = datetime.now(tz.utc)
+        needs_commit = False
+
+        # Check and reset daily usage
+        if usage.daily_reset_at and now >= usage.daily_reset_at:
+            usage.daily_chats_used = 0
+            usage.daily_reset_at = now + timedelta(days=1)
+            needs_commit = True
+        elif not usage.daily_reset_at:
+            # Initialize if not set
+            usage.daily_reset_at = now + timedelta(days=1)
+            needs_commit = True
+
+        # Check and reset monthly usage
+        if usage.monthly_reset_at and now >= usage.monthly_reset_at:
+            usage.monthly_chats_used = 0
+            usage.monthly_reset_at = now + timedelta(days=30)
+            needs_commit = True
+        elif not usage.monthly_reset_at:
+            # Initialize if not set
+            usage.monthly_reset_at = now + timedelta(days=30)
+            needs_commit = True
+
+        if needs_commit:
+            usage.updated_at = now
+            self.db.commit()
+            self.db.refresh(usage)
+
+        return usage
 
     def _log_subscription_change(
         self,

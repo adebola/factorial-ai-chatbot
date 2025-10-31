@@ -22,7 +22,8 @@ load_dotenv(dotenv_path=env_path)
 from .core.config import settings
 from .core.database import engine, Base
 from .core.logging_config import setup_logging, get_logger
-from .api import plans, subscriptions, payments
+from .api import plans, subscriptions, payments, usage
+from .services.usage_consumer import usage_consumer
 
 # Setup logging
 setup_logging()
@@ -44,10 +45,27 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to create database tables: {e}")
 
+    # Start RabbitMQ usage event consumer
+    try:
+        logger.info("Connecting to RabbitMQ for usage events...")
+        usage_consumer.connect()
+        usage_consumer.start_consuming()
+        logger.info("Usage event consumer started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start usage event consumer: {e}")
+        logger.warning("Service will continue but usage events will not be processed")
+
     yield
 
     # Shutdown
     logger.info("Shutting down Billing Service...")
+
+    # Stop usage event consumer
+    try:
+        usage_consumer.stop_consuming()
+        logger.info("Usage event consumer stopped")
+    except Exception as e:
+        logger.error(f"Error stopping usage event consumer: {e}")
 
 
 # Create FastAPI application
@@ -123,6 +141,12 @@ app.include_router(
     payments.router,
     prefix=settings.API_V1_STR,
     tags=["payments"]
+)
+
+app.include_router(
+    usage.router,
+    prefix=f"{settings.API_V1_STR}/usage",
+    tags=["usage"]
 )
 
 
