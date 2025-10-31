@@ -18,6 +18,8 @@ from .core.logging_config import (
     log_api_request,
     log_api_response
 )
+from .services.limit_warning_consumer import limit_warning_consumer
+from .services.event_publisher import event_publisher
 
 # Setup structured logging with configuration
 setup_logging(
@@ -36,7 +38,7 @@ app = FastAPI(
 async def startup_event():
     """Validate environment configuration on startup"""
     logger.info("Starting Chat Service...")
-    
+
     # Check critical environment variables
     openai_key = os.environ.get("OPENAI_API_KEY")
     if not openai_key:
@@ -45,8 +47,45 @@ async def startup_event():
     else:
         logger.info("OPENAI_API_KEY found - AI chat enabled")
 
-    
+    # Start RabbitMQ limit warning consumer
+    try:
+        limit_warning_consumer.start()
+        logger.info("Limit warning consumer started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start limit warning consumer: {e}", exc_info=True)
+        logger.warning("Chat service will continue without limit warning consumer")
+
+    # Connect event publisher
+    try:
+        event_publisher.connect()
+        logger.info("Event publisher connected successfully")
+    except Exception as e:
+        logger.error(f"Failed to connect event publisher: {e}", exc_info=True)
+        logger.warning("Chat service will continue without event publisher")
+
     logger.info("Chat Service startup completed")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources on shutdown"""
+    logger.info("Shutting down Chat Service...")
+
+    # Stop limit warning consumer
+    try:
+        limit_warning_consumer.stop()
+        logger.info("Limit warning consumer stopped successfully")
+    except Exception as e:
+        logger.error(f"Error stopping limit warning consumer: {e}", exc_info=True)
+
+    # Close event publisher
+    try:
+        event_publisher.close()
+        logger.info("Event publisher closed successfully")
+    except Exception as e:
+        logger.error(f"Error closing event publisher: {e}", exc_info=True)
+
+    logger.info("Chat Service shutdown completed")
 
 
 @app.middleware("http")

@@ -10,6 +10,8 @@ from ..models.chat_models import ChatSession, ChatMessage
 from ..services.chat_service import ChatService
 from ..services.tenant_client import TenantClient
 from ..services.workflow_client import WorkflowClient
+from ..services.event_publisher import event_publisher
+from ..services.usage_cache import usage_cache
 
 
 class ConnectionManager:
@@ -99,9 +101,16 @@ class ChatWebSocket:
         )
         self.db.add(chat_session)
         self.db.commit()
-        
+
         await manager.connect(websocket, tenant_id, session_id)
-        
+
+        # Prefetch usage limits to warm the cache
+        try:
+            await usage_cache.prefetch_for_tenant(tenant_id, tenant_api_key)
+        except Exception as e:
+            # Log but don't fail connection on cache warming error
+            print(f"Failed to prefetch usage limits: {str(e)}")
+
         try:
             # Send a welcome message
             welcome_msg = {
@@ -127,7 +136,24 @@ class ChatWebSocket:
                     continue
                 
                 user_message = message_data["message"]
-                
+
+                # Check chat usage limits BEFORE processing message
+                try:
+                    allowed, reason = await usage_cache.check_chat_allowed(tenant_id, tenant_api_key)
+                    if not allowed:
+                        # Send limit exceeded error to client
+                        limit_error_msg = {
+                            "type": "error",
+                            "message": f"Chat limit exceeded: {reason}",
+                            "error_code": "LIMIT_EXCEEDED",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                        await websocket.send_text(json.dumps(limit_error_msg))
+                        continue
+                except Exception as e:
+                    # Log but continue on cache check error (fail open)
+                    print(f"Failed to check usage limits: {str(e)}")
+
                 # Store user message
                 user_msg_record = ChatMessage(
                     tenant_id=tenant_id,
@@ -138,6 +164,32 @@ class ChatWebSocket:
                 )
                 self.db.add(user_msg_record)
                 self.db.commit()
+
+                # Publish user message event
+                try:
+                    event_publisher.publish_message_created(
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        message_id=user_msg_record.id,
+                        message_type="user",
+                        content=user_message
+                    )
+                except Exception as e:
+                    # Log but don't fail on event publishing errors
+                    print(f"Failed to publish user message event: {str(e)}")
+
+                # Publish usage event and increment local cache (fire-and-forget)
+                try:
+                    event_publisher.publish_chat_usage_event(
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        message_count=1
+                    )
+                    # Optimistically increment local cache
+                    usage_cache.increment_local_cache(tenant_id, message_count=1)
+                except Exception as e:
+                    # Log but don't fail on event publishing errors
+                    print(f"Failed to publish usage event: {str(e)}")
 
                 # Check if there's an active workflow for this session
                 try:
@@ -266,6 +318,20 @@ class ChatWebSocket:
                         self.db.add(ai_msg_record)
                         self.db.commit()
 
+                        # Publish assistant message event with quality metrics
+                        try:
+                            event_publisher.publish_message_created(
+                                tenant_id=tenant_id,
+                                session_id=session_id,
+                                message_id=ai_msg_record.id,
+                                message_type="assistant",
+                                content=ai_response["content"],
+                                quality_metrics=ai_response.get("quality_metrics")
+                            )
+                        except Exception as e:
+                            # Log but don't fail on event publishing errors
+                            print(f"Failed to publish assistant message event: {str(e)}")
+
                     # Only send response to client if there's content or choices to display
                     # This prevents blank messages from being shown to the user
                     if ai_response.get("content") or ai_response.get("metadata", {}).get("choices"):
@@ -274,6 +340,8 @@ class ChatWebSocket:
                             "type": "message",
                             "role": "assistant",
                             "content": ai_response["content"],
+                            "message_id": ai_msg_record.id if ai_response.get("content") else None,
+                            "session_id": session_id,
                             "sources": ai_response.get("sources", []),
                             "metadata": ai_response.get("metadata", {}),
                             "timestamp": datetime.now().isoformat()
