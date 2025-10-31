@@ -127,9 +127,9 @@ class SMSService:
             to_phone=to_phone,
             from_phone=from_phone,
             message=message,
-            template_id=template_id,
-            template_data=template_data,
-            status=MessageStatus.PENDING
+            # Note: template_id and template_data removed - fields don't exist in model
+            status=MessageStatus.PENDING,
+            created_at=datetime.utcnow()  # Explicitly set to avoid NOT NULL violation
         )
 
         self.db.add(sms_record)
@@ -218,9 +218,12 @@ class SMSService:
 
         if not settings:
             # Create default settings
+            now = datetime.utcnow()
             settings = TenantSettings(
                 tenant_id=tenant_id,
-                default_from_phone=self.default_from_phone
+                default_from_phone=self.default_from_phone,
+                limit_reset_date=now,  # Explicitly set to avoid NOT NULL violation
+                created_at=now  # Explicitly set to avoid NOT NULL violation
             )
             self.db.add(settings)
             self.db.commit()
@@ -277,6 +280,7 @@ class SMSService:
         provider_response: Dict[str, Any]
     ):
         """Log delivery event"""
+        now = datetime.utcnow()
         log_entry = DeliveryLog(
             message_id=message_id,
             message_type=message_type,
@@ -284,7 +288,8 @@ class SMSService:
             event_type=event_type,
             provider_name=self.provider.get_provider_name(),
             provider_response=provider_response,
-            occurred_at=datetime.utcnow()
+            occurred_at=now,
+            created_at=now  # Explicitly set to avoid NOT NULL violation
         )
 
         self.db.add(log_entry)

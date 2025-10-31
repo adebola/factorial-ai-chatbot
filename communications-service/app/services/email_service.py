@@ -82,7 +82,8 @@ class EmailService:
             # template_id=template_id,
             # template_data=template_data,
             attachments=attachments,
-            status=MessageStatus.PENDING
+            status=MessageStatus.PENDING,
+            created_at=datetime.utcnow()  # Explicitly set to avoid NOT NULL violation
         )
 
         self.db.add(email_record)
@@ -249,10 +250,13 @@ class EmailService:
 
         if not settings:
             # Create default settings
+            now = datetime.utcnow()
             settings = TenantSettings(
                 tenant_id=tenant_id,
                 default_from_email=self.default_from_email,
-                default_from_name=self.default_from_name
+                default_from_name=self.default_from_name,
+                limit_reset_date=now,  # Explicitly set to avoid NOT NULL violation
+                created_at=now  # Explicitly set to avoid NOT NULL violation
             )
             self.db.add(settings)
             self.db.commit()
@@ -309,6 +313,7 @@ class EmailService:
         provider_response: Dict[str, Any]
     ):
         """Log delivery event"""
+        now = datetime.utcnow()
         log_entry = DeliveryLog(
             message_id=message_id,
             message_type=message_type,
@@ -316,7 +321,8 @@ class EmailService:
             event_type=event_type,
             provider_name="sendgrid",
             provider_response=provider_response,
-            occurred_at=datetime.utcnow()
+            occurred_at=now,
+            created_at=now  # Explicitly set to avoid NOT NULL violation
         )
 
         self.db.add(log_entry)

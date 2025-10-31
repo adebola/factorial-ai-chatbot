@@ -171,11 +171,11 @@ async def validate_token(
             )
 
         # Extract authorities and determine role
+        # Current role: ROLE_TENANT_ADMIN (tenant/organization admin)
+        # Future role: ROLE_SYSTEM_ADMIN (system-wide admin, not yet implemented)
         authorities = token_info.get("authorities", [])
         role = "user"
-        if "ROLE_SUPER_ADMIN" in authorities or "SUPER_ADMIN" in authorities:
-            role = "super_admin"
-        elif "ROLE_ADMIN" in authorities or "ADMIN" in authorities:
+        if "ROLE_TENANT_ADMIN" in authorities:
             role = "admin"
 
         claims = TokenClaims(

@@ -41,6 +41,8 @@ class EmailMessageResponse(BaseModel):
     from_email: str
     from_name: Optional[str]
     subject: str
+    html_content: Optional[str]
+    text_content: Optional[str]
     status: str
     created_at: str
     sent_at: Optional[str]
@@ -69,6 +71,8 @@ def _convert_email_to_response(email: EmailMessage) -> EmailMessageResponse:
         from_email=email.from_email,
         from_name=email.from_name,
         subject=email.subject,
+        html_content=email.html_content,
+        text_content=email.text_content,
         status=email.status.value,
         created_at=email.created_at.isoformat(),
         sent_at=email.sent_at.isoformat() if email.sent_at else None,
