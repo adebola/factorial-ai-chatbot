@@ -7,7 +7,7 @@ before executing operations.
 """
 
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -18,6 +18,8 @@ from ..models.subscription import UsageTracking, Subscription
 from ..services.dependencies import TokenClaims, validate_token
 from ..services.plan_service import PlanService
 from ..services.subscription_service import SubscriptionService
+
+from ..core.logging_config import get_logger
 
 router = APIRouter()
 
@@ -31,7 +33,7 @@ class LimitCheckResponse(BaseModel):
     limit: int = Field(..., description="Maximum allowed usage (-1 for unlimited)")
     remaining: int = Field(..., description="Remaining usage (-1 for unlimited)")
     unlimited: bool = Field(..., description="Whether this resource is unlimited")
-    reason: str = Field(None, description="Reason if not allowed")
+    reason: Optional[str] = Field(None, description="Reason if not allowed")
 
 
 class BatchLimitCheckRequest(BaseModel):
@@ -128,6 +130,8 @@ async def check_usage_limit(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid usage type: {usage_type}"
             )
+        logger = get_logger('billing-service')
+        logger.info(f"Checking usage limit: {usage_type}, current: {current}, limit: {limit}, allowed: {allowed}")
 
         return LimitCheckResponse(
             allowed=allowed,
