@@ -493,6 +493,27 @@ async def get_document_metadata(
             {"document_id": document_id}
         ).fetchone()
 
+        # Get content type distribution from vector database
+        content_types = vector_db.execute(
+            text("""
+                SELECT content_type, COUNT(*) as count
+                FROM vectors.document_chunks
+                WHERE document_id = :document_id AND content_type IS NOT NULL
+                GROUP BY content_type
+                ORDER BY count DESC
+            """),
+            {"document_id": document_id}
+        ).fetchall()
+
+        # Get primary content type (most common)
+        primary_content_type = content_types[0].content_type if content_types else None
+
+        # Build content types distribution
+        content_types_distribution = {
+            ct.content_type: ct.count
+            for ct in content_types
+        } if content_types else {}
+
         return {
             "document_id": existing_doc.id,
             "filename": existing_doc.original_filename,
@@ -504,6 +525,8 @@ async def get_document_metadata(
             "created_at": existing_doc.created_at.isoformat(),
             "processed_at": existing_doc.processed_at.isoformat() if existing_doc.processed_at else None,
             "error_message": existing_doc.error_message,
+            "content_type": primary_content_type,
+            "content_types_distribution": content_types_distribution,
             "tenant_id": claims.tenant_id,
             "categories": [
                 {
@@ -541,7 +564,9 @@ async def get_document_metadata(
                 "ai_assigned_categories": len([c for c in categories if c.assigned_by == "ai"]),
                 "user_assigned_categories": len([c for c in categories if c.assigned_by == "user"]),
                 "auto_tags": len([t for t in tags if t.tag_type == "auto"]),
-                "custom_tags": len([t for t in tags if t.tag_type == "custom"])
+                "custom_tags": len([t for t in tags if t.tag_type == "custom"]),
+                "has_content_type": primary_content_type is not None,
+                "content_type_chunks": sum(content_types_distribution.values()) if content_types_distribution else 0
             }
         }
 

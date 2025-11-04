@@ -2,6 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
+      <module fileurl="file://$PROJECT_DIR$/answer-quality-service/answer-quality-module.iml" filepath="$PROJECT_DIR$/answer-quality-service/answer-quality-module.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/backend.iml" filepath="$PROJECT_DIR$/.idea/backend.iml" />
       <module fileurl="file://$PROJECT_DIR$/billing-service/billing-module.iml" filepath="$PROJECT_DIR$/billing-service/billing-module.iml" />
       <module fileurl="file://$PROJECT_DIR$/chat-service/chat-modue/chat-module.iml" filepath="$PROJECT_DIR$/chat-service/chat-modue/chat-module.iml" />
