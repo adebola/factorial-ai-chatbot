@@ -38,23 +38,88 @@ class ChatService:
         self.tenant_client = TenantClient()
         
         # System prompt template
-        self.system_prompt = """You are a helpful AI assistant for {company_name}. 
+        self.system_prompt = """You are a helpful AI assistant for {company_name}.
         You have access to the company's documents and website content to answer questions accurately.
-        
+
         Use the following context information to answer the user's question:
         {context}
-        
+
         Guidelines:
         - Answer based on the provided context when possible
         - If you can't find the answer in the context, say so politely
         - Be conversational and helpful
         - Reference specific sources when possible
         """
-    
+
+        # Intent-based content type mappings for smart filtering
+        self.intent_patterns = {
+            'contract': {
+                'keywords': ['contract', 'agreement', 'terms', 'legal', 'clause', 'sign', 'binding'],
+                'content_types': ['contract', 'policy']
+            },
+            'invoice': {
+                'keywords': ['invoice', 'payment', 'bill', 'receipt', 'charge', 'cost', 'price', 'pay'],
+                'content_types': ['invoice', 'contract']
+            },
+            'policy': {
+                'keywords': ['policy', 'rule', 'guideline', 'procedure', 'regulation', 'compliance'],
+                'content_types': ['policy', 'manual']
+            },
+            'technical': {
+                'keywords': ['specification', 'technical', 'api', 'architecture', 'implementation', 'configure'],
+                'content_types': ['specification', 'manual']
+            },
+            'report': {
+                'keywords': ['report', 'analysis', 'summary', 'findings', 'results', 'metrics', 'data'],
+                'content_types': ['report', 'presentation']
+            },
+            'email': {
+                'keywords': ['email', 'message', 'correspondence', 'communication', 'sent', 'received'],
+                'content_types': ['email']
+            }
+        }
+
+    def _detect_content_type_intent(self, query: str) -> Optional[List[str]]:
+        """
+        Detect query intent and suggest relevant content types for filtering.
+
+        Args:
+            query: The user's query text
+
+        Returns:
+            List of content types to filter by, or None for no filtering
+        """
+        query_lower = query.lower()
+
+        # Count keyword matches for each intent category
+        intent_scores = {}
+        for intent, config in self.intent_patterns.items():
+            matches = sum(1 for keyword in config['keywords'] if keyword in query_lower)
+            if matches > 0:
+                intent_scores[intent] = matches
+
+        # If we found matches, use the content types from the top matching intent
+        if intent_scores:
+            top_intent = max(intent_scores, key=intent_scores.get)
+            content_types = self.intent_patterns[top_intent]['content_types']
+
+            self.logger.info(
+                "Content type intent detected",
+                query_sample=query[:50],
+                detected_intent=top_intent,
+                content_types=content_types,
+                keyword_matches=intent_scores[top_intent]
+            )
+
+            return content_types
+
+        # No clear intent detected
+        return None
+
     async def generate_response(
-        self, 
-        tenant_id: str, 
-        user_message: str, 
+        self,
+        tenant_id: str,
+        user_message: str,
         session_id: str
     ) -> Dict[str, Any]:
         """Generate AI response with RAG and conversation memory"""
@@ -84,13 +149,17 @@ class ChatService:
             tenant_id=tenant_id,
             tenant_name=tenant.get('name', 'Unknown')
         )
-        
-        # Search relevant documents
+
+        # Detect content type intent for smart filtering
+        content_type_filter = self._detect_content_type_intent(user_message)
+
+        # Search relevant documents with optional content type filtering
         search_start = time.time()
         relevant_docs = self.vector_store.search_similar(
             tenant_id=tenant_id,
             query=user_message,
-            k=4
+            k=4,
+            content_types=content_type_filter
         )
         search_duration = (time.time() - search_start) * 1000
 
@@ -109,15 +178,27 @@ class ChatService:
         # Build context from relevant documents
         context_parts = []
         sources = []
-        
+        categorization_metadata = {
+            'content_types': set(),
+            'has_categorization': False
+        }
+
         for doc in relevant_docs:
             context_parts.append(doc.page_content)
             if hasattr(doc, 'metadata') and doc.metadata:
-                source = doc.metadata.get('source', 'Unknown')
+                source = doc.metadata.get('source_name', 'Unknown')
                 if source not in sources:
                     sources.append(source)
-        
+
+                # Collect categorization metadata from retrieved documents
+                if doc.metadata.get('content_type'):
+                    categorization_metadata['content_types'].add(doc.metadata['content_type'])
+                    categorization_metadata['has_categorization'] = True
+
         context = "\n\n".join(context_parts) if context_parts else "No specific context available."
+
+        # Convert sets to lists for JSON serialization
+        categorization_metadata['content_types'] = list(categorization_metadata['content_types'])
         
         # Get conversation history
         conversation_history = self._get_conversation_history(session_id)
@@ -210,7 +291,9 @@ class ChatService:
                 "metadata": {
                     "tenant_id": tenant_id,
                     "session_id": session_id,
-                    "context_docs_count": len(relevant_docs)
+                    "context_docs_count": len(relevant_docs),
+                    "content_type_filter_applied": content_type_filter,
+                    "categorization": categorization_metadata
                 },
                 "quality_metrics": quality_metrics  # NEW: Quality metrics for event publishing
             }
