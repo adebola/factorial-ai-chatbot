@@ -1,9 +1,9 @@
-# FactorialBot Production Deployment Checklist
+# ChatCraft Production Deployment Checklist
 
 ## Pre-Deployment
 
 ### 1. AWS Lightsail Instance
-- [ ] Instance resized to 8GB RAM / 4 vCPU
+- [ ] Instance resized to 16GB RAM / 4 vCPU
 - [ ] Static IP attached
 - [ ] Security groups configured (ports 22, 80, 443 open)
 - [ ] Swap file configured (4GB)
