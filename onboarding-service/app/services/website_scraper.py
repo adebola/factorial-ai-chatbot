@@ -357,10 +357,10 @@ class WebsiteScraper:
             )
             result = self._scrape_single_page(tenant_id, ingestion_id, url)
 
-            if result and len(result.page_content) > 100:
+            if result and len(result.page_content) > 500:
                 # Success with requests! Cache this preference
                 duration = time.time() - strategy_start_time
-                logger.debug(
+                logger.info(
                     "✅ Requests succeeded, caching preference",
                     tenant_id=tenant_id,
                     domain=domain,
@@ -401,7 +401,7 @@ class WebsiteScraper:
                 return result
 
             if getattr(settings, 'ENABLE_FALLBACK', True):
-                logger.debug(
+                logger.info(
                     "↪️  Requests failed, falling back to Playwright",
                     tenant_id=tenant_id,
                     url=url

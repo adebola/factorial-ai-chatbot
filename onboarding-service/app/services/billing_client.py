@@ -43,7 +43,7 @@ class BillingClient:
         self.access_token = access_token
         self.billing_url = os.environ.get(
             "BILLING_SERVICE_URL",
-            "http://localhost:8002"
+            "http://localhost:8004"
         )
         logger.debug(f"Billing client initialized with URL: {self.billing_url}")
 

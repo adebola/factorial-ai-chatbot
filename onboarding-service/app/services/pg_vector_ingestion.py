@@ -118,6 +118,23 @@ class PgVectorIngestionService:
                     page_number = metadata.get('page', None)
                     section_title = self._sanitize_content(metadata.get('section_title', '') if metadata.get('section_title') else None)
 
+                    # Extract categorization data from metadata
+                    category_ids = metadata.get('category_ids', [])
+                    tag_ids = metadata.get('tag_ids', [])
+                    content_type = metadata.get('content_type', None)
+
+                    # Convert category_ids and tag_ids to PostgreSQL array format
+                    # PostgreSQL expects arrays as '{val1,val2,val3}' format
+                    if category_ids:
+                        category_ids_str = '{' + ','.join(str(cid) for cid in category_ids) + '}'
+                    else:
+                        category_ids_str = '{}'
+
+                    if tag_ids:
+                        tag_ids_str = '{' + ','.join(str(tid) for tid in tag_ids) + '}'
+                    else:
+                        tag_ids_str = '{}'
+
                     insert_data.append({
                         'tenant_id': tenant_id,
                         'document_id': document_id,
@@ -130,9 +147,9 @@ class PgVectorIngestionService:
                         'source_name': source_name,
                         'page_number': page_number,
                         'section_title': section_title,
-                        'category_ids': '{}',  # Default empty array for categorization
-                        'tag_ids': '{}',       # Default empty array for tags
-                        'content_type': None   # Default null content type
+                        'category_ids': category_ids_str,
+                        'tag_ids': tag_ids_str,
+                        'content_type': content_type
                     })
                 
                 if insert_data:
@@ -215,16 +232,16 @@ class PgVectorIngestionService:
             # Update search index statistics
             self.db.execute(
                 text("""
-                    UPDATE vector_search_indexes 
+                    UPDATE vectors.vector_search_indexes
                     SET total_chunks = GREATEST(0, total_chunks - :deleted_count),
                         last_indexed_at = NOW()
                     WHERE tenant_id = :tenant_id
                 """),
                 {"tenant_id": tenant_id, "deleted_count": deleted_count}
             )
-            
+
             self.db.commit()
-            
+
             self.logger.info(f"Deleted {deleted_count} vector chunks for document {document_id}")
 
             return deleted_count != 0
@@ -241,20 +258,20 @@ class PgVectorIngestionService:
                 {"tenant_id": tenant_id, "ingestion_id": ingestion_id}
             )
             deleted_count = result.rowcount
-            
+
             # Update search index statistics
             self.db.execute(
                 text("""
-                    UPDATE vector_search_indexes 
+                    UPDATE vectors.vector_search_indexes
                     SET total_chunks = GREATEST(0, total_chunks - :deleted_count),
                         last_indexed_at = NOW()
                     WHERE tenant_id = :tenant_id
                 """),
                 {"tenant_id": tenant_id, "deleted_count": deleted_count}
             )
-            
+
             self.db.commit()
-            
+
             self.logger.info(f"Deleted {deleted_count} vector chunks for ingestion {ingestion_id}")
             return deleted_count != 0
                 
@@ -274,7 +291,7 @@ class PgVectorIngestionService:
             
             # Delete search index statistics for the tenant
             self.db.execute(
-                text("DELETE FROM vector_search_indexes WHERE tenant_id = :tenant_id"),
+                text("DELETE FROM vectors.vector_search_indexes WHERE tenant_id = :tenant_id"),
                 {"tenant_id": tenant_id}
             )
             

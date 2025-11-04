@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     REQUESTS_TIMEOUT: int = 10  # Requests timeout in seconds
 
     # Deprecated (kept for backward compatibility)
-    USE_JAVASCRIPT_SCRAPING: bool = True
+    USE_JAVASCRIPT_SCRAPING: bool = False
     
     # Password Policy (non-sensitive)
     PASSWORD_MIN_LENGTH: int = 8

@@ -241,19 +241,6 @@ async def delete_document(
                 detail="Failed to delete document"
             )
 
-        # Publish usage event for document deletion (fire-and-forget)
-        try:
-            usage_publisher.connect()
-            usage_publisher.publish_document_deleted(
-                tenant_id=claims.tenant_id,
-                document_id=document_id
-            )
-        except Exception as e:
-            # Log but don't fail the request
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to publish document deleted event: {e}")
-
         return {
             "message": "Document deleted successfully",
             "document_id": document_id,
@@ -310,20 +297,6 @@ async def delete_multiple_documents(
             else:
                 failed_ids.append(document_id)
 
-        # Publish usage events for all successfully deleted documents (fire-and-forget)
-        try:
-            usage_publisher.connect()
-            for document_id in successfully_deleted_ids:
-                usage_publisher.publish_document_deleted(
-                    tenant_id=claims.tenant_id,
-                    document_id=document_id
-                )
-        except Exception as e:
-            # Log but don't fail the request
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to publish document deleted events: {e}")
-        
         result = {
             "message": f"Deleted {deleted_count} of {len(document_ids)} documents",
             "deleted_count": deleted_count,

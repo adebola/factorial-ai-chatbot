@@ -15,14 +15,15 @@ from .api.logos import router as logos_router
 from .api.categorization import router as categorization_router
 from .core.config import settings
 from .core.logging_config import (
-    setup_logging, 
-    get_logger, 
-    set_request_context, 
+    setup_logging,
+    get_logger,
+    set_request_context,
     clear_request_context,
     generate_request_id,
     log_api_request,
     log_api_response
 )
+from .services.jwt_validator import jwt_validator
 
 # Setup structured logging with configuration
 setup_logging(
@@ -57,14 +58,26 @@ async def startup_event():
 async def logging_middleware(request: Request, call_next):
     """Middleware for request/response logging and context tracking."""
     start_time = time.time()
-    
+
     # Generate request ID
     request_id = generate_request_id()
-    
-    # Extract tenant info from headers or path
-    tenant_id = request.headers.get("x-tenant-id")
-    user_id = request.headers.get("x-user-id")
-    
+
+    # Extract tenant info from JWT token
+    tenant_id = None
+    user_id = None
+
+    authorization = request.headers.get("authorization")
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        try:
+            # Validate and decode JWT token
+            payload = await jwt_validator.validate_token(token)
+            tenant_id = payload.get("tenant_id")
+            user_id = payload.get("user_id") or payload.get("sub")
+        except Exception as e:
+            # Log but don't fail - some endpoints are public
+            logger.debug(f"Could not extract tenant info from token: {e}")
+
     # Set request context
     set_request_context(
         request_id=request_id,

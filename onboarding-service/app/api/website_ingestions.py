@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 import asyncio
 from datetime import datetime
 
@@ -9,6 +9,7 @@ from ..core.database import get_db, get_vector_db
 from ..core.config import settings
 from ..services.website_scraper import WebsiteScraper, ScrapingStrategy
 from ..services.pg_vector_ingestion import PgVectorIngestionService
+from ..services.document_categorization import DocumentCategorizationService
 from ..services.dependencies import get_current_tenant, TokenClaims, validate_token, get_full_tenant_details
 from ..models.tenant import IngestionStatus, WebsitePage
 from ..core.logging_config import get_logger
@@ -21,10 +22,13 @@ logger = get_logger("website_ingestions")
 @router.post("/websites/ingest")
 async def ingest_website(
     website_url: str = Form(...),
+    categories: Optional[List[str]] = Form(None, description="User-specified categories"),
+    tags: Optional[List[str]] = Form(None, description="User-specified tags"),
+    auto_categorize: bool = Form(True, description="Enable AI categorization"),
     claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Start the website ingestion process (requires Bearer token authentication)"""
+    """Start the website ingestion process with categorization (requires Bearer token authentication)"""
 
     # Validate URL
     if not website_url.startswith(('http://', 'https://')):
@@ -49,25 +53,39 @@ async def ingest_website(
 
     try:
         # Start scraping in the background
-        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+        # Don't pass use_javascript parameter - let it use the default AUTO strategy
+        scraper = WebsiteScraper(db)
         ingestion = scraper.start_website_ingestion(claims.tenant_id, website_url)
         
         # Process in the background (in a real app, use Celery)
-        # Pass environment variables explicitly to a background task
+        # Pass environment variables and categorization parameters to background task
         import os
         openai_key = os.environ.get("OPENAI_API_KEY")
         asyncio.create_task(
-            background_website_ingestion(claims.tenant_id, website_url, ingestion.id, openai_key)
+            background_website_ingestion(
+                tenant_id=claims.tenant_id,
+                website_url=website_url,
+                ingestion_id=ingestion.id,
+                openai_api_key=openai_key,
+                user_categories=categories,
+                user_tags=tags,
+                auto_categorize=auto_categorize
+            )
         )
 
         # Get tenant details if needed
         tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
 
         return {
-            "message": "Website ingestion started",
+            "message": "Website ingestion started with categorization",
             "ingestion_id": ingestion.id,
             "website_url": website_url,
             "status": "in_progress",
+            "categorization": {
+                "auto_categorize": auto_categorize,
+                "user_categories": categories or [],
+                "user_tags": tags or []
+            },
             "tenant_id": claims.tenant_id,
             "tenant_name": tenant_details.get("name")
         }
@@ -83,23 +101,119 @@ async def ingest_website(
 async def get_ingestion_status(
     ingestion_id: str,
     claims: TokenClaims = Depends(validate_token),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    vector_db: Session = Depends(get_vector_db)
 ) -> Dict[str, Any]:
-    """Get website ingestion status (requires Bearer token authentication)"""
+    """Get website ingestion status with categorization statistics (requires Bearer token authentication)"""
 
-    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+    scraper = WebsiteScraper(db)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
-    
+
     if not ingestion:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Ingestion not found or does not belong to this tenant"
         )
 
+    # Get categorization statistics from vector database
+    categorization_stats = None
+    try:
+        from sqlalchemy import text
+
+        # Query for categorization statistics for this ingestion
+        stats_query = text("""
+            SELECT
+                COUNT(*) as total_chunks,
+                COUNT(*) FILTER (WHERE array_length(category_ids, 1) > 0) as chunks_with_categories,
+                COUNT(*) FILTER (WHERE array_length(tag_ids, 1) > 0) as chunks_with_tags,
+                COUNT(DISTINCT content_type) FILTER (WHERE content_type IS NOT NULL) as content_types_count
+            FROM vectors.document_chunks
+            WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id
+        """)
+
+        result = vector_db.execute(stats_query, {
+            "tenant_id": claims.tenant_id,
+            "ingestion_id": ingestion_id
+        }).first()
+
+        if result and result.total_chunks > 0:
+            # Get distinct content types
+            content_types_query = text("""
+                SELECT content_type, COUNT(*) as count
+                FROM vectors.document_chunks
+                WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id
+                    AND content_type IS NOT NULL
+                GROUP BY content_type
+                ORDER BY count DESC
+            """)
+
+            content_types_result = vector_db.execute(content_types_query, {
+                "tenant_id": claims.tenant_id,
+                "ingestion_id": ingestion_id
+            }).fetchall()
+
+            # Get unique category IDs used in this ingestion
+            categories_query = text("""
+                SELECT DISTINCT unnest(category_ids) as category_id
+                FROM vectors.document_chunks
+                WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id
+                    AND array_length(category_ids, 1) > 0
+            """)
+
+            category_ids_result = vector_db.execute(categories_query, {
+                "tenant_id": claims.tenant_id,
+                "ingestion_id": ingestion_id
+            }).fetchall()
+
+            # Get category names from main database
+            categories_list = []
+            if category_ids_result:
+                from ..models.categorization import DocumentCategory
+                category_ids = [row.category_id for row in category_ids_result]
+                categories = db.query(DocumentCategory).filter(
+                    DocumentCategory.id.in_(category_ids)
+                ).all()
+                categories_list = [{"id": cat.id, "name": cat.name} for cat in categories]
+
+            # Get unique tag IDs used in this ingestion
+            tags_query = text("""
+                SELECT DISTINCT unnest(tag_ids) as tag_id
+                FROM vectors.document_chunks
+                WHERE tenant_id = :tenant_id AND ingestion_id = :ingestion_id
+                    AND array_length(tag_ids, 1) > 0
+            """)
+
+            tag_ids_result = vector_db.execute(tags_query, {
+                "tenant_id": claims.tenant_id,
+                "ingestion_id": ingestion_id
+            }).fetchall()
+
+            # Get tag names from main database
+            tags_list = []
+            if tag_ids_result:
+                from ..models.categorization import DocumentTag
+                tag_ids = [row.tag_id for row in tag_ids_result]
+                tags = db.query(DocumentTag).filter(
+                    DocumentTag.id.in_(tag_ids)
+                ).all()
+                tags_list = [{"id": tag.id, "name": tag.name} for tag in tags]
+
+            categorization_stats = {
+                "total_chunks": result.total_chunks,
+                "chunks_with_categories": result.chunks_with_categories,
+                "chunks_with_tags": result.chunks_with_tags,
+                "categories": categories_list,
+                "tags": tags_list,
+                "content_types": {row.content_type: row.count for row in content_types_result}
+            }
+    except Exception as e:
+        logger.warning(f"Failed to get categorization stats: {e}")
+        categorization_stats = None
+
     # Get tenant details if needed
     tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
 
-    return {
+    response = {
         "ingestion_id": ingestion.id,
         "base_url": ingestion.base_url,
         "status": ingestion.status,
@@ -113,16 +227,89 @@ async def get_ingestion_status(
         "tenant_name": tenant_details.get("name")
     }
 
+    # Add categorization stats if available
+    if categorization_stats:
+        response["categorization"] = categorization_stats
+
+    return response
+
 
 @router.get("/ingestions/")
 async def list_tenant_ingestions(
     claims: TokenClaims = Depends(validate_token),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    vector_db: Session = Depends(get_vector_db)
 ) -> Dict[str, Any]:
-    """List all website ingestions for a tenant (requires Bearer token authentication)"""
-    
-    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+    """List all website ingestions for a tenant with categorization summaries (requires Bearer token authentication)"""
+
+    scraper = WebsiteScraper(db)
     ingestions = scraper.get_tenant_ingestions(claims.tenant_id)
+
+    # Get categorization summaries for all ingestions in batch
+    categorization_summaries = {}
+    if ingestions:
+        try:
+            from sqlalchemy import text
+
+            ingestion_ids = [ing.id for ing in ingestions]
+
+            # Single batch query to get categorization stats for all ingestions
+            batch_query = text("""
+                SELECT
+                    ingestion_id,
+                    COUNT(*) as total_chunks,
+                    COUNT(*) FILTER (WHERE array_length(category_ids, 1) > 0) as chunks_with_categories,
+                    COUNT(*) FILTER (WHERE array_length(tag_ids, 1) > 0) as chunks_with_tags,
+                    (
+                        SELECT COUNT(DISTINCT category_id)
+                        FROM (
+                            SELECT unnest(category_ids) as category_id
+                            FROM vectors.document_chunks
+                            WHERE tenant_id = :tenant_id AND ingestion_id = dc.ingestion_id
+                        ) cat_ids
+                    ) as unique_categories,
+                    (
+                        SELECT COUNT(DISTINCT tag_id)
+                        FROM (
+                            SELECT unnest(tag_ids) as tag_id
+                            FROM vectors.document_chunks
+                            WHERE tenant_id = :tenant_id AND ingestion_id = dc.ingestion_id
+                        ) tag_ids
+                    ) as unique_tags,
+                    (
+                        SELECT content_type
+                        FROM vectors.document_chunks
+                        WHERE tenant_id = :tenant_id
+                            AND ingestion_id = dc.ingestion_id
+                            AND content_type IS NOT NULL
+                        GROUP BY content_type
+                        ORDER BY COUNT(*) DESC
+                        LIMIT 1
+                    ) as primary_content_type
+                FROM vectors.document_chunks dc
+                WHERE tenant_id = :tenant_id
+                    AND ingestion_id = ANY(:ingestion_ids)
+                GROUP BY ingestion_id
+            """)
+
+            results = vector_db.execute(batch_query, {
+                "tenant_id": claims.tenant_id,
+                "ingestion_ids": ingestion_ids
+            }).fetchall()
+
+            # Build summary dict
+            for row in results:
+                categorization_summaries[row.ingestion_id] = {
+                    "category_count": row.unique_categories or 0,
+                    "tag_count": row.unique_tags or 0,
+                    "primary_content_type": row.primary_content_type,
+                    "has_categorization": (row.chunks_with_categories or 0) > 0,
+                    "chunks_with_categories": row.chunks_with_categories or 0,
+                    "total_chunks": row.total_chunks or 0
+                }
+        except Exception as e:
+            logger.warning(f"Failed to get categorization summaries: {e}")
+            # Continue without categorization summaries
 
     # Get tenant details if needed
     tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
@@ -138,7 +325,8 @@ async def list_tenant_ingestions(
                 "pages_failed": ing.pages_failed,
                 "started_at": ing.started_at.isoformat() if ing.started_at else None,
                 "completed_at": ing.completed_at.isoformat() if ing.completed_at else None,
-                "error_message": ing.error_message
+                "error_message": ing.error_message,
+                "categorization_summary": categorization_summaries.get(ing.id)
             }
             for ing in ingestions
         ],
@@ -157,7 +345,7 @@ async def delete_ingestion(
     """Delete a website ingestion record (requires Bearer token authentication)"""
     
     try:
-        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+        scraper = WebsiteScraper(db)
 
         # Verify ingestion exists and belongs to a tenant
         ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
@@ -175,17 +363,6 @@ async def delete_ingestion(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete ingestion"
             )
-
-        # Publish usage event for website deletion (fire-and-forget)
-        try:
-            usage_publisher.connect()
-            usage_publisher.publish_website_deleted(
-                tenant_id=claims.tenant_id,
-                website_id=ingestion_id
-            )
-        except Exception as e:
-            # Log but don't fail the request
-            logger.warning(f"Failed to publish website deleted event: {e}")
 
         return {
             "message": "Website ingestion deleted successfully",
@@ -212,7 +389,7 @@ async def retry_ingestion(
     """Retry a failed website ingestion (requires Bearer token authentication)"""
     
     try:
-        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+        scraper = WebsiteScraper(db)
 
         # Get existing ingestion
         ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
@@ -256,8 +433,16 @@ async def retry_ingestion(
         )
 
 
-async def background_website_ingestion(tenant_id: str, website_url: str, ingestion_id: str, openai_api_key: str = None):
-    """Background task for website ingestion - creates its own database session"""
+async def background_website_ingestion(
+    tenant_id: str,
+    website_url: str,
+    ingestion_id: str,
+    openai_api_key: str = None,
+    user_categories: Optional[List[str]] = None,
+    user_tags: Optional[List[str]] = None,
+    auto_categorize: bool = True
+):
+    """Background task for website ingestion with categorization - creates its own database session"""
     logger.info(
         "Background ingestion task started",
         tenant_id=tenant_id,
@@ -298,7 +483,7 @@ async def background_website_ingestion(tenant_id: str, website_url: str, ingesti
 
             # Update ingestion status to failed
             from ..core.config import settings
-            scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+            scraper = WebsiteScraper(db)
             ingestion = scraper.get_ingestion_status(tenant_id, ingestion_id)
             if ingestion:
                 ingestion.status = IngestionStatus.FAILED
@@ -315,7 +500,7 @@ async def background_website_ingestion(tenant_id: str, website_url: str, ingesti
         )
 
         from ..core.config import settings
-        scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+        scraper = WebsiteScraper(db)
 
         # Get the existing ingestion record instead of creating a new one
         ingestion = scraper.get_ingestion_status(tenant_id, ingestion_id)
@@ -335,6 +520,105 @@ async def background_website_ingestion(tenant_id: str, website_url: str, ingesti
         )
 
         documents = await scraper.process_existing_ingestion(ingestion)
+
+        # Categorize documents before vector ingestion
+        if documents:
+            logger.info(
+                "Starting categorization for scraped pages",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                document_count=len(documents),
+                auto_categorize=auto_categorize
+            )
+
+            # Initialize categorization service
+            categorization_service = DocumentCategorizationService(db)
+
+            # Track categorization statistics
+            categorized_count = 0
+            categories_discovered = set()
+            tags_discovered = set()
+            content_types_found = {}
+
+            # Categorize each scraped page
+            for doc in documents:
+                try:
+                    # Perform categorization using classify_document method
+                    classification = await categorization_service.classify_document(
+                        document=doc,
+                        tenant_id=tenant_id,
+                        enable_ai=auto_categorize
+                    )
+
+                    if classification:
+                        # Get or create category and tag records, collect their IDs
+                        category_ids = []
+                        tag_ids = []
+
+                        # Process categories
+                        for cat_data in classification.categories:
+                            try:
+                                category = await categorization_service.get_or_create_category(
+                                    tenant_id=tenant_id,
+                                    category_name=cat_data["name"],
+                                    description=f"Auto-categorized as {cat_data['name']}"
+                                )
+                                category_ids.append(category.id)
+                                categories_discovered.add(cat_data["name"])
+                            except Exception as cat_err:
+                                logger.warning(f"Failed to create category {cat_data['name']}: {cat_err}")
+
+                        # Process tags
+                        for tag_data in classification.tags:
+                            try:
+                                tag = await categorization_service.get_or_create_tag(
+                                    tenant_id=tenant_id,
+                                    tag_name=tag_data["name"],
+                                    tag_type="auto"
+                                )
+                                tag_ids.append(tag.id)
+                                tags_discovered.add(tag_data["name"])
+                            except Exception as tag_err:
+                                logger.warning(f"Failed to create tag {tag_data['name']}: {tag_err}")
+
+                        # Update document metadata with IDs for vector database
+                        doc.metadata['category_ids'] = category_ids
+                        doc.metadata['tag_ids'] = tag_ids
+                        doc.metadata['content_type'] = classification.content_type
+                        doc.metadata['language'] = classification.language
+                        doc.metadata['sentiment'] = classification.sentiment
+
+                        # Track statistics
+                        categorized_count += 1
+                        content_type = classification.content_type
+                        content_types_found[content_type] = content_types_found.get(content_type, 0) + 1
+
+                        logger.debug(
+                            "Page categorized",
+                            page_url=doc.metadata.get('source_name'),
+                            categories=len(category_ids),
+                            tags=len(tag_ids),
+                            content_type=content_type
+                        )
+
+                except Exception as e:
+                    logger.warning(
+                        "Failed to categorize page",
+                        page_url=doc.metadata.get('source_name'),
+                        error=str(e)
+                    )
+                    # Continue with other pages even if one fails
+
+            logger.info(
+                "Categorization completed",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                categorized_count=categorized_count,
+                total_pages=len(documents),
+                categories_discovered=len(categories_discovered),
+                tags_discovered=len(tags_discovered),
+                content_types=content_types_found
+            )
 
         # Ingest into vector store
         if documents:
@@ -358,24 +642,6 @@ async def background_website_ingestion(tenant_id: str, website_url: str, ingesti
                 ingestion_id=ingestion_id,
                 document_count=len(documents)
             )
-
-            # Publish usage event for website creation (fire-and-forget)
-            try:
-                usage_publisher.connect()
-                usage_publisher.publish_website_created(
-                    tenant_id=tenant_id,
-                    website_id=ingestion_id,
-                    url=website_url,
-                    pages_scraped=ingestion.pages_processed
-                )
-                logger.debug(
-                    "Published website created event",
-                    tenant_id=tenant_id,
-                    ingestion_id=ingestion_id
-                )
-            except Exception as e:
-                # Log but don't fail the ingestion
-                logger.warning(f"Failed to publish website created event: {e}")
         else:
             logger.warning(
                 "No documents extracted from website",
@@ -397,7 +663,7 @@ async def background_website_ingestion(tenant_id: str, website_url: str, ingesti
         # Update ingestion status to failed
         try:
             from ..core.config import settings
-            scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+            scraper = WebsiteScraper(db)
             ingestion = scraper.get_ingestion_status(tenant_id, ingestion_id)
             if ingestion:
                 ingestion.status = IngestionStatus.FAILED
@@ -440,7 +706,7 @@ async def get_ingestion_pages(
     """Get individual pages for website ingestion with pagination (requires Bearer token authentication)"""
 
     # Verify ingestion belongs to tenant
-    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+    scraper = WebsiteScraper(db)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
@@ -499,7 +765,7 @@ async def get_ingestion_stats(
     """Get detailed statistics for a website ingestion (requires Bearer token authentication)"""
 
     # Verify ingestion belongs to tenant
-    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+    scraper = WebsiteScraper(db)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
@@ -586,7 +852,7 @@ async def get_page_content_preview(
     """Get content preview for a specific page (requires Bearer token authentication)"""
 
     # Verify ingestion belongs to tenant
-    scraper = WebsiteScraper(db, use_javascript=settings.USE_JAVASCRIPT_SCRAPING)
+    scraper = WebsiteScraper(db)
     ingestion = scraper.get_ingestion_status(claims.tenant_id, ingestion_id)
     
     if not ingestion:
