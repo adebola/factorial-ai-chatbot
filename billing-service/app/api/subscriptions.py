@@ -203,8 +203,8 @@ async def get_current_usage(
                 "id": subscription.id if subscription else None,
                 "plan_id": subscription.plan_id if subscription else plan.id,
                 "plan_name": plan.name,
-                "status": subscription.status.value if subscription else "none",
-                "billing_cycle": subscription.billing_cycle.value if subscription else "none"
+                "status": subscription.status if subscription else "none",
+                "billing_cycle": subscription.billing_cycle if subscription else "none"
             }
         }
         
@@ -481,8 +481,8 @@ async def create_subscription(
             "subscription": {
                 "id": subscription.id,
                 "plan_id": subscription.plan_id,
-                "status": subscription.status.value,
-                "billing_cycle": subscription.billing_cycle.value,
+                "status": subscription.status,
+                "billing_cycle": subscription.billing_cycle,
                 "amount": str(subscription.amount),
                 "currency": subscription.currency,
                 "starts_at": subscription.starts_at.isoformat(),
@@ -533,8 +533,8 @@ async def get_current_subscription(
             "subscription": {
                 "id": subscription.id,
                 "plan_id": subscription.plan_id,
-                "status": subscription.status.value,
-                "billing_cycle": subscription.billing_cycle.value,
+                "status": subscription.status,
+                "billing_cycle": subscription.billing_cycle,
                 "amount": str(subscription.amount),
                 "currency": subscription.currency,
                 "starts_at": subscription.starts_at.isoformat(),
@@ -552,7 +552,7 @@ async def get_current_subscription(
                 {
                     "id": payment.id,
                     "amount": str(payment.amount),
-                    "status": payment.status.value,
+                    "status": payment.status,
                     "transaction_type": payment.transaction_type.value,
                     "created_at": payment.created_at.isoformat(),
                     "processed_at": payment.processed_at.isoformat() if payment.processed_at else None
@@ -691,8 +691,8 @@ async def get_subscription_history(
                 {
                     "id": sub.id,
                     "plan_id": sub.plan_id,
-                    "status": sub.status.value,
-                    "billing_cycle": sub.billing_cycle.value,
+                    "status": sub.status,
+                    "billing_cycle": sub.billing_cycle,
                     "amount": str(sub.amount),
                     "currency": sub.currency,
                     "starts_at": sub.starts_at.isoformat(),
@@ -724,27 +724,27 @@ async def get_subscription_analytics(
         # Get subscription counts
         total_subs = db.query(Subscription).count()
         active_subs = db.query(Subscription).filter(
-            Subscription.status == SubscriptionStatus.ACTIVE
+            Subscription.status == 'active'
         ).count()
         trial_subs = db.query(Subscription).filter(
-            Subscription.status == SubscriptionStatus.TRIALING
+            Subscription.status == 'trialing'
         ).count()
         cancelled_subs = db.query(Subscription).filter(
-            Subscription.status == SubscriptionStatus.CANCELLED
+            Subscription.status == 'cancelled'
         ).count()
-        
+
         # Calculate revenue (simplified)
         monthly_revenue = db.query(Subscription).filter(
             and_(
-                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
-                Subscription.billing_cycle == BillingCycle.MONTHLY
+                Subscription.status.in_(['active', 'trialing']),
+                Subscription.billing_cycle == 'monthly'
             )
         ).all()
-        
+
         yearly_revenue = db.query(Subscription).filter(
             and_(
-                Subscription.status.in_([SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]),
-                Subscription.billing_cycle == BillingCycle.YEARLY
+                Subscription.status.in_(['active', 'trialing']),
+                Subscription.billing_cycle == 'yearly'
             )
         ).all()
         
@@ -755,7 +755,7 @@ async def get_subscription_analytics(
         thirty_days_ago = datetime.utcnow() - timedelta(days=30)
         churned_count = db.query(Subscription).filter(
             and_(
-                Subscription.status == SubscriptionStatus.CANCELLED,
+                Subscription.status == 'cancelled',
                 Subscription.cancelled_at >= thirty_days_ago
             )
         ).count()
@@ -818,8 +818,8 @@ async def list_all_subscriptions(
                     "id": sub.id,
                     "tenant_id": sub.tenant_id,
                     "plan_id": sub.plan_id,
-                    "status": sub.status.value,
-                    "billing_cycle": sub.billing_cycle.value,
+                    "status": sub.status,
+                    "billing_cycle": sub.billing_cycle,
                     "amount": str(sub.amount),
                     "currency": sub.currency,
                     "starts_at": sub.starts_at.isoformat(),

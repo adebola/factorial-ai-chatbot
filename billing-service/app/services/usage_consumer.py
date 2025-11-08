@@ -266,19 +266,19 @@ class UsageEventConsumer:
                 ).first()
 
             # Update usage based on event type
-            if event_type == "usage.document.created":
+            if event_type in ["usage.document.created", "usage.document.added"]:
                 usage.documents_used += 1
                 logger.info(f"Incremented documents for tenant {tenant_id}: {usage.documents_used}")
 
-            elif event_type == "usage.document.deleted":
+            elif event_type in ["usage.document.deleted", "usage.document.removed"]:
                 usage.documents_used = max(0, usage.documents_used - 1)
                 logger.info(f"Decremented documents for tenant {tenant_id}: {usage.documents_used}")
 
-            elif event_type == "usage.website.created":
+            elif event_type in ["usage.website.created", "usage.website.added"]:
                 usage.websites_used += 1
                 logger.info(f"Incremented websites for tenant {tenant_id}: {usage.websites_used}")
 
-            elif event_type == "usage.website.deleted":
+            elif event_type in ["usage.website.deleted", "usage.website.removed"]:
                 usage.websites_used = max(0, usage.websites_used - 1)
                 logger.info(f"Decremented websites for tenant {tenant_id}: {usage.websites_used}")
 

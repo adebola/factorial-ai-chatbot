@@ -250,7 +250,7 @@ class WorkflowService:
 
         try:
             # Soft delete by setting status to archived
-            workflow.status = WorkflowStatus.ARCHIVED
+            workflow.status = WorkflowStatus.ARCHIVED.value
             workflow.is_active = False
             workflow.updated_at = datetime.utcnow()
 
@@ -284,7 +284,7 @@ class WorkflowService:
 
         try:
             workflow.is_active = True
-            workflow.status = WorkflowStatus.ACTIVE
+            workflow.status = WorkflowStatus.ACTIVE.value
             workflow.updated_at = datetime.utcnow()
 
             self.db.commit()
@@ -318,7 +318,7 @@ class WorkflowService:
 
         try:
             workflow.is_active = False
-            workflow.status = WorkflowStatus.INACTIVE
+            workflow.status = WorkflowStatus.INACTIVE.value
             workflow.updated_at = datetime.utcnow()
 
             self.db.commit()

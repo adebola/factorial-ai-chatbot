@@ -24,6 +24,7 @@ from .core.logging_config import (
     log_api_response
 )
 from .services.jwt_validator import jwt_validator
+from .services.usage_publisher import usage_publisher
 
 # Setup structured logging with configuration
 setup_logging(
@@ -42,7 +43,7 @@ app = FastAPI(
 async def startup_event():
     """Validate environment configuration on startup"""
     logger.info("Starting Onboarding Service...")
-    
+
     # Check critical environment variables
     openai_key = os.environ.get("OPENAI_API_KEY")
     if not openai_key:
@@ -50,7 +51,15 @@ async def startup_event():
         logger.error("Please add OPENAI_API_KEY to your .env file")
     else:
         logger.info("OPENAI_API_KEY found - vector ingestion enabled")
-    
+
+    # Connect usage event publisher
+    try:
+        usage_publisher.connect()
+        logger.info("✓ Usage event publisher connected successfully")
+    except Exception as e:
+        logger.error(f"Failed to connect usage publisher: {e}", exc_info=True)
+        logger.warning("Onboarding service will continue without usage event publishing")
+
     logger.info("Onboarding Service startup completed")
 
 

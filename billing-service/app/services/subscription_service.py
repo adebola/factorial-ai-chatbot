@@ -147,7 +147,7 @@ class SubscriptionService:
             "subscription_id": subscription.id,
             "tenant_id": subscription.tenant_id,
             "plan_id": subscription.plan_id,
-            "billing_cycle": subscription.billing_cycle.value,
+            "billing_cycle": subscription.billing_cycle,
             "transaction_type": TransactionType.SUBSCRIPTION.value,
             **(metadata or {})
         }
@@ -172,7 +172,7 @@ class SubscriptionService:
                 transaction_type=TransactionType.SUBSCRIPTION,
                 paystack_reference=reference,
                 paystack_access_code=result["access_code"],
-                description=f"Subscription payment for {subscription.billing_cycle.value} plan",
+                description=f"Subscription payment for {subscription.billing_cycle} plan",
                 payment_metadata=payment_metadata
             )
 
@@ -440,11 +440,7 @@ class SubscriptionService:
         return self.db.query(Subscription).filter(
             and_(
                 Subscription.tenant_id == tenant_id,
-                Subscription.status.in_([
-                    SubscriptionStatus.ACTIVE,
-                    SubscriptionStatus.TRIALING,
-                    SubscriptionStatus.PAST_DUE
-                ])
+                Subscription.status.in_(['active', 'trialing', 'past_due'])
             )
         ).first()
 

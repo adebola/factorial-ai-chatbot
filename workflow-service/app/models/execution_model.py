@@ -38,7 +38,7 @@ class WorkflowExecution(Base):
     user_identifier = Column(String(255), nullable=True)  # Email, phone, or user ID
 
     # Execution state
-    status = Column(SQLEnum(ExecutionStatus), default=ExecutionStatus.RUNNING)
+    status = Column(String(20), default=ExecutionStatus.RUNNING.value, nullable=False)
     current_step_id = Column(String(255), nullable=True)
     variables = Column(JSON, default=dict)  # Workflow variables and context
 
@@ -94,13 +94,13 @@ class StepExecution(Base):
 
     # Step info
     step_id = Column(String(255), nullable=False)
-    step_type = Column(SQLEnum(StepType), nullable=False)
+    step_type = Column(String(20), nullable=False)
     step_config = Column(JSON, nullable=True)  # Step configuration
 
     # Execution details
     input_data = Column(JSON, nullable=True)  # Input to the step
     output_data = Column(JSON, nullable=True)  # Output from the step
-    status = Column(SQLEnum(ExecutionStatus), nullable=False)
+    status = Column(String(20), nullable=False)
     error_message = Column(Text, nullable=True)
 
     # Timing

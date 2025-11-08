@@ -135,7 +135,7 @@ class UserEventConsumer:
 
             logger.info(
                 f"✅ Successfully created subscription {subscription.id} for tenant {tenant_id}. "
-                f"Status: {subscription.status.value}, Trial ends: {trial_end.date()}"
+                f"Status: {subscription.status}, Trial ends: {trial_end.date()}"
             )
 
             # Publish subscription_created event to authorization server

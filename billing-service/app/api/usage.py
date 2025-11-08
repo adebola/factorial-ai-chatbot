@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..models.subscription import UsageTracking, Subscription
-from ..services.dependencies import TokenClaims, validate_token
+from ..services.dependencies import TokenClaims, validate_token, validate_token_or_api_key
 from ..services.plan_service import PlanService
 from ..services.subscription_service import SubscriptionService
 
@@ -50,7 +50,7 @@ class BatchLimitCheckResponse(BaseModel):
 @router.get("/check/{usage_type}", response_model=LimitCheckResponse)
 async def check_usage_limit(
     usage_type: str,
-    claims: TokenClaims = Depends(validate_token),
+    claims: TokenClaims = Depends(validate_token_or_api_key),
     db: Session = Depends(get_db)
 ) -> LimitCheckResponse:
     """
@@ -64,6 +64,10 @@ async def check_usage_limit(
     - websites: Check website ingestion limit
     - daily_chats: Check daily chat limit
     - monthly_chats: Check monthly chat limit
+
+    Authentication:
+    - JWT token (Bearer): For user access
+    - API key (X-API-Key): For service-to-service calls
     """
 
     try:
@@ -196,7 +200,7 @@ async def check_batch_limits(
 @router.get("/stats/{tenant_id}", response_model=Dict[str, Any])
 async def get_usage_stats(
     tenant_id: str,
-    claims: TokenClaims = Depends(validate_token),
+    claims: TokenClaims = Depends(validate_token_or_api_key),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -204,6 +208,10 @@ async def get_usage_stats(
 
     This is a lightweight endpoint for getting raw usage numbers.
     For detailed usage with percentages and limits, use /subscriptions/usage/current
+
+    Authentication:
+    - JWT token (Bearer): For user access
+    - API key (X-API-Key): For service-to-service calls
     """
 
     # Verify tenant access (users can only access their own tenant data)
@@ -259,10 +267,10 @@ async def get_usage_stats(
                 "monthly_reset_at": usage.monthly_reset_at.isoformat() if usage.monthly_reset_at else None
             },
             "period": {
-                "start": usage.period_start.isoformat(),
-                "end": usage.period_end.isoformat()
+                "start": usage.period_start.isoformat() if usage.period_start else None,
+                "end": usage.period_end.isoformat() if usage.period_end else None
             },
-            "updated_at": usage.updated_at.isoformat()
+            "updated_at": usage.updated_at.isoformat() if usage.updated_at else None
         }
 
     except Exception as e:

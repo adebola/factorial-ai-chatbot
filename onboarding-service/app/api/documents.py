@@ -11,6 +11,7 @@ from ..services.pg_vector_ingestion import PgVectorIngestionService
 from ..services.categorized_vector_store import CategorizedVectorStore
 from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
 from ..services.billing_client import BillingClient
+from ..services.usage_publisher import usage_publisher
 
 router = APIRouter()
 
@@ -73,8 +74,17 @@ async def upload_document_with_categorization(
         # Get tenant details
         tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
 
-        # Note: Usage tracking events are now published by the Billing Service
-        # The billing service monitors document creation through its own mechanisms
+        # Publish usage event to billing service
+        try:
+            usage_publisher.publish_document_added(
+                tenant_id=claims.tenant_id,
+                document_id=document_id,
+                filename=file.filename,
+                file_size=file.size or 0
+            )
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Failed to publish document usage event: {e}")
 
         return {
             "message": "Document uploaded and categorized successfully",
@@ -240,6 +250,17 @@ async def delete_document(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete document"
             )
+
+        # Publish usage event to billing service
+        try:
+            usage_publisher.publish_document_removed(
+                tenant_id=claims.tenant_id,
+                document_id=document_id,
+                filename=existing_doc.original_filename
+            )
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Failed to publish document removal usage event: {e}")
 
         return {
             "message": "Document deleted successfully",

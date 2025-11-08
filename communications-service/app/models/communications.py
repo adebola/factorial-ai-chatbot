@@ -50,7 +50,7 @@ class EmailMessage(Base):
     # template_data = Column(JSON, nullable=True)  # Data used for template substitution
 
     # Delivery tracking
-    status = Column(Enum(MessageStatus), default=MessageStatus.PENDING, nullable=False)
+    status = Column(String(20), default=MessageStatus.PENDING.value, nullable=False)
     provider_message_id = Column(String(255), nullable=True)  # SendGrid message ID
 
     # Attachment info (stored as JSON array)
@@ -89,7 +89,7 @@ class SmsMessage(Base):
     # template_data = Column(JSON, nullable=True)
 
     # Delivery tracking
-    status = Column(Enum(MessageStatus), default=MessageStatus.PENDING, nullable=False)
+    status = Column(String(20), default=MessageStatus.PENDING.value, nullable=False)
     provider_message_id = Column(String(255), nullable=True)  # Provider message ID
 
     # Tracking
@@ -116,7 +116,7 @@ class MessageTemplate(Base):
     # Template details
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    template_type = Column(Enum(TemplateType), nullable=False)
+    template_type = Column(String(20), nullable=False)
 
     # Email template fields
     subject_template = Column(String(500), nullable=True)  # For email only
@@ -146,7 +146,7 @@ class DeliveryLog(Base):
 
     # Reference to original message
     message_id = Column(String(36), nullable=False, index=True)
-    message_type = Column(Enum(MessageType), nullable=False)
+    message_type = Column(String(20), nullable=False)
     tenant_id = Column(String(36), nullable=False, index=True)
 
     # Event details

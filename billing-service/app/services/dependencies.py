@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -9,6 +9,7 @@ import jwt
 
 from .redis_auth_cache import redis_token_cache
 from .jwt_validator import jwt_validator
+from .tenant_client import TenantClient
 
 logger = logging.getLogger(__name__)
 # Configure HTTPBearer to return 401 instead of 403 for authentication failures
@@ -219,6 +220,87 @@ async def get_full_tenant_details(tenant_id: str, access_token: Optional[str] = 
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authorization server unavailable"
         )
+
+
+# API Key Authentication (for service-to-service calls)
+tenant_client = TenantClient()
+
+
+async def validate_api_key(
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+) -> TokenClaims:
+    """Validate API key and return tenant claims (for service-to-service auth)"""
+
+    if not x_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key header missing",
+            headers={"WWW-Authenticate": "ApiKey"}
+        )
+
+    try:
+        # Fetch tenant using API key
+        tenant = await tenant_client.get_tenant_by_api_key(x_api_key)
+
+        if not tenant:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API key",
+                headers={"WWW-Authenticate": "ApiKey"}
+            )
+
+        # Create claims from tenant data (service account context)
+        claims = TokenClaims(
+            tenant_id=tenant["id"],
+            user_id="service_account",  # API key auth doesn't have user context
+            email=None,
+            full_name=None,
+            api_key=x_api_key,
+            authorities=[]  # Service accounts have no user roles
+        )
+
+        logger.debug(f"API key validated for tenant: {tenant['id']}")
+        return claims
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API key validation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API key",
+            headers={"WWW-Authenticate": "ApiKey"}
+        )
+
+
+async def validate_token_or_api_key(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key")
+) -> TokenClaims:
+    """
+    Flexible authentication: accepts either JWT token OR API key.
+    Use this for endpoints that need to support both user access (JWT) and service access (API key).
+    """
+
+    # Try JWT token first
+    if credentials:
+        try:
+            return await validate_token(credentials)
+        except HTTPException as e:
+            # If JWT validation fails and no API key provided, raise the error
+            if not x_api_key:
+                raise
+
+    # Try API key
+    if x_api_key:
+        return await validate_api_key(x_api_key)
+
+    # Neither provided
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required: provide Bearer token or X-API-Key header",
+        headers={"WWW-Authenticate": "Bearer, ApiKey"}
+    )
 
 
 # Backward compatibility aliases

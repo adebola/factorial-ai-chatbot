@@ -1,7 +1,7 @@
 import os
 import hashlib
 from typing import List, Dict, Any, Tuple
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from openai import OpenAI

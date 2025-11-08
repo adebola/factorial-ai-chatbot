@@ -129,7 +129,7 @@ async def get_session_state(
         state = await state_manager.get_state(session_id)
 
         if not state:
-            logger.warning(f"Session state not found for session_id={session_id}")
+            logger.debug(f"Session state not found for session_id={session_id}")
             raise HTTPException(status_code=404, detail="Session state not found")
 
         # Verify tenant access

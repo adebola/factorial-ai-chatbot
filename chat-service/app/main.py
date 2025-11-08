@@ -20,11 +20,12 @@ from .core.logging_config import (
 )
 from .services.limit_warning_consumer import limit_warning_consumer
 from .services.event_publisher import event_publisher
+from .services.rabbitmq_diagnostics import log_diagnostics
 
 # Setup structured logging with configuration
 setup_logging(
-    log_level=os.environ['LOG_LEVEL'],
-    json_logs=(os.environ['ENVIRONMENT'].lower() == "production")
+    log_level=os.environ.get('LOG_LEVEL', 'INFO'),
+    json_logs=(os.environ.get('ENVIRONMENT', 'development').lower() == "production")
 )
 logger = get_logger("main")
 
@@ -32,7 +33,6 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
-
 
 @app.on_event("startup")
 async def startup_event():
@@ -48,20 +48,42 @@ async def startup_event():
         logger.info("OPENAI_API_KEY found - AI chat enabled")
 
     # Start RabbitMQ limit warning consumer
+    consumer_started = False
     try:
         limit_warning_consumer.start()
-        logger.info("Limit warning consumer started successfully")
+        consumer_started = True
+        logger.info("✓ Limit warning consumer initialization started (running in background thread)")
     except Exception as e:
         logger.error(f"Failed to start limit warning consumer: {e}", exc_info=True)
         logger.warning("Chat service will continue without limit warning consumer")
+        # Run diagnostics to help identify the issue
+        logger.info("Running RabbitMQ connection diagnostics...")
+        log_diagnostics()
 
     # Connect event publisher
+    publisher_connected = False
     try:
         event_publisher.connect()
-        logger.info("Event publisher connected successfully")
+        publisher_connected = True
+        logger.info("✓ Event publisher connected successfully")
     except Exception as e:
         logger.error(f"Failed to connect event publisher: {e}", exc_info=True)
         logger.warning("Chat service will continue without event publisher")
+        # Run diagnostics to help identify the issue (only if not already run)
+        logger.info("Running RabbitMQ connection diagnostics...")
+        log_diagnostics()
+
+    # Log RabbitMQ connection summary
+    rabbitmq_status = {
+        "event_publisher": "connected" if publisher_connected else "disconnected",
+        "limit_warning_consumer": "started" if consumer_started else "not_started"
+    }
+    logger.info(
+        f"RabbitMQ Integration Status: "
+        f"Publisher={rabbitmq_status['event_publisher']}, "
+        f"Consumer={rabbitmq_status['limit_warning_consumer']}",
+        extra=rabbitmq_status
+    )
 
     logger.info("Chat Service startup completed")
 

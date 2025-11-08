@@ -3,7 +3,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 from typing import Optional
 
-from sqlalchemy import Column, String, DateTime, Boolean, Text, JSON, Enum, ForeignKey, Numeric, Integer
+from sqlalchemy import Column, String, DateTime, Boolean, Text, JSON, ForeignKey, Numeric, Integer
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 import enum
@@ -59,8 +59,8 @@ class Subscription(Base):
     plan_id = Column(String(36), ForeignKey("plans.id"), nullable=False, index=True)
     
     # Subscription details
-    status = Column(Enum(SubscriptionStatus), default=SubscriptionStatus.PENDING, nullable=False)
-    billing_cycle = Column(Enum(BillingCycle), default=BillingCycle.MONTHLY, nullable=False)
+    status = Column(String(20), default=SubscriptionStatus.PENDING.value, nullable=False)
+    billing_cycle = Column(String(20), default=BillingCycle.MONTHLY.value, nullable=False)
     
     # Pricing and billing
     amount = Column(Numeric(10, 2), nullable=False)  # Current subscription amount
@@ -83,7 +83,7 @@ class Subscription(Base):
 
     # Pending plan change (for scheduled downgrades)
     pending_plan_id = Column(String(36), nullable=True)  # Plan ID to switch to at period end
-    pending_billing_cycle = Column(Enum(BillingCycle), nullable=True)  # Billing cycle for pending plan
+    pending_billing_cycle = Column(String(20), nullable=True)  # Billing cycle for pending plan
     pending_plan_effective_date = Column(DateTime(timezone=True), nullable=True)  # When pending plan takes effect
 
     # Grace period for failed payments
@@ -116,9 +116,9 @@ class Payment(Base):
     # Payment details
     amount = Column(Numeric(10, 2), nullable=False)
     currency = Column(String(3), default="NGN", nullable=False)
-    status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
-    payment_method = Column(Enum(PaymentMethod), nullable=True)
-    transaction_type = Column(Enum(TransactionType), default=TransactionType.SUBSCRIPTION, nullable=False)
+    status = Column(String(20), default=PaymentStatus.PENDING.value, nullable=False)
+    payment_method = Column(String(20), nullable=True)
+    transaction_type = Column(String(20), default=TransactionType.SUBSCRIPTION.value, nullable=False)
     
     # Paystack integration
     paystack_reference = Column(String(255), unique=True, nullable=True, index=True)
@@ -158,7 +158,7 @@ class PaymentMethodRecord(Base):
     tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     
     # Payment method details
-    type = Column(Enum(PaymentMethod), nullable=False)
+    type = Column(String(20), nullable=False)
     is_default = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     
@@ -194,7 +194,7 @@ class Invoice(Base):
     
     # Invoice details
     invoice_number = Column(String(50), unique=True, nullable=False, index=True)
-    status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
+    status = Column(String(20), default=PaymentStatus.PENDING.value, nullable=False)
     
     # Amounts
     subtotal = Column(Numeric(10, 2), nullable=False)
@@ -325,7 +325,7 @@ class RefundRequest(Base):
     currency = Column(String(3), default="NGN", nullable=False)
     
     # Status and processing
-    status = Column(Enum(PaymentStatus), default=PaymentStatus.PENDING, nullable=False)
+    status = Column(String(20), default=PaymentStatus.PENDING.value, nullable=False)
     reason = Column(Text, nullable=False)
     admin_notes = Column(Text, nullable=True)
     

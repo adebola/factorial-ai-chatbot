@@ -65,14 +65,18 @@ def setup_logging(
         # Use JSON logs in production (when not in development)
         json_logs = os.getenv("ENVIRONMENT", "development").lower() != "development"
     
-    # Remove default Loguru logger
-    logger.remove()
-    
+    # Set up stdlib logging first (required for structlog)
+    import logging
+    logging.basicConfig(
+        level=getattr(logging, log_level.upper()),
+        format="%(message)s",  # structlog will handle formatting
+        stream=sys.stdout
+    )
+
     # Configure structlog
     if json_logs:
         # Production: JSON logs
         processors = [
-            structlog.stdlib.filter_by_level,
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
@@ -82,34 +86,8 @@ def setup_logging(
             add_context_processor,
             structlog.processors.JSONRenderer()
         ]
-        
-        # Console output for production
-        logger.add(
-            sys.stdout,
-            format="{message}",
-            level=log_level,
-            serialize=True,  # JSON output
-            backtrace=True,
-            diagnose=True
-        )
     else:
-        # Development: Simple console logs with structlog context
-        def custom_formatter(logger, name, event_dict):
-            """Custom formatter that includes structured context"""
-            level = event_dict.get("level", "info").upper()
-            message = event_dict.get("event", "")
-            
-            # Build context string
-            context_parts = []
-            for key, value in event_dict.items():
-                if key not in ["level", "event", "timestamp", "logger"]:
-                    context_parts.append(f"{key}={value}")
-            
-            context_str = " ".join(context_parts)
-            if context_str:
-                return f"[{level}] {message} | {context_str}"
-            return f"[{level}] {message}"
-        
+        # Development: Pretty console logs
         processors = [
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
@@ -118,32 +96,8 @@ def setup_logging(
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
             add_context_processor,
-            custom_formatter
+            structlog.dev.ConsoleRenderer(colors=True)
         ]
-        
-        # Pretty console output for development with all levels
-        logger.add(
-            sys.stdout,
-            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan> | <level>{message}</level>",
-            level=log_level.upper(),
-            colorize=True,
-            backtrace=True,
-            diagnose=True
-        )
-    
-    # Optional file logging
-    if log_file:
-        logger.add(
-            log_file,
-            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-                   "<level>{level: <8}</level> | "
-                   "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
-                   "<level>{message}</level>",
-            level=log_level,
-            rotation="100 MB",
-            retention="30 days",
-            compression="gz"
-        )
     
     # Configure structlog
     structlog.configure(
@@ -164,60 +118,7 @@ def setup_logging(
 
 def get_logger(name: str = None):
     """Get a structured logger instance."""
-    # For development, use loguru directly to ensure all levels work
-    environment = os.getenv("ENVIRONMENT", "development").lower()
-    if environment == "development":
-        from loguru import logger as loguru_logger
-        
-        # Create a custom logger wrapper that adds context
-        class ContextualLogger:
-            def __init__(self, name=None):
-                self.name = name or "app"
-                
-            def _log_with_context(self, level, message, **kwargs):
-                # Get context variables
-                context = {}
-                if request_id := request_id_var.get():
-                    context["request_id"] = request_id
-                if tenant_id := tenant_id_var.get():
-                    context["tenant_id"] = tenant_id
-                if user_id := user_id_var.get():
-                    context["user_id"] = user_id
-                if session_id := session_id_var.get():
-                    context["session_id"] = session_id
-                
-                context["service"] = "chat-service"
-                context.update(kwargs)
-                
-                # Format context as string
-                if context:
-                    context_str = " | " + " ".join(f"{k}={v}" for k, v in context.items())
-                    full_message = f"{message}{context_str}"
-                else:
-                    full_message = message
-                
-                # Use loguru to log with the appropriate level
-                getattr(loguru_logger, level.lower())(full_message)
-            
-            def debug(self, message, **kwargs):
-                self._log_with_context("DEBUG", message, **kwargs)
-                
-            def info(self, message, **kwargs):
-                self._log_with_context("INFO", message, **kwargs)
-                
-            def warning(self, message, **kwargs):
-                self._log_with_context("WARNING", message, **kwargs)
-                
-            def error(self, message, **kwargs):
-                self._log_with_context("ERROR", message, **kwargs)
-                
-            def critical(self, message, **kwargs):
-                self._log_with_context("CRITICAL", message, **kwargs)
-        
-        return ContextualLogger(name)
-    else:
-        # Production: use structlog
-        return structlog.get_logger(name)
+    return structlog.get_logger(name)
 
 
 def set_request_context(request_id: str = None, tenant_id: str = None, user_id: str = None, session_id: str = None):

@@ -112,15 +112,16 @@ class UsageCacheManager:
 
         Args:
             tenant_id: Tenant UUID
-            api_key: Optional API key for auth
+            api_key: Tenant API key for authentication
 
         Returns:
             Tuple of (allowed, reason)
         """
         try:
+            # Internal service-to-service call with API key authentication
             headers = {}
             if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+                headers["X-API-Key"] = api_key
 
             async with httpx.AsyncClient(timeout=self.http_timeout) as client:
                 response = await client.get(
@@ -142,7 +143,7 @@ class UsageCacheManager:
                         "cached_at": datetime.now(timezone.utc).isoformat()
                     }
 
-                    # Fetch plan limits
+                    # Fetch plan limits with API key authentication
                     plan_response = await client.get(
                         f"{self.billing_service_url}/api/v1/usage/check/daily_chats",
                         headers=headers

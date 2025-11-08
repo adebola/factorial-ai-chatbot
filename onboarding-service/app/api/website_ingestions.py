@@ -14,6 +14,7 @@ from ..services.dependencies import get_current_tenant, TokenClaims, validate_to
 from ..models.tenant import IngestionStatus, WebsitePage
 from ..core.logging_config import get_logger
 from ..services.billing_client import BillingClient
+from ..services.usage_publisher import usage_publisher
 
 router = APIRouter()
 logger = get_logger("website_ingestions")
@@ -364,6 +365,17 @@ async def delete_ingestion(
                 detail="Failed to delete ingestion"
             )
 
+        # Publish usage event to billing service
+        try:
+            usage_publisher.publish_website_removed(
+                tenant_id=claims.tenant_id,
+                website_id=ingestion_id,
+                url=ingestion.base_url
+            )
+        except Exception as e:
+            # Log error but don't fail the request
+            logger.error(f"Failed to publish website removal usage event: {e}", tenant_id=claims.tenant_id)
+
         return {
             "message": "Website ingestion deleted successfully",
             "ingestion_id": ingestion_id,
@@ -636,11 +648,24 @@ async def background_website_ingestion(
             vector_service.ingest_documents(tenant_id, documents, ingestion_id=ingestion_id)
             vector_db.close()
 
+            # Publish usage event to billing service
+            try:
+                usage_publisher.publish_website_added(
+                    tenant_id=tenant_id,
+                    website_id=ingestion_id,
+                    url=website_url,
+                    pages_scraped=pages_scraped
+                )
+            except Exception as e:
+                # Log error but don't fail the ingestion
+                logger.error(f"Failed to publish website usage event: {e}", tenant_id=tenant_id)
+
             logger.info(
                 "✅ Background ingestion completed successfully",
                 tenant_id=tenant_id,
                 ingestion_id=ingestion_id,
-                document_count=len(documents)
+                document_count=len(documents),
+                pages_scraped=pages_scraped
             )
         else:
             logger.warning(

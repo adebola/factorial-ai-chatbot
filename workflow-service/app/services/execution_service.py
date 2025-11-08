@@ -91,7 +91,7 @@ class ExecutionService:
                 tenant_id=tenant_id,
                 session_id=request.session_id,
                 user_identifier=user_identifier,
-                status=ExecutionStatus.RUNNING,
+                status=ExecutionStatus.RUNNING.value,
                 current_step_id=first_step.id,
                 variables=variables,
                 total_steps=len(definition.steps)
@@ -232,7 +232,7 @@ class ExecutionService:
                 logger.error(f"Execution {request.execution_id} not found")
                 raise WorkflowExecutionError(f"Execution {request.execution_id} not found")
 
-            if execution.status != ExecutionStatus.RUNNING:
+            if execution.status != ExecutionStatus.RUNNING.value:
                 logger.error(f"Execution is not running (status: {execution.status})")
                 raise WorkflowExecutionError(f"Execution is not running (status: {execution.status})")
 
@@ -418,11 +418,11 @@ class ExecutionService:
             if not execution:
                 raise WorkflowExecutionError(f"Execution {execution_id} not found")
 
-            if execution.status != ExecutionStatus.RUNNING:
+            if execution.status != ExecutionStatus.RUNNING.value:
                 raise WorkflowExecutionError(f"Cannot cancel execution with status: {execution.status}")
 
             # Update execution status
-            execution.status = ExecutionStatus.CANCELLED
+            execution.status = ExecutionStatus.CANCELLED.value
             execution.completed_at = datetime.utcnow()
 
             self.db.commit()
@@ -521,10 +521,10 @@ class ExecutionService:
                 workflow_id=execution.workflow_id,
                 tenant_id=execution.tenant_id,
                 step_id=step.id,
-                step_type=StepType(step.type.value),
+                step_type=step.type.value,
                 step_config=step.model_dump(),
                 input_data=variables,
-                status=ExecutionStatus.RUNNING
+                status=ExecutionStatus.RUNNING.value
             )
 
             self.db.add(step_execution)
@@ -549,7 +549,7 @@ class ExecutionService:
                 raise StepExecutionError(step.id, f"Unsupported step type: {step.type}")
 
             # Update step execution record
-            step_execution.status = ExecutionStatus.COMPLETED
+            step_execution.status = ExecutionStatus.COMPLETED.value
             step_execution.output_data = result
             step_execution.completed_at = datetime.utcnow()
             step_execution.duration_ms = int(
@@ -568,7 +568,7 @@ class ExecutionService:
                     variables=variables
                 )
             elif result.get("workflow_completed"):
-                execution.status = ExecutionStatus.COMPLETED
+                execution.status = ExecutionStatus.COMPLETED.value
                 execution.completed_at = datetime.utcnow()
                 # Mark state as completed instead of deleting - it will expire naturally via TTL
                 await self.state_manager.mark_completed(execution.session_id)
@@ -599,12 +599,12 @@ class ExecutionService:
 
         except Exception as e:
             # Update step execution record with error
-            step_execution.status = ExecutionStatus.FAILED
+            step_execution.status = ExecutionStatus.FAILED.value
             step_execution.error_message = str(e)
             step_execution.completed_at = datetime.utcnow()
 
             # Mark execution as failed
-            execution.status = ExecutionStatus.FAILED
+            execution.status = ExecutionStatus.FAILED.value
             execution.error_message = str(e)
             execution.completed_at = datetime.utcnow()
 

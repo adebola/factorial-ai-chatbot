@@ -73,7 +73,7 @@ def _convert_email_to_response(email: EmailMessage) -> EmailMessageResponse:
         subject=email.subject,
         html_content=email.html_content,
         text_content=email.text_content,
-        status=email.status.value,
+        status=email.status,
         created_at=email.created_at.isoformat(),
         sent_at=email.sent_at.isoformat() if email.sent_at else None,
         delivered_at=email.delivered_at.isoformat() if email.delivered_at else None,

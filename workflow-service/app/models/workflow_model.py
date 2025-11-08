@@ -32,13 +32,13 @@ class Workflow(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     version = Column(String(50), default="1.0.0")
-    status = Column(SQLEnum(WorkflowStatus, values_callable=lambda x: [e.value for e in x]), default=WorkflowStatus.DRAFT)
+    status = Column(String(20), default=WorkflowStatus.DRAFT.value, nullable=False)
 
     # Workflow definition (YAML/JSON)
     definition = Column(JSON, nullable=False)
 
     # Trigger configuration
-    trigger_type = Column(SQLEnum(TriggerType, values_callable=lambda x: [e.value for e in x]), nullable=False)
+    trigger_type = Column(String(20), nullable=False)
     trigger_config = Column(JSON, nullable=True)  # Trigger conditions, keywords, etc.
 
     # Workflow metadata

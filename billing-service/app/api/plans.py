@@ -755,8 +755,8 @@ async def switch_tenant_plan(
                     }
                 },
                 "subscription_info": {
-                    "status": subscription.status.value,
-                    "billing_cycle": subscription.billing_cycle.value,
+                    "status": subscription.status,
+                    "billing_cycle": subscription.billing_cycle,
                     "trial_starts_at": subscription.trial_starts_at.isoformat() if subscription.trial_starts_at else None,
                     "trial_ends_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None,
                     "starts_at": subscription.starts_at.isoformat() if subscription.starts_at else None,
@@ -823,14 +823,11 @@ async def switch_tenant_plan(
             # VALIDATION: Reject if user is trying to switch to the same plan they already have
             if existing_subscription.plan_id == new_plan.id:
                 from ..models.subscription import SubscriptionStatus
-                if existing_subscription.status in [
-                    SubscriptionStatus.ACTIVE,
-                    SubscriptionStatus.TRIALING
-                ]:
+                if existing_subscription.status in ['active', 'trialing']:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"You are already subscribed to the {new_plan.name} plan. "
-                               f"Your subscription is currently {existing_subscription.status.value}."
+                               f"Your subscription is currently {existing_subscription.status}."
                     )
 
             # Switch subscription plan
