@@ -15,6 +15,7 @@ DOCKER_REGISTRY="${DOCKER_REGISTRY:-adebola}"
 VERSION="${VERSION:-latest}"
 PUSH_TO_REGISTRY=false
 PLATFORMS="${PLATFORMS:-linux/amd64}"
+NO_CACHE=false
 SERVICE_NAME=""
 
 # Parse command line arguments
@@ -28,6 +29,10 @@ while [[ $# -gt 0 ]]; do
             PLATFORMS="$2"
             shift 2
             ;;
+        --no-cache)
+            NO_CACHE=true
+            shift
+            ;;
         chat-service|onboarding-service|communications-service|answer-quality-service|billing-service|workflow-service|authorization-service|gateway-service|ai-authorization-service|ai-gateway-service)
             SERVICE_NAME="$1"
             shift
@@ -37,7 +42,7 @@ while [[ $# -gt 0 ]]; do
                 SERVICE_NAME="$1"
             else
                 echo -e "${RED}Unknown option: $1${NC}"
-                echo "Usage: $0 <service-name> [--push] [--platform PLATFORMS]"
+                echo "Usage: $0 <service-name> [--push] [--platform PLATFORMS] [--no-cache]"
                 echo "Available services:"
                 echo "  - chat-service"
                 echo "  - onboarding-service"
@@ -57,7 +62,7 @@ done
 # Validate service name
 if [[ -z "$SERVICE_NAME" ]]; then
     echo -e "${RED}Error: Service name is required${NC}"
-    echo "Usage: $0 <service-name> [--push] [--platform PLATFORMS]"
+    echo "Usage: $0 <service-name> [--push] [--platform PLATFORMS] [--no-cache]"
     echo ""
     echo "Available services:"
     echo "  - chat-service"
@@ -121,6 +126,7 @@ echo "  Registry: ${DOCKER_REGISTRY}"
 echo "  Version: ${VERSION}"
 echo "  Platforms: ${PLATFORMS}"
 echo "  Push to registry: ${PUSH_TO_REGISTRY}"
+echo "  No cache: ${NO_CACHE}"
 echo "  Dockerfile: ${DOCKERFILE}"
 echo "  Image: ${IMAGE_NAME}"
 echo ""
@@ -144,6 +150,11 @@ build_cmd="docker buildx build"
 build_cmd="$build_cmd --platform $PLATFORMS"
 build_cmd="$build_cmd -f $DOCKERFILE"
 build_cmd="$build_cmd -t $IMAGE_NAME"
+
+# Add --no-cache flag if requested
+if $NO_CACHE; then
+    build_cmd="$build_cmd --no-cache"
+fi
 
 if $PUSH_TO_REGISTRY; then
     build_cmd="$build_cmd --push"
@@ -176,6 +187,7 @@ if eval "$build_cmd"; then
     else
         echo "  - Test locally: docker run --rm ${IMAGE_NAME}"
         echo "  - Push to registry: $0 $SERVICE_NAME --push"
+        echo "  - Rebuild without cache: $0 $SERVICE_NAME --no-cache"
     fi
 else
     echo -e "\n${RED}✗ Failed to build ${SERVICE_NAME}${NC}"

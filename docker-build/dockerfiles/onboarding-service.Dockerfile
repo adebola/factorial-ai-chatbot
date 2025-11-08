@@ -9,7 +9,8 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
@@ -60,8 +61,9 @@ COPY onboarding-service/static /app/static
 COPY docker-build/entrypoints/onboarding-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# Create non-root user
+# Create non-root user and setup Playwright cache directory
 RUN adduser --disabled-password --gecos '' appuser && \
+    mkdir -p /app/.cache/ms-playwright && \
     chown -R appuser:appuser /app && \
     chown appuser:appuser /entrypoint.sh
 USER appuser
