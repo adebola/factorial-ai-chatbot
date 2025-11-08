@@ -17,8 +17,8 @@ public class TenantRegistrationRequest {
     @NotBlank(message = "Organization name is required")
     @Size(min = 2, max = 100, message = "Organization name must be between 2 and 100 characters")
     private String name;
-    
-    @NotBlank(message = "Domain is required")
+
+    // Domain is now optional - not required for registration
     @Pattern(regexp = "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$", message = "Please enter a valid domain (e.g., yourcompany.com)")
     private String domain;
     

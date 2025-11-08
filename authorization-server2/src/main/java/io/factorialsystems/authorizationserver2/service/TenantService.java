@@ -89,21 +89,21 @@ public class TenantService {
 
     @Transactional
     public Tenant createTenant(String name, String domain, String description) {
-        // Check if tenant already exists
-        if (findByDomain(domain) != null) {
+        // Check if tenant already exists (only if domain is provided)
+        if (domain != null && findByDomain(domain) != null) {
             throw new IllegalArgumentException("A tenant with this domain already exists");
         }
 
         if (findByName(name) != null) {
             throw new IllegalArgumentException("A tenant with this name already exists");
         }
-        
+
         // Generate unique API key
         String apiKey = generateApiKey();
         while (tenantMapper.findByApiKey(apiKey) != null) {
             apiKey = generateApiKey();
         }
-        
+
         // Get free-tier plan ID from billing service
         String freePlanId = null;
         try {
@@ -113,12 +113,12 @@ public class TenantService {
             log.warn("Failed to retrieve free-tier plan ID from billing service, tenant will be created without plan: {}", e.getMessage());
             // Continue creating tenant without plan - plan can be assigned later
         }
-        
+
         // Create new tenant
         Tenant tenant = Tenant.builder()
                 .id(UUID.randomUUID().toString())
                 .name(name.trim())
-                .domain(domain.toLowerCase().trim())
+                .domain(domain != null ? domain.toLowerCase().trim() : null)
                 .apiKey(apiKey)
                 .planId(freePlanId)
                 .isActive(true)
@@ -182,6 +182,9 @@ public class TenantService {
     }
     
     public boolean isDomainAvailable(String domain) {
+        if (domain == null) {
+            return true; // Null domain is allowed (optional field)
+        }
         return findByDomain(domain.toLowerCase().trim()) == null;
     }
     

@@ -56,24 +56,6 @@
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="domain" class="form-label">Website Domain *</label>
-                        <input type="text" 
-                               class="form-control"
-                               th:class="${#fields.hasErrors('domain')} ? 'form-control is-invalid' : 'form-control'"
-                               id="domain" 
-                               th:field="*{domain}"
-                               required 
-                               pattern="^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
-                               placeholder="e.g., yourcompany.com or your-business.org">
-                        <div th:if="${#fields.hasErrors('domain')}" class="invalid-feedback">
-                            <span th:errors="*{domain}">Domain error</span>
-                        </div>
-                        <small class="text-muted">
-                            Enter your organization's actual website domain. This will be used to identify your organization.
-                        </small>
-                    </div>
-
                 </div>
 
                 <!-- Administrator Account Section -->

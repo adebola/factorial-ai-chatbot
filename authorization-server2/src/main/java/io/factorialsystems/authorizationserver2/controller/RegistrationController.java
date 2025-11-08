@@ -36,7 +36,7 @@ public class RegistrationController {
                                     Model model,
                                     RedirectAttributes redirectAttributes) {
         
-        log.info("Processing registration for organization: {} ({})", request.getName(), request.getDomain());
+        log.info("Processing registration for organization: {}", request.getName());
         
         // Validate form
         if (bindingResult.hasErrors()) {
@@ -64,20 +64,22 @@ public class RegistrationController {
             return "register/registration-success";
             
         } catch (Exception e) {
-            log.error("Registration failed for organization: {} ({})", request.getName(), request.getDomain(), e);
-            model.addAttribute("errorMessage", 
+            log.error("Registration failed for organization: {}", request.getName(), e);
+            model.addAttribute("errorMessage",
                 "Registration failed: " + e.getMessage() + ". Please try again.");
             return "register/tenant-registration";
         }
     }
     
     private void validateRegistrationRequest(TenantRegistrationRequest request, BindingResult bindingResult) {
-        // Check if domain is already taken
-        if (!tenantService.isDomainAvailable(request.getDomainNormalized())) {
-            bindingResult.rejectValue("domain", "domain.taken", 
-                "A tenant with this domain already exists");
+        // Check if domain is already taken (only if provided)
+        if (request.getDomainNormalized() != null && !request.getDomainNormalized().isEmpty()) {
+            if (!tenantService.isDomainAvailable(request.getDomainNormalized())) {
+                bindingResult.rejectValue("domain", "domain.taken",
+                    "A tenant with this domain already exists");
+            }
         }
-        
+
         // Check if organization name is already taken
         if (!tenantService.isNameAvailable(request.getName())) {
             bindingResult.rejectValue("name", "name.taken", 
@@ -125,7 +127,7 @@ public class RegistrationController {
             request.getAdminLastName()
         );
         
-        log.info("Successfully completed registration for tenant: {} ({})", tenant.getName(), tenant.getDomain());
+        log.info("Successfully completed registration for tenant: {}", tenant.getName());
         
         return new RegistrationResult(tenant, adminUser);
     }
