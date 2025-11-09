@@ -55,8 +55,20 @@ class RabbitMQPublisher:
     def _connect(self) -> bool:
         """Establish connection to RabbitMQ"""
         try:
-            if self.connection and not self.connection.is_closed:
-                return True
+            # Force close any stale connections to prevent EOF errors
+            if self.connection:
+                try:
+                    if not self.connection.is_closed:
+                        # Connection exists and is open
+                        return True
+                    # Connection exists but is closed, clean it up
+                    self.connection.close()
+                except Exception as e:
+                    logger.warning(f"Error checking/closing stale connection: {e}")
+                finally:
+                    # Always reset connection objects when reconnecting
+                    self.connection = None
+                    self.channel = None
 
             credentials = pika.PlainCredentials(self.username, self.password)
             parameters = pika.ConnectionParameters(
@@ -82,6 +94,13 @@ class RabbitMQPublisher:
 
         except AMQPConnectionError as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
+            self.connection = None
+            self.channel = None
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error connecting to RabbitMQ: {e}")
+            self.connection = None
+            self.channel = None
             return False
 
     def _publish_message(
@@ -132,13 +151,27 @@ class RabbitMQPublisher:
     def _disconnect(self):
         """Close RabbitMQ connection"""
         try:
-            if self.channel and not self.channel.is_closed:
-                self.channel.close()
-            if self.connection and not self.connection.is_closed:
-                self.connection.close()
+            if self.channel:
+                try:
+                    if not self.channel.is_closed:
+                        self.channel.close()
+                except Exception:
+                    pass  # Ignore errors closing channel
+
+            if self.connection:
+                try:
+                    if not self.connection.is_closed:
+                        self.connection.close()
+                except Exception:
+                    pass  # Ignore errors closing connection
+
             logger.info("Disconnected from RabbitMQ")
         except Exception as e:
             logger.error(f"Error disconnecting from RabbitMQ: {e}")
+        finally:
+            # Always reset connection objects
+            self.connection = None
+            self.channel = None
 
     async def publish_email(
         self,

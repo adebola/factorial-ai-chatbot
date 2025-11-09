@@ -20,16 +20,15 @@ from ..schemas.execution_schema import (
 router = APIRouter()
 
 
-@router.get("/", response_model=ExecutionList)
-async def list_executions(
-    page: int = Query(1, ge=1),
-    size: int = Query(10, ge=1, le=100),
-    workflow_id: str = None,
-    status: str = None,
-    db: Session = Depends(get_db),
-    claims: TokenClaims = Depends(validate_token)
+def _list_executions_impl(
+    page: int,
+    size: int,
+    workflow_id: str,
+    status: str,
+    db: Session,
+    claims: TokenClaims
 ):
-    """List workflow executions for the authenticated tenant"""
+    """Shared implementation for list executions"""
     try:
         service = ExecutionService(db)
         return service.list_executions(
@@ -43,13 +42,33 @@ async def list_executions(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/", response_model=ExecutionList)
+@router.get("", response_model=ExecutionList)  # Route without trailing slash
+async def list_executions(
+    page: int = Query(1, ge=1),
+    size: int = Query(10, ge=1, le=100),
+    workflow_id: str = None,
+    status: str = None,
+    db: Session = Depends(get_db),
+    claims: TokenClaims = Depends(validate_token_or_api_key)
+):
+    """List workflow executions for the authenticated tenant
+
+    Authentication: Accepts either JWT Bearer token OR X-API-Key header
+    """
+    return _list_executions_impl(page, size, workflow_id, status, db, claims)
+
+
 @router.get("/{execution_id}", response_model=WorkflowExecutionResponse)
 async def get_execution(
     execution_id: str,
     db: Session = Depends(get_db),
-    claims: TokenClaims = Depends(validate_token)
+    claims: TokenClaims = Depends(validate_token_or_api_key)
 ):
-    """Get a specific workflow execution by ID"""
+    """Get a specific workflow execution by ID
+
+    Authentication: Accepts either JWT Bearer token OR X-API-Key header
+    """
     try:
         service = ExecutionService(db)
         return await service.get_execution(execution_id, claims.tenant_id)

@@ -37,12 +37,14 @@ class WorkflowClient:
                 headers["X-API-Key"] = self.api_key
 
             async with aiohttp.ClientSession() as session:
+                logger.info(f"Calling workflow service: {self.api_base}/triggers/check with payload: {payload}")
                 async with session.post(
                     f"{self.api_base}/triggers/check",
                     json=payload,
                     headers=headers,
                     timeout=aiohttp.ClientTimeout(total=5.0)
                 ) as response:
+                    logger.info(f"Workflow service response status: {response.status}")
                     if response.status == 200:
                         result = await response.json()
 

@@ -72,6 +72,9 @@ class TriggerDetector:
             Workflow.status == "active"
         ).all()
 
+        logger.info(f"Found {len(active_workflows)} active workflows for tenant {tenant_id}")
+        logger.info(f"Checking message: '{message}' against workflows")
+
         if not active_workflows:
             log_workflow_trigger(
                 tenant_id=tenant_id,
@@ -87,16 +90,20 @@ class TriggerDetector:
         highest_confidence = 0.0
 
         for workflow in active_workflows:
+            trigger_type_str = workflow.trigger_type.value if hasattr(workflow.trigger_type, 'value') else workflow.trigger_type
+            logger.info(f"Checking workflow {workflow.id} ('{workflow.name}'): trigger_type={trigger_type_str}, keywords={workflow.trigger_config.get('keywords', [])}")
             confidence = self._calculate_trigger_confidence(workflow, message, user_context)
+            logger.info(f"Workflow {workflow.id} confidence: {confidence}")
 
             if confidence > highest_confidence and confidence > 0.5:  # Minimum confidence threshold
                 highest_confidence = confidence
                 best_match = workflow
 
         if best_match:
+            trigger_type_str = best_match.trigger_type.value if hasattr(best_match.trigger_type, 'value') else best_match.trigger_type
             log_workflow_trigger(
                 tenant_id=tenant_id,
-                trigger_type=best_match.trigger_type.value,
+                trigger_type=trigger_type_str,
                 message=message,
                 triggered=True,
                 workflow_id=best_match.id,
@@ -135,13 +142,16 @@ class TriggerDetector:
     ) -> float:
         """Calculate confidence score for workflow trigger (0.0 to 1.0)"""
 
-        if workflow.trigger_type == TriggerType.MESSAGE:
+        # Convert trigger_type to string for comparison (handles both enum and string types)
+        trigger_type_str = workflow.trigger_type.value if hasattr(workflow.trigger_type, 'value') else str(workflow.trigger_type)
+
+        if trigger_type_str == "message":
             return _check_message_trigger(workflow, message)
-        elif workflow.trigger_type == TriggerType.KEYWORD:
+        elif trigger_type_str == "keyword":
             return self._check_keyword_trigger(workflow, message)
-        elif workflow.trigger_type == TriggerType.INTENT:
+        elif trigger_type_str == "intent":
             return self._check_intent_trigger(workflow, message, user_context)
-        elif workflow.trigger_type == TriggerType.MANUAL:
+        elif trigger_type_str == "manual":
             return 0.0  # Manual triggers are not automatic
         else:
             return 0.0
@@ -152,7 +162,10 @@ class TriggerDetector:
         trigger_config = workflow.trigger_config or {}
         keywords = trigger_config.get("keywords", [])
 
+        logger.info(f"[KEYWORD CHECK] Workflow {workflow.id}: keywords={keywords}")
+
         if not keywords:
+            logger.info(f"[KEYWORD CHECK] No keywords configured")
             return 0.0
 
         message_lower = message.lower()
@@ -162,14 +175,18 @@ class TriggerDetector:
             if isinstance(keyword, str):
                 # Exact word match (not just substring)
                 pattern = r'\b' + re.escape(keyword.lower()) + r'\b'
-                if re.search(pattern, message_lower):
+                found = re.search(pattern, message_lower)
+                logger.info(f"[KEYWORD CHECK] Testing keyword '{keyword}' with pattern '{pattern}' against '{message_lower}': match={bool(found)}")
+                if found:
                     matches += 1
 
         if matches == 0:
+            logger.info(f"[KEYWORD CHECK] No keyword matches found")
             return 0.0
 
         # Higher confidence for more keyword matches
         confidence = min(1.0, matches / len(keywords) * 1.2)
+        logger.info(f"[KEYWORD CHECK] {matches}/{len(keywords)} keywords matched, confidence={confidence}")
         return confidence
 
     @staticmethod

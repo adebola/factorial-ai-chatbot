@@ -124,12 +124,17 @@ class ActionService:
                     "queued": True  # Indicates async processing
                 }
             else:
-                raise ActionExecutionError("send_email", f"Failed to queue email: {result.get('error')}")
+                error_msg = result.get('error', 'Unknown error')
+                # Provide more helpful error message for common issues
+                if "Connection" in error_msg or "EOF" in error_msg:
+                    error_msg = f"Unable to connect to messaging service. Please try again later. (Technical details: {error_msg})"
+                raise ActionExecutionError("send_email", f"Failed to queue email: {error_msg}")
 
         except ActionExecutionError:
             raise
         except Exception as e:
-            raise ActionExecutionError("send_email", f"Failed to queue email message: {e}")
+            logger.error(f"Unexpected error in send_email action: {e}", exc_info=True)
+            raise ActionExecutionError("send_email", f"An unexpected error occurred while sending email. Please contact support if this persists.")
 
     async def _send_sms(
         self,
@@ -163,12 +168,17 @@ class ActionService:
                     "queued": True  # Indicates async processing
                 }
             else:
-                raise ActionExecutionError("send_sms", f"Failed to queue SMS: {result.get('error')}")
+                error_msg = result.get('error', 'Unknown error')
+                # Provide more helpful error message for common issues
+                if "Connection" in error_msg or "EOF" in error_msg:
+                    error_msg = f"Unable to connect to messaging service. Please try again later. (Technical details: {error_msg})"
+                raise ActionExecutionError("send_sms", f"Failed to queue SMS: {error_msg}")
 
         except ActionExecutionError:
             raise
         except Exception as e:
-            raise ActionExecutionError("send_sms", f"Failed to queue SMS message: {e}")
+            logger.error(f"Unexpected error in send_sms action: {e}", exc_info=True)
+            raise ActionExecutionError("send_sms", f"An unexpected error occurred while sending SMS. Please contact support if this persists.")
 
     async def _call_webhook(
         self,

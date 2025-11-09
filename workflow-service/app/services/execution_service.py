@@ -611,7 +611,19 @@ class ExecutionService:
             self.db.commit()
 
             logger.error(f"Step execution failed: {e}")
-            raise StepExecutionError(step.id, str(e))
+
+            # Return error result instead of raising exception
+            # This allows proper error reporting to the user
+            return StepExecutionResult(
+                success=False,
+                step_id=step.id,
+                step_type=step.type,
+                workflow_id=execution.workflow_id,
+                message=f"Workflow step failed: {str(e)}",
+                error_message=str(e),
+                fallback_to_ai=False,  # Don't fall back to AI, show error to user
+                workflow_completed=True  # End the workflow on error
+            )
 
     async def _execute_message_step(self, step, variables: Dict[str, Any], definition) -> Dict[str, Any]:
         """Execute a message step"""

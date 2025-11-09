@@ -12,6 +12,9 @@ from ..services.tenant_client import TenantClient
 from ..services.workflow_client import WorkflowClient
 from ..services.event_publisher import event_publisher
 from ..services.usage_cache import usage_cache
+from ..core.logging_config import get_logger
+
+logger = get_logger("ws")
 
 
 class ConnectionManager:
@@ -230,13 +233,32 @@ class ChatWebSocket:
                                 user_input=user_message
                             )
 
-                        if workflow_result.get("error"):
-                            # Workflow execution failed, fall back to AI
-                            ai_response = await self.chat_service.generate_response(
-                                tenant_id=tenant_id,
-                                user_message=user_message,
-                                session_id=session_id
-                            )
+                        # Check for workflow execution errors
+                        if not workflow_result.get("success", True):
+                            # Workflow step failed
+                            error_message = workflow_result.get("error_message", "Workflow step failed")
+
+                            # Check if we should fall back to AI
+                            if workflow_result.get("fallback_to_ai", False):
+                                logger.warning(f"Workflow step failed, falling back to AI: {error_message}", tenant_id=tenant_id)
+                                ai_response = await self.chat_service.generate_response(
+                                    tenant_id=tenant_id,
+                                    user_message=user_message,
+                                    session_id=session_id
+                                )
+                            else:
+                                # Report error to user and end workflow
+                                logger.error(f"Workflow step failed: {error_message}", tenant_id=tenant_id)
+                                ai_response = {
+                                    "content": workflow_result.get("message", f"I encountered an error: {error_message}"),
+                                    "metadata": {
+                                        "workflow_step": True,
+                                        "workflow_error": True,
+                                        "error_message": error_message,
+                                        "workflow_id": workflow_result.get("workflow_id"),
+                                        "completed": True  # Workflow ended due to error
+                                    }
+                                }
                         else:
                             # Extract message and choices from workflow step result
                             message = workflow_result.get("message", "")
@@ -257,11 +279,13 @@ class ChatWebSocket:
 
                     else:
                         # Check if message triggers any workflows
+                        logger.info(f"Checking workflows for message: '{user_message[:50]}'", tenant_id=tenant_id, session_id=session_id)
                         trigger_result = await self.workflow_client.check_triggers(
                             tenant_id=tenant_id,
                             message=user_message,
                             session_id=session_id
                         )
+                        logger.info(f"Workflow check result: triggered={trigger_result.get('triggered')}, workflow_id={trigger_result.get('workflow_id')}", tenant_id=tenant_id)
 
                         if trigger_result.get("triggered"):
                             # Start workflow execution
@@ -271,16 +295,34 @@ class ChatWebSocket:
                                 session_id=session_id
                             )
 
-                            if execution_result.get("error"):
-                                # Workflow start failed, fall back to AI
-                                ai_response = await self.chat_service.generate_response(
-                                    tenant_id=tenant_id,
-                                    user_message=user_message,
-                                    session_id=session_id
-                                )
+                            # Check for workflow start errors
+                            first_step = execution_result.get("first_step_result", {})
+                            if not first_step.get("success", True):
+                                # Workflow start/first step failed
+                                error_message = first_step.get("error_message", "Workflow failed to start")
+
+                                # Check if we should fall back to AI
+                                if first_step.get("fallback_to_ai", False):
+                                    logger.warning(f"Workflow start failed, falling back to AI: {error_message}", tenant_id=tenant_id)
+                                    ai_response = await self.chat_service.generate_response(
+                                        tenant_id=tenant_id,
+                                        user_message=user_message,
+                                        session_id=session_id
+                                    )
+                                else:
+                                    # Report error to user
+                                    logger.error(f"Workflow start failed: {error_message}", tenant_id=tenant_id)
+                                    ai_response = {
+                                        "content": first_step.get("message", f"I encountered an error: {error_message}"),
+                                        "metadata": {
+                                            "workflow_step": True,
+                                            "workflow_error": True,
+                                            "error_message": error_message,
+                                            "completed": True
+                                        }
+                                    }
                             else:
                                 # Extract message from first step result
-                                first_step = execution_result.get("first_step_result", {})
                                 message = first_step.get("message", "Workflow started")
                                 choices = first_step.get("choices")
 
