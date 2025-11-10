@@ -262,16 +262,22 @@ class ExecutionService:
             variables = state.get("variables", {})
             logger.info(f"variables: {variables}")
 
-            # Process user input if provided
-            if request.user_input:
-                logger.info(f"XXX Current step {current_step}")
-                logger.info(f"XXXXX Request Input {request.user_input}")
-                logger.info(f"XXXXXXXXX Variables {variables}")
+            # Process user input if provided (but not for CHOICE steps - those use user_choice)
+            if request.user_input and current_step.type != SchemaStepType.CHOICE:
+                logger.info(f"Current step {current_step}")
+                logger.info(f"Request Input {request.user_input}")
+                logger.info(f"Variables {variables}")
 
                 variables = self._process_user_input(current_step, request.user_input, variables)
                 logger.info(f"Variables saved to state after processing user input new variable {variables}")
                 # Save updated variables to state immediately (same as user_choice handling)
                 await self.state_manager.update_variables(request.session_id, variables)
+
+            # For CHOICE steps, treat user_input as user_choice if user_choice is not provided
+            # This handles frontends that send user_input instead of user_choice for selections
+            if current_step.type == SchemaStepType.CHOICE and request.user_input and not request.user_choice:
+                logger.info(f"CHOICE step received user_input instead of user_choice, treating as choice: '{request.user_input}'")
+                request.user_choice = request.user_input
 
 
             if request.user_choice:
@@ -918,12 +924,10 @@ class ExecutionService:
         """Process user choice for choice steps and determine next step based on selected option"""
         logger.debug(f"Processing user choice: '{user_choice}' for step {step.id}")
 
-        if step.variable:
-            variables = VariableResolver.set_variable(variables, step.variable, user_choice)
-
-        # Store the selected option's next_step for branching logic
-        # This will be picked up in the step execution flow
+        # First find the matching option and extract its VALUE (not text)
         choice_matched = False
+        matched_value = user_choice  # Default to user_choice if no match found
+
         if step.options:
             for option in step.options:
                 # Match by value or text
@@ -931,7 +935,9 @@ class ExecutionService:
                     # ChoiceOption object
                     logger.debug(f"Checking option: text='{option.text}', value='{option.value}', next_step='{option.next_step}'")
                     if option.value == user_choice or option.text == user_choice:
-                        logger.info(f"Choice matched! Setting next_step to: {option.next_step}")
+                        # KEY FIX: Extract the VALUE field from matched option
+                        matched_value = option.value
+                        logger.info(f"Choice matched! value='{matched_value}', next_step='{option.next_step}'")
                         if option.next_step:
                             variables['__selected_option_next_step'] = option.next_step
                         choice_matched = True
@@ -939,8 +945,14 @@ class ExecutionService:
                 elif option == user_choice:
                     # String option (backward compatibility)
                     logger.debug(f"Checking string option: '{option}'")
+                    matched_value = option
                     choice_matched = True
                     break
+
+        # NOW set the variable to the matched VALUE (not the display text)
+        if step.variable:
+            variables = VariableResolver.set_variable(variables, step.variable, matched_value)
+            logger.info(f"Set variable '{step.variable}' = '{matched_value}'")
 
         # Mark that a choice was made (for fallback to step-level next_step)
         if choice_matched:
