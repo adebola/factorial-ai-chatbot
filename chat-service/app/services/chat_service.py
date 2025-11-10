@@ -83,38 +83,36 @@ class ChatService:
         """
         Detect query intent and suggest relevant content types for filtering.
 
+        DISABLED: Intent-based filtering was causing accuracy issues by excluding
+        relevant content (e.g., website pages about board of directors, branch locations).
+        The filtering was too aggressive and would exclude content with generic content_types
+        like "webpage" even when they contained the answer.
+
+        Can be re-enabled in future with:
+        - Higher confidence threshold (require 3+ keyword matches)
+        - Smart fallback (retry without filter if <3 results)
+        - Multi-intent support (combine multiple content_types)
+
         Args:
             query: The user's query text
 
         Returns:
-            List of content types to filter by, or None for no filtering
+            None - No filtering applied, search all content
         """
-        query_lower = query.lower()
-
-        # Count keyword matches for each intent category
-        intent_scores = {}
-        for intent, config in self.intent_patterns.items():
-            matches = sum(1 for keyword in config['keywords'] if keyword in query_lower)
-            if matches > 0:
-                intent_scores[intent] = matches
-
-        # If we found matches, use the content types from the top matching intent
-        if intent_scores:
-            top_intent = max(intent_scores, key=intent_scores.get)
-            content_types = self.intent_patterns[top_intent]['content_types']
-
-            self.logger.info(
-                "Content type intent detected",
-                query_sample=query[:50],
-                detected_intent=top_intent,
-                content_types=content_types,
-                keyword_matches=intent_scores[top_intent]
-            )
-
-            return content_types
-
-        # No clear intent detected
+        # DISABLED: Return None to disable intent-based filtering
         return None
+
+        # Original implementation preserved below for future reference:
+        # query_lower = query.lower()
+        # intent_scores = {}
+        # for intent, config in self.intent_patterns.items():
+        #     matches = sum(1 for keyword in config['keywords'] if keyword in query_lower)
+        #     if matches > 0:
+        #         intent_scores[intent] = matches
+        # if intent_scores:
+        #     top_intent = max(intent_scores, key=intent_scores.get)
+        #     return self.intent_patterns[top_intent]['content_types']
+        # return None
 
     async def generate_response(
         self,
@@ -154,11 +152,13 @@ class ChatService:
         content_type_filter = self._detect_content_type_intent(user_message)
 
         # Search relevant documents with optional content type filtering
+        # Increased k from 4 to 10 to provide more context to AI, especially important
+        # with categorized content to ensure comprehensive coverage
         search_start = time.time()
         relevant_docs = self.vector_store.search_similar(
             tenant_id=tenant_id,
             query=user_message,
-            k=4,
+            k=10,  # Increased from 4 to 10 for better accuracy
             content_types=content_type_filter
         )
         search_duration = (time.time() - search_start) * 1000
