@@ -11,7 +11,7 @@ from ..services.website_scraper import WebsiteScraper, ScrapingStrategy
 from ..services.pg_vector_ingestion import PgVectorIngestionService
 from ..services.document_categorization import DocumentCategorizationService
 from ..services.dependencies import get_current_tenant, TokenClaims, validate_token, get_full_tenant_details
-from ..models.tenant import IngestionStatus, WebsitePage
+from ..models.tenant import IngestionStatus, WebsitePage, WebsiteIngestion
 from ..core.logging_config import get_logger
 from ..services.billing_client import BillingClient
 from ..services.usage_publisher import usage_publisher
@@ -533,6 +533,9 @@ async def background_website_ingestion(
 
         documents = await scraper.process_existing_ingestion(ingestion)
 
+        # Define pages_scraped for usage tracking and logging
+        pages_scraped = len(documents) if documents else 0
+
         # Categorize documents before vector ingestion
         if documents:
             logger.info(
@@ -673,6 +676,26 @@ async def background_website_ingestion(
                 tenant_id=tenant_id,
                 ingestion_id=ingestion_id
             )
+
+        # Mark ingestion as completed after ALL processing (scraping + categorization + vector ingestion)
+        # This ensures the status is only set to COMPLETED when everything is truly done
+        from ..core.database import get_db as get_main_db
+        main_db = next(get_main_db())
+        try:
+            ingestion_record = main_db.query(WebsiteIngestion).filter(
+                WebsiteIngestion.id == ingestion_id
+            ).first()
+            if ingestion_record:
+                ingestion_record.status = IngestionStatus.COMPLETED
+                ingestion_record.completed_at = datetime.now()
+                main_db.commit()
+                logger.info(
+                    "Ingestion status updated to COMPLETED",
+                    tenant_id=tenant_id,
+                    ingestion_id=ingestion_id
+                )
+        finally:
+            main_db.close()
 
     except Exception as e:
         logger.error(

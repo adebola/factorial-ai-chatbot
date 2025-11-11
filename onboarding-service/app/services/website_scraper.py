@@ -269,14 +269,13 @@ class WebsiteScraper:
                 # Rate limiting
                 await asyncio.sleep(settings.SCRAPING_DELAY)
 
-            # Final update
+            # Final update - DO NOT set status to COMPLETED here
+            # Status will be set to COMPLETED by the background task after categorization finishes
             total_duration = time.time() - start_time
-            ingestion.status = IngestionStatus.COMPLETED
             # pages_discovered = total unique URLs found (visited + any remaining in queue)
             ingestion.pages_discovered = len(visited_urls) + len(urls_to_visit)
             ingestion.pages_processed = pages_processed
             ingestion.pages_failed = pages_failed
-            ingestion.completed_at = datetime.now()
             self.db.commit()
 
             logger.info(
