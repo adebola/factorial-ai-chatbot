@@ -79,7 +79,8 @@ class SubscriptionService:
             trial_starts_at = None
             trial_ends_at = None
             starts_at = now
-            status = SubscriptionStatus.PENDING
+            # Free plans ($0) should be active immediately, paid plans need payment
+            status = SubscriptionStatus.ACTIVE if amount == 0 else SubscriptionStatus.PENDING
 
         # Calculate subscription end date
         if billing_cycle == BillingCycle.YEARLY:
@@ -440,7 +441,7 @@ class SubscriptionService:
         return self.db.query(Subscription).filter(
             and_(
                 Subscription.tenant_id == tenant_id,
-                Subscription.status.in_(['active', 'trialing', 'past_due'])
+                Subscription.status.in_(['active', 'trialing', 'past_due', 'pending'])
             )
         ).first()
 

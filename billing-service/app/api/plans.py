@@ -708,17 +708,23 @@ async def switch_tenant_plan(
             # Calculate trial end date: 14 days from registration
             trial_end_date = registration_date + timedelta(days=14)
 
-            # Create subscription with custom trial end
+            # Check if trial would be in the past - if so, don't use trial
+            now = datetime.now(timezone.utc)
+            use_trial = trial_end_date > now
+
+            # Create subscription with custom trial end only if trial hasn't expired
             subscription = subscription_service.create_subscription(
                 tenant_id=tenant_id,
                 plan_id=basic_plan.id,
                 billing_cycle=billing_cycle,
-                start_trial=False,  # We're using custom_trial_end instead
-                custom_trial_end=trial_end_date,
+                start_trial=use_trial and basic_plan.monthly_plan_cost == 0,  # Only trial for free plans
+                custom_trial_end=trial_end_date if use_trial else None,
                 metadata={
                     "created_via": "switch_tenant_plan",
                     "user_id": claims.user_id,
-                    "initial_plan": True
+                    "initial_plan": True,
+                    "trial_skipped": not use_trial,
+                    "trial_skipped_reason": "trial_period_expired" if not use_trial else None
                 }
             )
 

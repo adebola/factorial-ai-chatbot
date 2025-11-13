@@ -294,8 +294,57 @@ class ExecutionService:
             if request.context:
                 variables = VariableResolver.merge_variables(variables, request.context)
 
-            # Execute the step
-            result = await self._execute_step_internal(execution, current_step, definition, variables)
+            # CRITICAL FIX: Check if this is a CHOICE or INPUT step WITHOUT user input
+            # If so, prepare it for display manually instead of executing it
+            # This prevents triggering "already completed" logic that causes workflow to hang
+            if (current_step.type in [SchemaStepType.CHOICE, SchemaStepType.INPUT] and
+                not request.user_choice and not request.user_input):
+
+                logger.info(f"Preparing {current_step.type.value} step for first-time display without execution")
+
+                if current_step.type == SchemaStepType.CHOICE:
+                    # Manually prepare CHOICE step
+                    message = VariableResolver.resolve_content(current_step.content, variables)
+                    choices = []
+
+                    if current_step.options:
+                        for option in current_step.options:
+                            if hasattr(option, 'text'):
+                                choices.append(VariableResolver.resolve_content(option.text, variables))
+
+                    result = StepExecutionResult(
+                        success=True,
+                        step_id=current_step.id,
+                        step_type=current_step.type,
+                        workflow_id=execution.workflow_id,
+                        message=message,
+                        choices=choices,
+                        input_required="choice",
+                        workflow_completed=False,
+                        next_step_id=None
+                    )
+
+                    logger.info(f"CHOICE step prepared: {len(choices)} choices available")
+
+                elif current_step.type == SchemaStepType.INPUT:
+                    # Manually prepare INPUT step
+                    message = VariableResolver.resolve_content(current_step.content, variables)
+
+                    result = StepExecutionResult(
+                        success=True,
+                        step_id=current_step.id,
+                        step_type=current_step.type,
+                        workflow_id=execution.workflow_id,
+                        message=message,
+                        input_required="text",
+                        workflow_completed=False,
+                        next_step_id=None
+                    )
+
+                    logger.info(f"INPUT step prepared for variable: {current_step.variable}")
+            else:
+                # Execute normally if not a first-time interactive step
+                result = await self._execute_step_internal(execution, current_step, definition, variables)
 
             # Update execution progress
             execution.steps_completed += 1
@@ -346,7 +395,111 @@ class ExecutionService:
                     if updated_state:
                         variables = updated_state.get("variables", {})
 
-                    # Execute the next step
+                    # CRITICAL FIX: Check if this is an interactive step BEFORE executing it
+                    # Interactive steps (MESSAGE, CHOICE, INPUT) require user interaction
+                    # We should prepare them for display but NOT execute them in the auto-loop
+                    if next_step.type in [SchemaStepType.MESSAGE, SchemaStepType.CHOICE, SchemaStepType.INPUT]:
+                        logger.info(f"Reached interactive step {next_step.type.value}, preparing for user display")
+
+                        # For MESSAGE steps, resolve the content with variables and prepare for display
+                        if next_step.type == SchemaStepType.MESSAGE:
+                            message = VariableResolver.resolve_content(next_step.content, variables)
+
+                            # Determine if workflow completes after this message
+                            next_step_id = next_step.next_step if next_step.next_step else None
+                            workflow_completed = False
+
+                            if not next_step_id:
+                                workflow_completed = True
+                                # Mark workflow as completed in variables
+                                variables["__workflow_completed"] = True
+                                await self.state_manager.update_variables(request.session_id, variables)
+                            else:
+                                # Check if the next_step actually exists
+                                next_step_exists = WorkflowParser.get_step_by_id(definition, next_step_id) is not None
+                                if not next_step_exists:
+                                    logger.info(f"MESSAGE step next_step '{next_step_id}' does not exist, marking workflow as completed")
+                                    workflow_completed = True
+                                    next_step_id = None
+                                    variables["__workflow_completed"] = True
+                                    await self.state_manager.update_variables(request.session_id, variables)
+
+                            # Return the MESSAGE result for display
+                            final_result = StepExecutionResult(
+                                success=True,
+                                step_id=next_step.id,
+                                step_type=next_step.type,
+                                workflow_id=execution.workflow_id,
+                                message=message,
+                                next_step_id=next_step_id,
+                                workflow_completed=workflow_completed
+                            )
+
+                            # Update execution step counter
+                            execution.steps_completed += 1
+                            self.db.commit()
+
+                        # For CHOICE steps, manually prepare choices WITHOUT executing
+                        # This prevents triggering the "already completed" logic
+                        elif next_step.type == SchemaStepType.CHOICE:
+                            message = VariableResolver.resolve_content(next_step.content, variables)
+                            choices = []
+
+                            if next_step.options:
+                                for option in next_step.options:
+                                    if hasattr(option, 'text'):
+                                        choices.append(VariableResolver.resolve_content(option.text, variables))
+
+                            final_result = StepExecutionResult(
+                                success=True,
+                                step_id=next_step.id,
+                                step_type=next_step.type,
+                                workflow_id=execution.workflow_id,
+                                message=message,
+                                choices=choices,
+                                input_required="choice",
+                                workflow_completed=False
+                            )
+
+                            # Update execution step counter
+                            execution.steps_completed += 1
+                            self.db.commit()
+
+                            logger.info(
+                                f"CHOICE step prepared for display: step_id={next_step.id}, "
+                                f"choices_count={len(choices)}"
+                            )
+
+                        # For INPUT steps, manually prepare prompt WITHOUT executing
+                        # This prevents triggering the "already provided" logic
+                        elif next_step.type == SchemaStepType.INPUT:
+                            message = VariableResolver.resolve_content(next_step.content, variables)
+
+                            final_result = StepExecutionResult(
+                                success=True,
+                                step_id=next_step.id,
+                                step_type=next_step.type,
+                                workflow_id=execution.workflow_id,
+                                message=message,
+                                input_required="text",
+                                workflow_completed=False
+                            )
+
+                            # Update execution step counter
+                            execution.steps_completed += 1
+                            self.db.commit()
+
+                            logger.info(
+                                f"INPUT step prepared for display: step_id={next_step.id}, "
+                                f"variable={next_step.variable}"
+                            )
+
+                        # Stop auto-execution at interactive steps
+                        logger.info(f"Stopping auto-execution at interactive step {next_step.type.value}")
+                        break
+
+                    # Execute non-interactive steps (CONDITION, ACTION, DELAY)
+                    logger.info(f"Executing non-interactive step: {next_step.type.value}")
                     next_result = await self._execute_step_internal(execution, next_step, definition, variables)
                     execution.steps_completed += 1
                     self.db.commit()
@@ -377,14 +530,7 @@ class ExecutionService:
                             )
                         break
 
-                    # If this is an interactive step, always stop - these require user interaction
-                    # Interactive steps: MESSAGE, CHOICE, INPUT
-                    if next_step.type in [SchemaStepType.MESSAGE, SchemaStepType.CHOICE, SchemaStepType.INPUT]:
-                        # Always stop at interactive steps that require user interaction
-                        logger.info(f"Reached interactive step {next_step.type.value}, stopping auto-execution")
-                        break
-
-                    # If this is a non-interactive step (CONDITION, ACTION, DELAY) and has next_step, continue
+                    # If this is a non-interactive step and has next_step, continue
                     if next_result.next_step_id:
                         current_next_step_id = next_result.next_step_id
                         logger.info(f"Non-interactive step, continuing to {current_next_step_id}")
