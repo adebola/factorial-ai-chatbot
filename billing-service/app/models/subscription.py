@@ -53,11 +53,16 @@ class TransactionType(str, enum.Enum):
 class Subscription(Base):
     """Core subscription model for tenant plan subscriptions"""
     __tablename__ = "subscriptions"
-    
+
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(String(36), nullable=False, index=True)  # Tenant data in OAuth2 server
     plan_id = Column(String(36), ForeignKey("plans.id"), nullable=False, index=True)
-    
+
+    # User information (from JWT token claims at creation time)
+    # Used by scheduled jobs for sending emails (no token available in background jobs)
+    user_email = Column(String(255), nullable=True, index=True)
+    user_full_name = Column(String(255), nullable=True)
+
     # Subscription details
     status = Column(String(20), default=SubscriptionStatus.PENDING.value, nullable=False)
     billing_cycle = Column(String(20), default=BillingCycle.MONTHLY.value, nullable=False)
@@ -253,29 +258,72 @@ class SubscriptionChange(Base):
     subscription = relationship("Subscription", back_populates="subscription_changes")
 
 
+class NotificationLog(Base):
+    """Track email notifications sent to customers"""
+    __tablename__ = "notification_logs"
+
+    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+
+    # Foreign keys
+    tenant_id = Column(String(36), nullable=False, index=True)
+    subscription_id = Column(String(36), nullable=True, index=True)
+
+    # Notification details
+    notification_type = Column(String(50), nullable=False, index=True)
+    recipient_email = Column(String(255), nullable=False, index=True)
+    recipient_name = Column(String(255), nullable=True)
+
+    # Email content
+    subject = Column(String(500), nullable=False)
+    template_used = Column(String(100), nullable=True)
+
+    # Delivery status
+    status = Column(String(20), nullable=False, default="pending")
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    failed_at = Column(DateTime(timezone=True), nullable=True)
+    failure_reason = Column(Text, nullable=True)
+
+    # Retry tracking
+    retry_count = Column(Integer, nullable=False, default=0)
+    last_retry_at = Column(DateTime(timezone=True), nullable=True)
+    max_retries = Column(Integer, nullable=False, default=3)
+
+    # Related data
+    related_payment_id = Column(String(36), nullable=True)
+    related_invoice_id = Column(String(36), nullable=True)
+
+    # Metadata
+    notification_metadata = Column(JSON, default={})
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class PaystackWebhook(Base):
     """Log Paystack webhook events"""
     __tablename__ = "paystack_webhooks"
-    
+
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
-    
+
     # Webhook details
     event_type = Column(String(100), nullable=False, index=True)
     paystack_event_id = Column(String(255), unique=True, nullable=False, index=True)
-    
+
     # Processing status
     processed = Column(Boolean, default=False, nullable=False)
     processing_attempts = Column(Integer, default=0, nullable=False)
     last_processing_error = Column(Text, nullable=True)
-    
+
     # Event data
     raw_data = Column(JSON, nullable=False)  # Complete webhook payload
     signature = Column(String(255), nullable=False)  # Webhook signature for verification
-    
+
     # Related records
     payment_id = Column(String(36), nullable=True, index=True)
     subscription_id = Column(String(36), nullable=True, index=True)
-    
+
     # Timestamps
     received_at = Column(DateTime(timezone=True), server_default=func.now())
     processed_at = Column(DateTime(timezone=True), nullable=True)

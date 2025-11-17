@@ -1,5 +1,5 @@
 """
-Structured logging configuration for FactorialBot Onboarding Service.
+Structured logging configuration for ChatCraft Billing Service.
 
 This module sets up structured logging using Loguru + Structlog for:
 - Multi-tenant context tracking

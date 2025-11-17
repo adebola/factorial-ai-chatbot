@@ -1,7 +1,7 @@
 """
 Billing Service - Main Application Entry Point
 
-Manages subscription plans, billing, and payment processing for FactorialBot tenants.
+Manages subscription plans, billing, and payment processing for ChatCraft tenants.
 """
 
 import os
@@ -72,7 +72,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="1.0.0",
-    description="Billing and subscription management service for FactorialBot",
+    description="Billing and subscription management service for ChatCraft",
     lifespan=lifespan
 )
 
@@ -157,7 +157,7 @@ async def root():
     return {
         "service": "Billing Service",
         "version": "1.0.0",
-        "description": "Subscription and payment management for FactorialBot",
+        "description": "Subscription and payment management for ChatCraft",
         "api_docs": f"{settings.API_V1_STR}/docs"
     }
 
