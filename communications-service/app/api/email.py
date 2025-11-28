@@ -402,9 +402,12 @@ async def get_email_statistics(
         clear_request_context()
 
 
+# Webhook endpoint commented out - not needed for basic email sending
+# TODO: Implement Brevo webhook handling if delivery tracking is needed in the future
+"""
 @router.post("/webhooks/sendgrid")
 async def handle_sendgrid_webhook(webhook_data: List[Dict[str, Any]], db: Session = Depends(get_db)):
-    """Handle SendGrid webhook events"""
+    '''Handle SendGrid webhook events'''
 
     try:
         email_service = EmailService(db)
@@ -423,3 +426,4 @@ async def handle_sendgrid_webhook(webhook_data: List[Dict[str, Any]], db: Sessio
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Webhook processing failed: {str(e)}"
         )
+"""

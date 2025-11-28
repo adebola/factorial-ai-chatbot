@@ -12,8 +12,8 @@ if os.environ.get("ENVIRONMENT", "development") == "development":
         pass
 
 import urllib3
-from sendgrid import SendGridAPIClient, Content, Attachment, FileContent, FileName, FileType, Disposition
-from sendgrid.helpers.mail import Mail, TrackingSettings, OpenTracking, ClickTracking
+import sib_api_v3_sdk
+from sib_api_v3_sdk.rest import ApiException
 from sqlalchemy.orm import Session
 
 from ..core.logging_config import get_logger, log_message_sent, log_message_failed
@@ -24,27 +24,34 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class EmailService:
-    """Service for sending emails via SendGrid"""
+    """Service for sending emails via Brevo (formerly Sendinblue)"""
 
     def __init__(self, db: Session):
         self.db = db
         self.logger = get_logger("email_service")
 
-        # Get SendGrid configuration from environment
-        self.api_key = os.environ.get("SENDGRID_API_KEY")
+        # Get Brevo configuration from environment
+        self.api_key = os.environ.get("BREVO_API_KEY")
 
         if not self.api_key:
-            raise ValueError("SENDGRID_API_KEY environment variable is not set")
+            raise ValueError("BREVO_API_KEY environment variable is not set")
 
-        self.default_from_email = os.environ.get("SENDGRID_FROM_EMAIL", "noreply@example.com")
-        self.default_from_name = os.environ.get("SENDGRID_FROM_NAME", "FactorialBot")
+        self.default_from_email = os.environ.get("BREVO_FROM_EMAIL", "noreply@example.com")
+        self.default_from_name = os.environ.get("BREVO_FROM_NAME", "ChatCraft")
 
-        # Initialize SendGrid client
+        # Initialize Brevo client
         try:
-            self.sg = SendGridAPIClient(api_key=self.api_key)
-            self.logger.info("SendGrid client initialized successfully")
+            # Configure API key
+            configuration = sib_api_v3_sdk.Configuration()
+            configuration.api_key['api-key'] = self.api_key
+
+            # Create API instance
+            api_client = sib_api_v3_sdk.ApiClient(configuration)
+            self.brevo_api = sib_api_v3_sdk.TransactionalEmailsApi(api_client)
+
+            self.logger.info("Brevo client initialized successfully")
         except Exception as e:
-            self.logger.error(f"Failed to initialize SendGrid client: {e}")
+            self.logger.error(f"Failed to initialize Brevo client: {e}")
             raise
 
     def send_email(
@@ -60,7 +67,7 @@ class EmailService:
         template_data: Optional[Dict[str, Any]] = None
     ) -> Tuple[str, bool]:
         """
-        Send an email via SendGrid
+        Send an email via Brevo
 
         Returns:
             Tuple of (message_id, success)
@@ -96,8 +103,8 @@ class EmailService:
                 self._update_email_status(email_record.id, MessageStatus.FAILED, "Rate limit exceeded")
                 return email_record.id, False
 
-            # Create SendGrid mail object
-            mail = self._create_sendgrid_mail(
+            # Create Brevo email object
+            brevo_email = self._create_brevo_email(
                 from_email=self.default_from_email,
                 from_name=self.default_from_name,
                 to_email=to_email,
@@ -109,58 +116,59 @@ class EmailService:
                 tenant_settings=tenant_settings
             )
 
-            # Send email via SendGrid
-            response = self.sg.send(mail)
+            # Send email via Brevo
+            response = self.brevo_api.send_transac_email(brevo_email)
 
-            if response.status_code in [200, 202]:
-                # Success
-                self._update_email_status(
-                    email_record.id,
-                    MessageStatus.SENT,
-                    provider_id=response.headers.get('X-Message-Id'),
-                    sent_at=datetime.utcnow()
-                )
+            # Success - Brevo returns message_id in response
+            message_id = response.message_id if hasattr(response, 'message_id') else None
 
-                # Update rate limit counter
-                self._increment_rate_limit_counter(tenant_id, tenant_settings)
+            self._update_email_status(
+                email_record.id,
+                MessageStatus.SENT,
+                provider_id=message_id,
+                sent_at=datetime.utcnow()
+            )
 
-                # Log delivery
-                self._log_delivery(
-                    email_record.id,
-                    MessageType.EMAIL,
-                    tenant_id,
-                    "sent",
-                    {"status_code": response.status_code, "headers": dict(response.headers)}
-                )
+            # Update rate limit counter
+            self._increment_rate_limit_counter(tenant_id, tenant_settings)
 
-                log_message_sent(
-                    message_type="email",
-                    message_id=email_record.id,
-                    tenant_id=tenant_id,
-                    recipient=to_email,
-                    provider="sendgrid",
-                    subject=subject
-                )
+            # Log delivery
+            self._log_delivery(
+                email_record.id,
+                MessageType.EMAIL,
+                tenant_id,
+                "sent",
+                {"message_id": message_id}
+            )
 
-                return email_record.id, True
+            log_message_sent(
+                message_type="email",
+                message_id=email_record.id,
+                tenant_id=tenant_id,
+                recipient=to_email,
+                provider="brevo",
+                subject=subject
+            )
 
-            else:
-                # Failed
-                error_msg = f"SendGrid API error: {response.status_code}"
-                self._update_email_status(email_record.id, MessageStatus.FAILED, error_msg)
+            return email_record.id, True
 
-                log_message_failed(
-                    message_type="email",
-                    message_id=email_record.id,
-                    tenant_id=tenant_id,
-                    recipient=to_email,
-                    error=error_msg
-                )
+        except ApiException as e:
+            # Brevo API error
+            error_msg = f"Brevo API error: {e.status} - {e.reason}"
+            self._update_email_status(email_record.id, MessageStatus.FAILED, error_msg)
 
-                return email_record.id, False
+            log_message_failed(
+                message_type="email",
+                message_id=email_record.id,
+                tenant_id=tenant_id,
+                recipient=to_email,
+                error=error_msg
+            )
+
+            return email_record.id, False
 
         except Exception as e:
-            # Exception occurred
+            # General exception
             error_msg = f"Failed to send email: {str(e)}"
             self._update_email_status(email_record.id, MessageStatus.FAILED, error_msg)
 
@@ -174,7 +182,7 @@ class EmailService:
 
             return email_record.id, False
 
-    def _create_sendgrid_mail(
+    def _create_brevo_email(
         self,
         from_email: str,
         from_name: str,
@@ -185,62 +193,71 @@ class EmailService:
         text_content: Optional[str],
         attachments: Optional[List[Dict[str, Any]]],
         tenant_settings: TenantSettings
-    ) -> Mail:
-        """Create SendGrid Mail object"""
+    ) -> sib_api_v3_sdk.SendSmtpEmail:
+        """Create Brevo SendSmtpEmail object"""
 
-        # Create mail object
-        mail = Mail(
-            from_email=from_email,
-            to_emails=to_email,
-            subject=subject
-        )
+        # Prepare sender
+        sender = {"name": from_name, "email": from_email}
 
-        # Add content
+        # Prepare recipient(s)
+        to = [{"email": to_email}]
+        if to_name:
+            to[0]["name"] = to_name
+
+        # Create email object
+        email_data = {
+            "sender": sender,
+            "to": to,
+            "subject": subject,
+        }
+
+        # Add HTML content if provided
         if html_content:
-            mail.add_content(Content("text/html", html_content))
+            email_data["html_content"] = html_content
+
+        # Add text content if provided
         if text_content:
-            mail.add_content(Content("text/plain", text_content))
+            email_data["text_content"] = text_content
+
+        # Add reply-to (same as sender for now)
+        email_data["reply_to"] = sender
 
         # Add attachments if provided
         if attachments:
+            brevo_attachments = []
             for attachment_info in attachments:
                 try:
-                    attachment = self._create_attachment(attachment_info)
-                    if attachment:
-                        mail.add_attachment(attachment)
+                    brevo_attachment = self._create_attachment(attachment_info)
+                    if brevo_attachment:
+                        brevo_attachments.append(brevo_attachment)
                 except Exception as e:
                     self.logger.warning(f"Failed to add attachment: {e}")
 
-        # Add tracking settings
-        tracking_settings = TrackingSettings()
+            if brevo_attachments:
+                email_data["attachment"] = brevo_attachments
 
-        if tenant_settings.enable_open_tracking:
-            tracking_settings.open_tracking = OpenTracking(enable=True)
+        # Note: Brevo doesn't have the same tracking settings API as SendGrid
+        # Tracking is typically enabled at the account level in Brevo dashboard
+        # If needed, you can add headers for tracking:
+        # email_data["headers"] = {"X-Mailin-custom": "tracking_data"}
 
-        if tenant_settings.enable_click_tracking:
-            tracking_settings.click_tracking = ClickTracking(enable=True)
+        return sib_api_v3_sdk.SendSmtpEmail(**email_data)
 
-        mail.tracking_settings = tracking_settings
-
-        return mail
-
-    def _create_attachment(self, attachment_info: Dict[str, Any]) -> Optional[Attachment]:
-        """Create SendGrid attachment from attachment info"""
+    def _create_attachment(self, attachment_info: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Create Brevo attachment from attachment info"""
 
         filename = attachment_info.get("filename")
         content = attachment_info.get("content")  # Base64 encoded content
-        content_type = attachment_info.get("content_type")
 
-        if not all([filename, content, content_type]):
+        if not all([filename, content]):
             return None
 
-        attachment = Attachment()
-        attachment.file_content = FileContent(content)
-        attachment.file_name = FileName(filename)
-        attachment.file_type = FileType(content_type)
-        attachment.disposition = Disposition("attachment")
-
-        return attachment
+        # Brevo expects attachments in this format:
+        # {"content": "base64_string", "name": "filename"}
+        return {
+            "content": content,
+            "name": filename
+        }
 
     def _get_tenant_settings(self, tenant_id: str) -> TenantSettings:
         """Get or create tenant settings"""
@@ -319,7 +336,7 @@ class EmailService:
             message_type=message_type,
             tenant_id=tenant_id,
             event_type=event_type,
-            provider_name="sendgrid",
+            provider_name="brevo",
             provider_response=provider_response,
             occurred_at=now,
             created_at=now  # Explicitly set to avoid NOT NULL violation
@@ -350,56 +367,34 @@ class EmailService:
 
         return query.order_by(EmailMessage.created_at.desc()).offset(skip).limit(limit).all()
 
+    # Webhook handling commented out - not needed for basic email sending
+    # TODO: Implement Brevo webhook handling if tracking is needed in the future
+    """
     def handle_webhook(self, webhook_data: List[Dict[str, Any]]) -> bool:
-        """Handle SendGrid webhook events"""
+        '''Handle Brevo webhook events'''
         try:
             for event in webhook_data:
                 event_type = event.get("event")
-                email_id = event.get("email_id")  # Custom header we should add
-                sg_message_id = event.get("sg_message_id")
+                brevo_message_id = event.get("message-id")
 
                 if not event_type:
                     continue
 
                 # Find email by provider ID
                 email = self.db.query(EmailMessage).filter(
-                    EmailMessage.provider_id == sg_message_id
+                    EmailMessage.provider_id == brevo_message_id
                 ).first()
 
                 if not email:
                     continue
 
                 # Update email status based on event
-                if event_type == "delivered":
-                    self._update_email_status(
-                        email.id,
-                        MessageStatus.DELIVERED,
-                        delivered_at=datetime.fromtimestamp(event.get("timestamp", 0))
-                    )
-                elif event_type == "bounce":
-                    self._update_email_status(
-                        email.id,
-                        MessageStatus.BOUNCED,
-                        error_message=event.get("reason", "Email bounced")
-                    )
-                elif event_type == "open":
-                    email.opened_at = datetime.fromtimestamp(event.get("timestamp", 0))
-                    self.db.commit()
-                elif event_type == "click":
-                    email.clicked_at = datetime.fromtimestamp(event.get("timestamp", 0))
-                    self.db.commit()
-
-                # Log the webhook event
-                self._log_delivery(
-                    email.id,
-                    MessageType.EMAIL,
-                    email.tenant_id,
-                    event_type,
-                    event
-                )
+                # (Implementation depends on Brevo webhook event format)
+                pass
 
             return True
 
         except Exception as e:
             self.logger.error(f"Failed to process webhook: {e}")
             return False
+    """

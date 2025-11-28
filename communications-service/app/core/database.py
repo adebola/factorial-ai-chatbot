@@ -1,7 +1,7 @@
 import os
 from typing import Any, Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, QueuePool
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
@@ -14,10 +14,16 @@ if not DATABASE_URL:
 # Create engine with connection pooling
 engine = create_engine(
     DATABASE_URL,
+    poolclass=QueuePool,
     pool_size=int(os.environ.get("POOL_SIZE", "10")),
     max_overflow=int(os.environ.get("POOL_MAX_OVERFLOW", "20")),
-    pool_recycle=int(os.environ.get("POOL_RECYCLE_SECONDS", "3600")),
+    pool_recycle=int(os.environ.get("POOL_RECYCLE_SECONDS", "300")),  # Default 5 minutes (was 3600)
+    pool_timeout=int(os.environ.get("POOL_TIMEOUT", "30")),  # Wait max 30 seconds
     pool_pre_ping=True,  # Validate connections before use
+    connect_args={
+        "connect_timeout": int(os.environ.get("CONNECT_TIMEOUT", "10")),
+        "options": "-c statement_timeout=30000"  # 30 seconds
+    },
     echo=False  # Set to True for SQL debugging
 )
 
