@@ -12,6 +12,7 @@ from ..services.tenant_client import TenantClient
 from ..services.workflow_client import WorkflowClient
 from ..services.event_publisher import event_publisher
 from ..services.usage_cache import usage_cache
+from ..services.billing_client import billing_client
 from ..core.logging_config import get_logger
 
 logger = get_logger("ws")
@@ -142,7 +143,8 @@ class ChatWebSocket:
 
                 # Check chat usage limits BEFORE processing message
                 try:
-                    allowed, reason = await usage_cache.check_chat_allowed(tenant_id, tenant_api_key)
+                    # Check with billing service first (authoritative source)
+                    allowed, reason = await billing_client.check_can_send_chat(tenant_id)
                     if not allowed:
                         # Send limit exceeded error to client
                         limit_error_msg = {
@@ -152,10 +154,22 @@ class ChatWebSocket:
                             "timestamp": datetime.now().isoformat()
                         }
                         await websocket.send_text(json.dumps(limit_error_msg))
+                        logger.warning(
+                            f"Chat blocked due to subscription limit",
+                            extra={
+                                "tenant_id": tenant_id,
+                                "session_id": session_id,
+                                "reason": reason
+                            }
+                        )
                         continue
                 except Exception as e:
-                    # Log but continue on cache check error (fail open)
-                    print(f"Failed to check usage limits: {str(e)}")
+                    # Log but continue on check error (fail open to prevent service disruption)
+                    logger.error(
+                        f"Failed to check subscription limits: {str(e)}",
+                        extra={"tenant_id": tenant_id},
+                        exc_info=True
+                    )
 
                 # Store user message
                 user_msg_record = ChatMessage(
