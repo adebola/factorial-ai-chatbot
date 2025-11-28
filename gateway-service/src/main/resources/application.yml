@@ -3,7 +3,7 @@ server:
 
 logging:
   pattern:
-    console: "%green(%d{HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
+    console: "%green(%d{yyyy-MM-dd HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
   level:
     org.springframework.web: DEBUG
     org.springframework.cloud.gateway: TRACE
@@ -111,6 +111,48 @@ spring:
                 uri: http://localhost:8004
                 predicates:
                     - Path=/api/v1/payments/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: billing-payment-methods
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/api/v1/payment-methods/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: billing-webhooks
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/api/v1/webhooks/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: billing-invoices
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/api/v1/invoices/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: billing-usage
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/api/v1/usage/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: billing-restrictions
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/api/v1/restrictions/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              - id: billing-analytics
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/api/v1/analytics/**
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
