@@ -1,6 +1,5 @@
 package io.factorialsystems.authorizationserver2.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -24,7 +23,6 @@ import java.util.Map;
 public class UserCreationPublisher {
 
     private final RabbitTemplate rabbitTemplate;
-    private final ObjectMapper objectMapper;
 
     @Value("${rabbitmq.exchange:billing.events}")
     private String exchange;
@@ -51,11 +49,8 @@ public class UserCreationPublisher {
             message.put("event_type", "user_created");
             message.put("timestamp", OffsetDateTime.now().toString());
 
-            // Convert to JSON string
-            String messageJson = objectMapper.writeValueAsString(message);
-
-            // Publish to RabbitMQ
-            rabbitTemplate.convertAndSend(exchange, routingKey, messageJson);
+            // Publish to RabbitMQ - pass Map directly, Jackson2JsonMessageConverter handles serialization
+            rabbitTemplate.convertAndSend(exchange, routingKey, message);
 
             log.info("✅ Published user.created event for tenant: {} to exchange: {} with routing key: {}",
                     tenantId, exchange, routingKey);

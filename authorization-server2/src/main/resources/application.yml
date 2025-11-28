@@ -5,7 +5,7 @@ server:
 
 logging:
   pattern:
-    console: "%green(%d{HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
+    console: "%green(%d{yyyy-MM-dd HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
   level:
     org.springframework.web: DEBUG
     org.springframework.security: DEBUG
