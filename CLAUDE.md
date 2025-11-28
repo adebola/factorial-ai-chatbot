@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FactorialBot is a multi-tenant AI chat platform built with FastAPI and LangChain. It allows organizations to upload documents, scrape websites, and provide AI-powered chat responses based on their knowledge base.
+**ChatCraft** is a multi-tenant AI chat platform built with FastAPI and LangChain. It allows organizations to upload documents, scrape websites, and provide AI-powered chat responses based on their knowledge base.
+
+**Note**: While the repository directory is named "factorialbot" (legacy), the application is called **ChatCraft**. All user-facing content, emails, and documentation should use "ChatCraft" as the product name.
 
 ## Architecture
 
@@ -387,6 +389,55 @@ The system includes a comprehensive subscription plans system:
 - Plans management restricted to admin role users
 - Chat widget files contain tenant-specific API keys for secure access
 - **OPENAI_API_KEY**: Always accessed via `os.environ.get("OPENAI_API_KEY")` - never through settings classes to prevent accidental commits
+
+## Scheduled Jobs and User Context
+
+**CRITICAL**: Scheduled background jobs (APScheduler) run without HTTP request context, meaning **no access token is available**.
+
+### The Problem:
+- JWT claims (`email`, `full_name`, `tenant_id`) are only available during authenticated API requests
+- Scheduled jobs like trial expiration checks, subscription renewals, etc. run independently
+- Cannot use `validate_token()` or access `claims.email` / `claims.full_name` in scheduled jobs
+
+### Solution Pattern:
+When designing features that need user information in scheduled jobs:
+
+1. **Store user data at creation time** (when token IS available):
+```python
+# In API endpoint (has token access)
+@router.post("/subscriptions")
+async def create_subscription(
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db)
+):
+    subscription = Subscription(
+        tenant_id=claims.tenant_id,
+        user_email=claims.email,        # Store for later use
+        user_full_name=claims.full_name, # Store for later use
+        # ... other fields
+    )
+```
+
+2. **Use stored data in scheduled jobs** (no token needed):
+```python
+# In scheduled job (NO token available)
+def check_trial_expirations():
+    subscriptions = db.query(Subscription).filter(...).all()
+
+    for sub in subscriptions:
+        email_publisher.publish_trial_expiring_email(
+            tenant_id=sub.tenant_id,
+            to_email=sub.user_email,      # From database, not token
+            to_name=sub.user_full_name,   # From database, not token
+            days_remaining=3
+        )
+```
+
+### Best Practices:
+- Add `user_email` and `user_full_name` columns to models that will be used by scheduled jobs
+- Populate these fields during creation/update when JWT token is available
+- Never assume `validate_token()` or JWT claims are accessible outside API request handlers
+- For service-to-service calls, use dedicated service authentication (not user tokens)
 
 ## Structured Logging System
 
