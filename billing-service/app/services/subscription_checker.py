@@ -149,9 +149,9 @@ class SubscriptionChecker:
             return True, None
 
         # Check document limit
-        if plan.max_documents is not None:
-            if usage.documents_uploaded >= plan.max_documents:
-                return False, f"Document limit reached ({plan.max_documents} documents allowed on {plan.name} plan)"
+        if plan.document_limit is not None:
+            if usage.documents_uploaded >= plan.document_limit:
+                return False, f"Document limit reached ({plan.document_limit} documents allowed on {plan.name} plan)"
 
         return True, None
 
@@ -189,9 +189,9 @@ class SubscriptionChecker:
             return True, None
 
         # Check website limit
-        if plan.max_websites is not None:
-            if usage.websites_ingested >= plan.max_websites:
-                return False, f"Website limit reached ({plan.max_websites} websites allowed on {plan.name} plan)"
+        if plan.website_limit is not None:
+            if usage.websites_ingested >= plan.website_limit:
+                return False, f"Website limit reached ({plan.website_limit} websites allowed on {plan.name} plan)"
 
         return True, None
 
@@ -229,9 +229,9 @@ class SubscriptionChecker:
             return True, None
 
         # Check monthly chat limit
-        if plan.monthly_chats is not None:
-            if usage.monthly_chats_used >= plan.monthly_chats:
-                return False, f"Monthly chat limit reached ({plan.monthly_chats} chats allowed on {plan.name} plan)"
+        if plan.monthly_chat_limit is not None:
+            if usage.monthly_chats_used >= plan.monthly_chat_limit:
+                return False, f"Monthly chat limit reached ({plan.monthly_chat_limit} chats allowed on {plan.name} plan)"
 
         return True, None
 
@@ -264,18 +264,18 @@ class SubscriptionChecker:
                 "plan_name": plan.name,
                 "documents": {
                     "used": 0,
-                    "limit": plan.max_documents,
-                    "remaining": plan.max_documents
+                    "limit": plan.document_limit,
+                    "remaining": plan.document_limit
                 },
                 "websites": {
                     "used": 0,
-                    "limit": plan.max_websites,
-                    "remaining": plan.max_websites
+                    "limit": plan.website_limit,
+                    "remaining": plan.website_limit
                 },
                 "monthly_chats": {
                     "used": 0,
-                    "limit": plan.monthly_chats,
-                    "remaining": plan.monthly_chats
+                    "limit": plan.monthly_chat_limit,
+                    "remaining": plan.monthly_chat_limit
                 }
             }
 
@@ -284,18 +284,18 @@ class SubscriptionChecker:
             "plan_name": plan.name,
             "documents": {
                 "used": usage.documents_uploaded,
-                "limit": plan.max_documents,
-                "remaining": max(0, plan.max_documents - usage.documents_uploaded) if plan.max_documents else None
+                "limit": plan.document_limit,
+                "remaining": max(0, plan.document_limit - usage.documents_uploaded) if plan.document_limit else None
             },
             "websites": {
                 "used": usage.websites_ingested,
-                "limit": plan.max_websites,
-                "remaining": max(0, plan.max_websites - usage.websites_ingested) if plan.max_websites else None
+                "limit": plan.website_limit,
+                "remaining": max(0, plan.website_limit - usage.websites_ingested) if plan.website_limit else None
             },
             "monthly_chats": {
                 "used": usage.monthly_chats_used,
-                "limit": plan.monthly_chats,
-                "remaining": max(0, plan.monthly_chats - usage.monthly_chats_used) if plan.monthly_chats else None,
+                "limit": plan.monthly_chat_limit,
+                "remaining": max(0, plan.monthly_chat_limit - usage.monthly_chats_used) if plan.monthly_chat_limit else None,
                 "resets_at": usage.monthly_reset_at.isoformat() if usage.monthly_reset_at else None
             }
         }
