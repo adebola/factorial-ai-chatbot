@@ -3,7 +3,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 import pika
 from pika.exceptions import AMQPConnectionError, AMQPChannelError
@@ -135,7 +135,7 @@ class RabbitMQService:
                 "subscription_id": subscription_id,
                 "plan_id": plan_id,
                 "action": action,
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
             }
 
             # Convert to JSON
@@ -198,7 +198,7 @@ class RabbitMQService:
                 "plan_id": new_plan_id,  # The new plan becomes the current plan
                 "old_plan_id": old_plan_id,
                 "action": "plan_switched",
-                "timestamp": datetime.utcnow().isoformat() + "Z"
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z"
             }
 
             # Convert to JSON
@@ -256,7 +256,7 @@ class RabbitMQService:
             message = {
                 "event_type": event_type,
                 "tenant_id": tenant_id,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat() + "Z",
                 "data": logo_data or {}
             }
             

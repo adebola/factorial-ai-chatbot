@@ -1,5 +1,5 @@
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 import uuid
 
@@ -60,7 +60,7 @@ class SubscriptionService:
             amount = plan.monthly_plan_cost
 
         # Calculate dates
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if custom_trial_end:
             # Use custom trial end date (e.g., 14 days from registration)
@@ -232,7 +232,7 @@ class SubscriptionService:
 
         # Update payment record
         payment.status = PaymentStatus.COMPLETED
-        payment.processed_at = datetime.utcnow()
+        payment.processed_at = datetime.now(timezone.utc)
         payment.gateway_response = verification_result["data"]
         payment.paystack_transaction_id = str(verification_result["transaction_id"])
 
@@ -250,6 +250,61 @@ class SubscriptionService:
             # tenant.plan_id would be updated via OAuth2 server API call
 
         self.db.commit()
+
+        # Phase 7: Send payment receipt and create invoice
+        try:
+            if subscription and subscription.user_email:
+                # Get plan name for receipt
+                plan = self.plan_service.get_plan_by_id(subscription.plan_id)
+                plan_name = plan.name if plan else "Subscription"
+
+                # Send payment receipt email
+                from ..services.email_publisher import email_publisher
+                email_publisher.publish_payment_receipt_email(
+                    tenant_id=subscription.tenant_id,
+                    to_email=subscription.user_email,
+                    to_name=subscription.user_full_name or "Valued Customer",
+                    amount=float(payment.amount),
+                    currency=payment.currency,
+                    payment_reference=payment.paystack_reference,
+                    payment_date=payment.processed_at or datetime.now(timezone.utc),
+                    plan_name=plan_name
+                )
+
+                # Create invoice automatically
+                from ..services.invoice_service import InvoiceService
+                invoice_service = InvoiceService(self.db)
+                invoice = invoice_service.create_invoice_from_payment(payment)
+
+                # Send invoice email
+                if invoice:
+                    email_publisher.publish_invoice_email(
+                        tenant_id=subscription.tenant_id,
+                        to_email=subscription.user_email,
+                        to_name=subscription.user_full_name or "Valued Customer",
+                        invoice_number=invoice.invoice_number,
+                        total_amount=float(invoice.total_amount),
+                        currency=invoice.currency,
+                        due_date=invoice.due_date,
+                        status=invoice.status
+                    )
+
+                logger.info(
+                    f"Payment notification emails sent for payment {payment.id}",
+                    extra={
+                        "payment_id": payment.id,
+                        "subscription_id": subscription.id,
+                        "tenant_id": subscription.tenant_id
+                    }
+                )
+
+        except Exception as e:
+            # Don't fail payment verification if emails fail
+            logger.error(
+                f"Failed to send payment notification emails: {e}",
+                exc_info=True,
+                extra={"payment_id": payment.id}
+            )
 
         return {
             "success": True,
@@ -347,9 +402,21 @@ class SubscriptionService:
         # If upgrading from TRIALING status, change to ACTIVE (user is now paying)
         was_trialing = subscription.status == SubscriptionStatus.TRIALING
         if was_trialing and new_amount > old_amount:
+            now = datetime.now(timezone.utc)
             subscription.status = SubscriptionStatus.ACTIVE
             subscription.trial_ends_at = None  # End trial immediately
-            subscription.starts_at = datetime.utcnow()  # Update start date to now
+            subscription.starts_at = now  # Update start date to now
+
+            # Reset billing period to full cycle from upgrade date (no trial remainder)
+            subscription.current_period_start = now
+            if billing_cycle == BillingCycle.MONTHLY:
+                subscription.current_period_end = now + timedelta(days=30)
+                # Also update ends_at to match new billing period (was using trial period)
+                subscription.ends_at = now + timedelta(days=30)
+            else:  # YEARLY
+                subscription.current_period_end = now + timedelta(days=365)
+                # Also update ends_at to match new billing period (was using trial period)
+                subscription.ends_at = now + timedelta(days=365)
 
         # Clear any pending plan changes (user upgraded before scheduled downgrade)
         if subscription.pending_plan_id:
@@ -401,7 +468,7 @@ class SubscriptionService:
         if subscription.status == SubscriptionStatus.CANCELLED:
             return {"success": False, "error": "Subscription already cancelled"}
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if cancel_at_period_end:
             # Cancel at end of current period
@@ -453,7 +520,7 @@ class SubscriptionService:
 
     def _initialize_usage_tracking(self, subscription: Subscription) -> None:
         """Initialize usage tracking for a new subscription"""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         usage_tracking = UsageTracking(
             tenant_id=subscription.tenant_id,
             subscription_id=subscription.id,
@@ -522,7 +589,7 @@ class SubscriptionService:
             new_amount=new_amount,
             prorated_amount=prorated_amount,
             reason=reason,
-            effective_at=datetime.utcnow()
+            effective_at=datetime.now(timezone.utc)
         )
 
         self.db.add(change)
@@ -536,7 +603,8 @@ class SubscriptionService:
     ) -> Decimal:
         """Calculate prorated amount for plan changes"""
 
-        now = datetime.utcnow()
+        # Use timezone-aware datetime to match database DateTime(timezone=True) fields
+        now = datetime.now(timezone.utc)
         period_start = subscription.current_period_start
         period_end = subscription.current_period_end
 

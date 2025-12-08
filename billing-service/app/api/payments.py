@@ -1,9 +1,12 @@
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 import json
+import os
+import logging
 
 from ..core.database import get_db
 from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
@@ -12,6 +15,7 @@ from ..services.paystack_service import PaystackService
 from ..models.subscription import Payment, PaymentStatus, PaymentMethodRecord
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 # Pydantic models for request/response
@@ -23,8 +27,6 @@ class PaymentInitializeRequest(BaseModel):
 
 class PaymentVerificationRequest(BaseModel):
     reference: str = Field(..., description="Paystack transaction reference")
-
-
 
 
 @router.post("/payments/initialize", response_model=Dict[str, Any])
@@ -95,15 +97,15 @@ async def verify_payment(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Verify a payment transaction"""
-    
+
     try:
         subscription_service = SubscriptionService(db)
-        
+
         # Verify payment
         result = await subscription_service.verify_subscription_payment(
             reference=verification_data.reference
         )
-        
+
         if result["success"]:
             return {
                 "success": True,
@@ -120,13 +122,167 @@ async def verify_payment(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=result["error"]
             )
-            
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to verify payment: {str(e)}"
+        )
+
+
+@router.get("/payments/callback")
+async def payment_callback(
+    reference: str = Query(..., description="Paystack payment reference"),
+    db: Session = Depends(get_db)
+):
+    """
+    Payment callback endpoint - User is redirected here after completing payment on Paystack.
+
+    This endpoint:
+    1. Verifies the payment with Paystack
+    2. Updates the payment and subscription status
+    3. Redirects the user to a success or failure page
+
+    Query Parameters:
+    - reference: Paystack transaction reference (automatically added by Paystack)
+
+    Note: This endpoint does NOT require authentication because the user is being
+    redirected from Paystack's payment page and won't have an Authorization header.
+    Security is ensured by verifying the payment reference with Paystack directly.
+    """
+
+    logger.info(f"Payment callback received for reference: {reference}")
+
+    try:
+        subscription_service = SubscriptionService(db)
+
+        # Verify payment with Paystack
+        result = await subscription_service.verify_subscription_payment(reference)
+
+        if result["success"]:
+            logger.info(f"Payment verified successfully: {reference}")
+
+            # Get frontend URL from environment
+            frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+            # Redirect to the success page with payment details
+            success_url = (
+                f"{frontend_url}/payments/success"
+                f"?reference={reference}"
+                f"&subscription_id={result['subscription_id']}"
+                f"&amount={result['amount']}"
+            )
+
+            return RedirectResponse(url=success_url, status_code=status.HTTP_303_SEE_OTHER)
+
+        else:
+            logger.warning(f"Payment verification failed: {reference} - {result.get('error')}")
+
+            # Get frontend URL from environment
+            frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+            # Redirect to failure page with error details
+            failure_url = (
+                f"{frontend_url}/payments/failed"
+                f"?reference={reference}"
+                f"&error={result.get('error', 'Payment verification failed')}"
+            )
+
+            return RedirectResponse(url=failure_url, status_code=status.HTTP_303_SEE_OTHER)
+
+    except Exception as e:
+        logger.error(f"Payment callback error: {reference} - {str(e)}", exc_info=True)
+
+        # Get frontend URL from environment
+        frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+
+        # Redirect to error page
+        error_url = (
+            f"{frontend_url}/payments/error"
+            f"?reference={reference}"
+            f"&error=An unexpected error occurred"
+        )
+
+        return RedirectResponse(url=error_url, status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/payments/callback/status", response_model=Dict[str, Any])
+async def payment_callback_status(
+    reference: str = Query(..., description="Paystack payment reference"),
+    db: Session = Depends(get_db)
+):
+    """
+    Alternative callback endpoint that returns JSON instead of redirecting.
+
+    Useful for:
+    - Mobile apps that can't handle redirects
+    - AJAX-based payment flows
+    - API clients that need JSON responses
+
+    Returns the payment status without performing verification (assumes webhook already processed it).
+    """
+
+    try:
+        # Find payment by reference
+        payment = db.query(Payment).filter(
+            Payment.paystack_reference == reference
+        ).first()
+
+        if not payment:
+            return {
+                "success": False,
+                "status": "not_found",
+                "message": "Payment not found",
+                "reference": reference
+            }
+
+        # Check payment status
+        if payment.status == PaymentStatus.COMPLETED:
+            return {
+                "success": True,
+                "status": "completed",
+                "message": "Payment completed successfully",
+                "payment": {
+                    "payment_id": payment.id,
+                    "subscription_id": payment.subscription_id,
+                    "amount": float(payment.amount),
+                    "currency": payment.currency,
+                    "reference": payment.paystack_reference,
+                    "paid_at": payment.paid_at.isoformat() if payment.paid_at else None
+                }
+            }
+
+        elif payment.status == PaymentStatus.PENDING:
+            return {
+                "success": False,
+                "status": "pending",
+                "message": "Payment is still being processed",
+                "reference": reference
+            }
+
+        elif payment.status == PaymentStatus.FAILED:
+            return {
+                "success": False,
+                "status": "failed",
+                "message": payment.failure_reason or "Payment failed",
+                "reference": reference
+            }
+
+        else:
+            return {
+                "success": False,
+                "status": payment.status.value.lower(),
+                "message": f"Payment status: {payment.status.value}",
+                "reference": reference
+            }
+
+    except Exception as e:
+        logger.error(f"Error checking payment callback status: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to check payment status: {str(e)}"
         )
 
 
@@ -274,33 +430,104 @@ async def delete_payment_method(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a saved payment method"""
-    
+
     try:
         payment_method = db.query(PaymentMethodRecord).filter(
             PaymentMethodRecord.id == method_id,
             PaymentMethodRecord.tenant_id == claims.tenant_id
         ).first()
-        
+
         if not payment_method:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Payment method not found"
             )
-        
+
         payment_method.is_active = False
-        payment_method.updated_at = datetime.utcnow()
+        payment_method.updated_at = datetime.now(timezone.utc)
         db.commit()
-        
+
         return {
             "success": True,
             "message": "Payment method deleted successfully",
             "method_id": method_id
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete payment method: {str(e)}"
+        )
+
+
+@router.get("/payments/history", response_model=Dict[str, Any])
+async def get_payment_history(
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db),
+    limit: int = 50,
+    offset: int = 0
+) -> Dict[str, Any]:
+    """
+    Get payment history for the tenant.
+
+    Returns list of all payments made by the tenant, ordered by most recent first.
+    """
+
+    try:
+        # Query payments for all tenant subscriptions
+        from ..models.subscription import Subscription
+
+        # Get all tenant subscriptions
+        subscription_ids = db.query(Subscription.id).filter(
+            Subscription.tenant_id == claims.tenant_id
+        ).all()
+        subscription_ids = [sid[0] for sid in subscription_ids]
+
+        if not subscription_ids:
+            return {
+                "payments": [],
+                "total": 0,
+                "limit": limit,
+                "offset": offset
+            }
+
+        # Get payments for these subscriptions
+        total_query = db.query(Payment).filter(
+            Payment.subscription_id.in_(subscription_ids)
+        )
+        total = total_query.count()
+
+        payments = total_query.order_by(
+            Payment.created_at.desc()
+        ).limit(limit).offset(offset).all()
+
+        return {
+            "payments": [
+                {
+                    "id": payment.id,
+                    "subscription_id": payment.subscription_id,
+                    "amount": float(payment.amount),
+                    "currency": payment.currency,
+                    "status": payment.status.value,
+                    "payment_method": payment.payment_method.value if payment.payment_method else None,
+                    "paystack_reference": payment.paystack_reference,
+                    "transaction_id": payment.transaction_id,
+                    "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+                    "created_at": payment.created_at.isoformat(),
+                    "failure_reason": payment.failure_reason
+                }
+                for payment in payments
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": (offset + limit) < total
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve payment history: {str(e)}"
         )

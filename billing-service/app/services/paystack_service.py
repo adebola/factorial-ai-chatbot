@@ -4,7 +4,7 @@ import json
 import uuid
 from decimal import Decimal
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 import asyncio
@@ -24,7 +24,6 @@ class PaystackService:
         self.base_url = "https://api.paystack.co"
         self.secret_key = os.environ.get("PAYSTACK_SECRET_KEY")
         self.public_key = os.environ.get("PAYSTACK_PUBLIC_KEY")
-        self.webhook_secret = os.environ.get("PAYSTACK_WEBHOOK_SECRET")
 
         if not self.secret_key:
             raise ValueError("PAYSTACK_SECRET_KEY is required")
@@ -361,19 +360,26 @@ class PaystackService:
                 }
 
     def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
-        """Verify Paystack webhook signature"""
-        if not self.webhook_secret:
-            raise ValueError("PAYSTACK_WEBHOOK_SECRET is required for webhook verification")
+        """
+        Verify Paystack webhook signature.
+
+        Paystack signs webhook payloads using HMAC SHA512 with your SECRET KEY.
+        The signature is sent in the 'x-paystack-signature' header.
+
+        Reference: https://paystack.com/docs/payments/webhooks/
+        """
+        if not self.secret_key:
+            raise ValueError("PAYSTACK_SECRET_KEY is required for webhook verification")
 
         try:
-            # Generate expected signature
+            # Generate expected signature using HMAC SHA512 with secret key
             expected_signature = hmac.new(
-                self.webhook_secret.encode('utf-8'),
+                self.secret_key.encode('utf-8'),
                 payload,
                 hashlib.sha512
             ).hexdigest()
 
-            # Compare signatures
+            # Compare signatures (constant-time comparison to prevent timing attacks)
             return hmac.compare_digest(expected_signature, signature)
         except Exception:
             return False
@@ -415,7 +421,7 @@ class PaystackService:
         if webhook:
             webhook.processed = success
             webhook.processing_attempts += 1
-            webhook.processed_at = datetime.utcnow()
+            webhook.processed_at = datetime.now(timezone.utc)
 
             if error:
                 webhook.last_processing_error = error

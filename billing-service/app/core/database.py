@@ -20,6 +20,11 @@ engine = create_engine(
     max_overflow=settings.POOL_MAX_OVERFLOW,
     pool_pre_ping=True,
     pool_recycle=settings.POOL_RECYCLE_SECONDS,
+    pool_timeout=settings.POOL_TIMEOUT,
+    connect_args={
+        "connect_timeout": settings.CONNECT_TIMEOUT,
+        "options": "-c statement_timeout=30000"  # 30 seconds
+    }
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

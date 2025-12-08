@@ -19,7 +19,9 @@ class Settings(BaseSettings):
     # Database Pool Settings
     POOL_SIZE: int = 10
     POOL_MAX_OVERFLOW: int = 20
-    POOL_RECYCLE_SECONDS: int = 3600
+    POOL_RECYCLE_SECONDS: int = 300  # Recycle connections every 5 minutes (was 3600/1 hour)
+    POOL_TIMEOUT: int = 30  # Wait max 30 seconds for connection from pool
+    CONNECT_TIMEOUT: int = 10  # Connection timeout in seconds
 
     # JWT Token Settings
     JWT_ALGORITHM: str = "HS256"

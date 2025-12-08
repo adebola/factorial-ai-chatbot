@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -635,6 +636,172 @@ async def get_plan_usage(
 class PlanSwitchRequest(BaseModel):
     new_plan_id: str = Field(..., description="ID of the plan to switch to")
     billing_cycle: str = Field(default="monthly", description="Billing cycle: 'monthly' or 'yearly'")
+    payment_reference: Optional[str] = Field(None, description="Payment reference for upgrades (required if prorated_amount > 0)")
+
+
+class PlanPreviewRequest(BaseModel):
+    new_plan_id: str = Field(..., description="ID of the plan to preview switch to")
+    billing_cycle: str = Field(default="monthly", description="Billing cycle: 'monthly' or 'yearly'")
+
+
+@router.post("/plans/preview-switch", response_model=Dict[str, Any])
+async def preview_plan_switch(
+    preview_request: PlanPreviewRequest,
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Preview plan switch without making changes.
+    Returns proration details and whether payment is required.
+    """
+    from ..services.subscription_service import SubscriptionService
+    from ..models.subscription import BillingCycle
+
+    tenant_id = claims.tenant_id
+    logger.info(f"Plan switch preview request for tenant: {tenant_id}")
+
+    try:
+        plan_service = PlanService(db)
+        subscription_service = SubscriptionService(db)
+
+        # Get current subscription
+        existing_subscription = subscription_service.get_subscription_by_tenant(tenant_id)
+        if not existing_subscription:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No active subscription found. Cannot preview plan switch."
+            )
+
+        # Validate new plan exists and is active
+        new_plan = plan_service.get_plan_by_id(preview_request.new_plan_id)
+        if not new_plan or not new_plan.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid plan or plan is not active"
+            )
+
+        # Get current plan
+        current_plan = plan_service.get_plan_by_id(existing_subscription.plan_id)
+        if not current_plan:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Current plan not found"
+            )
+
+        # ENTERPRISE PLAN: Require manual contact
+        if new_plan.name == "Enterprise":
+            return {
+                "requires_payment": False,
+                "action_required": "contact_sales",
+                "message": "Please contact ChatCraft Support for Enterprise plan",
+                "contact_info": {
+                    "phone_numbers": ["+2348182222236", "+2348052222236"],
+                    "email": "sales@chatcraft.cc"
+                }
+            }
+
+        if current_plan.name == "Enterprise":
+            return {
+                "requires_payment": False,
+                "action_required": "contact_sales",
+                "message": "Please contact ChatCraft Support to change from Enterprise plan",
+                "contact_info": {
+                    "phone_numbers": ["+2348182222236", "+2348052222236"],
+                    "email": "sales@chatcraft.cc"
+                }
+            }
+
+        # Same plan check
+        if existing_subscription.plan_id == new_plan.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"You are already subscribed to the {new_plan.name} plan"
+            )
+
+        # Determine billing cycle
+        billing_cycle = BillingCycle.YEARLY if preview_request.billing_cycle.lower() == "yearly" else BillingCycle.MONTHLY
+
+        # Calculate costs
+        old_cost = current_plan.yearly_plan_cost if billing_cycle == BillingCycle.YEARLY else current_plan.monthly_plan_cost
+        new_cost = new_plan.yearly_plan_cost if billing_cycle == BillingCycle.YEARLY else new_plan.monthly_plan_cost
+
+        is_upgrade = new_cost > old_cost
+        is_downgrade = new_cost < old_cost
+
+        # Calculate payment amount for upgrades
+        # For trial upgrades: charge full monthly/yearly amount
+        # For paid-to-paid upgrades: prorate based on remaining days
+        from ..models.subscription import SubscriptionStatus
+        is_trial_upgrade = existing_subscription.status == SubscriptionStatus.TRIALING
+
+        prorated_amount = 0
+        if is_upgrade:
+            if is_trial_upgrade:
+                # Trial upgrade: charge full amount (no proration)
+                prorated_amount = float(new_cost)
+            elif existing_subscription.current_period_end:
+                # Paid-to-paid upgrade: prorate based on remaining days
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                period_end = existing_subscription.current_period_end
+                if period_end.tzinfo is None:
+                    period_end = period_end.replace(tzinfo=timezone.utc)
+
+                # Calculate remaining days in current period
+                remaining_days = (period_end - now).days
+                if remaining_days > 0:
+                    # Calculate daily rate difference
+                    days_in_period = 30 if billing_cycle == BillingCycle.MONTHLY else 365
+                    daily_rate_diff = (float(new_cost) - float(old_cost)) / days_in_period
+                    prorated_amount = round(daily_rate_diff * remaining_days, 2)
+
+        return {
+            "preview": {
+                "current_plan": {
+                    "id": current_plan.id,
+                    "name": current_plan.name,
+                    "cost": float(old_cost)
+                },
+                "new_plan": {
+                    "id": new_plan.id,
+                    "name": new_plan.name,
+                    "cost": float(new_cost),
+                    "description": new_plan.description,
+                    "document_limit": new_plan.document_limit,
+                    "website_limit": new_plan.website_limit,
+                    "daily_chat_limit": new_plan.daily_chat_limit,
+                    "monthly_chat_limit": new_plan.monthly_chat_limit
+                },
+                "billing_cycle": preview_request.billing_cycle
+            },
+            "billing_info": {
+                "old_cost": float(old_cost),
+                "new_cost": float(new_cost),
+                "prorated_amount": prorated_amount,
+                "is_upgrade": is_upgrade,
+                "is_downgrade": is_downgrade,
+                "currency": existing_subscription.currency or "NGN"
+            },
+            "requires_payment": is_upgrade and prorated_amount > 0,
+            "effective_immediately": is_upgrade,
+            "scheduled_for_period_end": is_downgrade,
+            "message": (
+                f"{'Trial upgrade' if is_trial_upgrade else 'Upgrade'} to {new_plan.name} requires payment of {prorated_amount} {existing_subscription.currency or 'NGN'}. "
+                f"{'You will receive a full 30-day subscription period.' if is_trial_upgrade and billing_cycle == BillingCycle.MONTHLY else ''}"
+                f"{'You will receive a full 365-day subscription period.' if is_trial_upgrade and billing_cycle == BillingCycle.YEARLY else ''}"
+                if is_upgrade and prorated_amount > 0
+                else f"Switch to {new_plan.name} will take effect {'immediately' if is_upgrade else 'at the end of your current billing period'}"
+            )
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to preview plan switch for tenant {tenant_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview plan switch: {str(e)}"
+        )
 
 
 @router.post("/plans/switch", response_model=Dict[str, Any])
@@ -655,7 +822,6 @@ async def switch_tenant_plan(
     from ..services.rabbitmq_service import rabbitmq_service
     from ..services.dependencies import get_full_tenant_details
     from ..models.subscription import BillingCycle
-    from datetime import timedelta
     from dateutil import parser
 
     tenant_id = claims.tenant_id
@@ -836,12 +1002,94 @@ async def switch_tenant_plan(
                                f"Your subscription is currently {existing_subscription.status}."
                     )
 
+            # PAYMENT VERIFICATION FOR UPGRADES
+            # Calculate if this is an upgrade requiring payment
+            old_cost = current_plan.yearly_plan_cost if billing_cycle == BillingCycle.YEARLY else current_plan.monthly_plan_cost
+            new_cost = new_plan.yearly_plan_cost if billing_cycle == BillingCycle.YEARLY else new_plan.monthly_plan_cost
+            is_upgrade = float(new_cost) > float(old_cost)
+
+            if is_upgrade:
+                # Calculate payment amount
+                # For trial upgrades: charge full monthly/yearly amount
+                # For paid-to-paid upgrades: prorate based on remaining days
+                from ..models.subscription import SubscriptionStatus
+                is_trial_upgrade = existing_subscription.status == SubscriptionStatus.TRIALING
+
+                if is_trial_upgrade:
+                    # Trial upgrade: charge full amount (no proration)
+                    prorated_amount = float(new_cost)
+                    logger.info(
+                        f"Trial upgrade for tenant {tenant_id}: charging full amount {prorated_amount} "
+                        f"(no proration for trial-to-paid upgrades)"
+                    )
+                else:
+                    # Paid-to-paid upgrade: prorate based on remaining days
+                    prorated_amount = 0
+                    if existing_subscription.current_period_end:
+                        now = datetime.now(timezone.utc)
+                        period_end = existing_subscription.current_period_end
+                        if period_end.tzinfo is None:
+                            period_end = period_end.replace(tzinfo=timezone.utc)
+
+                        remaining_days = (period_end - now).days
+                        if remaining_days > 0:
+                            days_in_period = 30 if billing_cycle == BillingCycle.MONTHLY else 365
+                            daily_rate_diff = (float(new_cost) - float(old_cost)) / days_in_period
+                            prorated_amount = round(daily_rate_diff * remaining_days, 2)
+
+                # Require payment for upgrades with prorated amount > 0
+                if prorated_amount > 0:
+                    if not plan_switch.payment_reference:
+                        raise HTTPException(
+                            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                            detail={
+                                "message": "Payment required for upgrade",
+                                "prorated_amount": prorated_amount,
+                                "currency": existing_subscription.currency or "NGN",
+                                "requires_payment": True,
+                                "hint": "Use /plans/preview-switch to get proration details, then complete payment before switching"
+                            }
+                        )
+
+                    # Verify payment with Paystack
+                    from ..services.paystack_service import PaystackService
+                    paystack_service = PaystackService(db)
+                    payment_verified = await paystack_service.verify_transaction(plan_switch.payment_reference)
+
+                    if not payment_verified or not payment_verified.get("success") or not payment_verified.get("verified"):
+                        error_msg = payment_verified.get("error", "Payment verification failed") if payment_verified else "Payment verification failed"
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Payment verification failed: {error_msg}. Please ensure payment was completed successfully."
+                        )
+
+                    # Check payment amount matches expected prorated amount (with 1% tolerance for currency conversion)
+                    paid_amount = float(payment_verified.get("amount", 0))  # Amount already converted from kobo
+                    if abs(paid_amount - prorated_amount) > (prorated_amount * 0.01):
+                        logger.warning(
+                            f"Payment amount mismatch for tenant {tenant_id}: "
+                            f"expected {prorated_amount}, got {paid_amount}"
+                        )
+                        # Allow it to proceed but log the discrepancy
+
+                    logger.info(f"Payment verified for tenant {tenant_id}: reference={plan_switch.payment_reference}")
+
             # Switch subscription plan
             switch_result = subscription_service.switch_subscription_plan(
                 subscription_id=existing_subscription.id,
                 new_plan_id=new_plan.id,
                 billing_cycle=billing_cycle,
                 prorate=True
+            )
+
+            # Update user fields for email notifications (critical for scheduled jobs)
+            existing_subscription.user_email = claims.email
+            existing_subscription.user_full_name = claims.full_name
+            db.commit()
+            db.refresh(existing_subscription)
+            logger.info(
+                f"Updated subscription {existing_subscription.id} with user info: "
+                f"email={claims.email}, name={claims.full_name}"
             )
 
             # Only publish to RabbitMQ if change is effective immediately (not scheduled downgrades)
@@ -859,6 +1107,46 @@ async def switch_tenant_plan(
                         f"Failed to publish plan switch to RabbitMQ for tenant {tenant_id}. "
                         "Auth server may not be updated."
                     )
+
+            # Send email notifications for upgrades and renewals
+            if switch_result.get("effective_immediately", True):
+                try:
+                    from ..services.email_publisher import email_publisher
+
+                    # Determine if this is an upgrade or renewal
+                    is_same_plan = (current_plan.id == new_plan.id) if current_plan else False
+                    is_upgrade_plan = is_upgrade and not is_same_plan
+                    is_renewal = is_same_plan  # Same plan = renewal after expiration
+
+                    if is_upgrade_plan:
+                        # Send upgrade notification
+                        email_publisher.publish_plan_upgraded_email(
+                            tenant_id=tenant_id,
+                            to_email=claims.email,
+                            to_name=claims.full_name or "Valued Customer",
+                            old_plan_name=current_plan.name if current_plan else "Free",
+                            new_plan_name=new_plan.name,
+                            proration_amount=float(switch_result.get("prorated_amount", 0)),
+                            currency=existing_subscription.currency or "NGN"
+                        )
+                        logger.info(f"Sent plan upgrade notification to {claims.email} for upgrade to {new_plan.name}")
+
+                    elif is_renewal:
+                        # Send renewal notification (user renewed same plan after expiration)
+                        email_publisher.publish_subscription_renewed_email(
+                            tenant_id=tenant_id,
+                            to_email=claims.email,
+                            to_name=claims.full_name or "Valued Customer",
+                            plan_name=new_plan.name,
+                            amount=float(new_cost),
+                            currency=existing_subscription.currency or "NGN",
+                            next_billing_date=existing_subscription.current_period_end
+                        )
+                        logger.info(f"Sent subscription renewal notification to {claims.email} for {new_plan.name}")
+
+                except Exception as e:
+                    # Don't fail the plan switch if email fails
+                    logger.error(f"Failed to send plan switch notification email: {e}", exc_info=True)
 
             # Build response based on whether it's a scheduled downgrade or immediate change
             response = {

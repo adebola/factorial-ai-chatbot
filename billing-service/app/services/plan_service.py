@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from ..models.plan import Plan
@@ -133,7 +133,7 @@ class PlanService:
         if is_active is not None:
             plan.is_active = is_active
 
-        plan.updated_at = datetime.utcnow()
+        plan.updated_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(plan)
@@ -151,7 +151,7 @@ class PlanService:
         # For now, we'll allow plan deletion since tenant management is in OAuth2 server
 
         plan.is_deleted = True
-        plan.deleted_at = datetime.utcnow()
+        plan.deleted_at = datetime.now(timezone.utc)
         plan.is_active = False
 
         self.db.commit()

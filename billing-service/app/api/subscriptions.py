@@ -265,7 +265,7 @@ async def increment_usage(
                 detail="Invalid usage type"
             )
         
-        usage.updated_at = datetime.utcnow()
+        usage.updated_at = datetime.now(timezone.utc)
         db.commit()
         
         return {
@@ -752,7 +752,7 @@ async def get_subscription_analytics(
         yearly_rev = sum(float(sub.amount) for sub in yearly_revenue)
         
         # Calculate churn rate (simplified - last 30 days)
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         churned_count = db.query(Subscription).filter(
             and_(
                 Subscription.status == 'cancelled',
@@ -783,7 +783,7 @@ async def get_subscription_analytics(
             },
             "period": {
                 "start": thirty_days_ago.isoformat(),
-                "end": datetime.utcnow().isoformat()
+                "end": datetime.now(timezone.utc).isoformat()
             }
         }
         

@@ -9,6 +9,7 @@ import json
 import logging
 import pika
 import os
+import threading
 from datetime import timedelta
 from typing import Dict, Any
 from dateutil import parser
@@ -26,43 +27,63 @@ class UserEventConsumer:
     """Consumer for user creation events from authorization server"""
 
     def __init__(self):
-        self.rabbitmq_url = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+        # Support both URL format and separate variables (matching usage_consumer pattern)
+        self.host = os.environ.get("RABBITMQ_HOST", "localhost")
+        self.port = int(os.environ.get("RABBITMQ_PORT", "5672"))
+        self.username = os.environ.get("RABBITMQ_USERNAME", "guest")
+        self.password = os.environ.get("RABBITMQ_PASSWORD", "guest")
+        self.vhost = os.environ.get("RABBITMQ_VHOST", "/")
+
         self.exchange_name = "billing.events"
         self.queue_name = "billing.user.events"
         self.routing_key = "user.created"
 
+        self.connection = None
+        self.channel = None
+        self.consumer_thread = None
+        self.is_running = False
+
     def connect(self):
         """Establish connection to RabbitMQ"""
         try:
-            # Parse connection parameters
-            parameters = pika.URLParameters(self.rabbitmq_url)
-            parameters.heartbeat = 600
-            parameters.blocked_connection_timeout = 300
+            # Use separate credentials (matching usage_consumer pattern)
+            credentials = pika.PlainCredentials(self.username, self.password)
+            parameters = pika.ConnectionParameters(
+                host=self.host,
+                port=self.port,
+                virtual_host=self.vhost,
+                credentials=credentials,
+                heartbeat=600,
+                blocked_connection_timeout=300,
+                connection_attempts=3,
+                retry_delay=2
+            )
 
             # Create connection
-            connection = pika.BlockingConnection(parameters)
-            channel = connection.channel()
+            self.connection = pika.BlockingConnection(parameters)
+            self.channel = self.connection.channel()
 
             # Declare exchange (topic exchange for routing)
-            channel.exchange_declare(
+            self.channel.exchange_declare(
                 exchange=self.exchange_name,
                 exchange_type='topic',
                 durable=True
             )
 
             # Declare queue
-            channel.queue_declare(queue=self.queue_name, durable=True)
+            self.channel.queue_declare(queue=self.queue_name, durable=True)
 
             # Bind queue to exchange with routing key
-            channel.queue_bind(
+            self.channel.queue_bind(
                 exchange=self.exchange_name,
                 queue=self.queue_name,
                 routing_key=self.routing_key
             )
 
-            logger.info(f"Connected to RabbitMQ: {self.queue_name} bound to {self.exchange_name} with key {self.routing_key}")
+            # Set QoS - process one message at a time
+            self.channel.basic_qos(prefetch_count=1)
 
-            return connection, channel
+            logger.info(f"Connected to RabbitMQ: {self.queue_name} bound to {self.exchange_name} with key {self.routing_key}")
 
         except Exception as e:
             logger.error(f"Failed to connect to RabbitMQ: {e}")
@@ -187,8 +208,15 @@ class UserEventConsumer:
             body: Message body (JSON)
         """
         try:
-            # Parse message
+            # Parse message - handle both bytes and string
+            if isinstance(body, bytes):
+                body = body.decode('utf-8')
             message = json.loads(body)
+
+            # Handle double-encoded JSON (if message is still a string after parsing)
+            if isinstance(message, str):
+                message = json.loads(message)
+
             logger.info(f"Received user.created event: {message}")
 
             # Process message
@@ -213,49 +241,70 @@ class UserEventConsumer:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
     def start_consuming(self):
-        """Start consuming messages from queue"""
-        connection, channel = self.connect()
+        """Start consuming messages in a background thread"""
+        if self.is_running:
+            logger.warning("User event consumer is already running")
+            return
 
+        self.is_running = True
+        self.consumer_thread = threading.Thread(target=self._consume_loop, daemon=True)
+        self.consumer_thread.start()
+        logger.info("Started user event consumer thread")
+
+    def stop_consuming(self):
+        """Stop consuming messages"""
+        self.is_running = False
+        if self.channel and self.channel.is_open:
+            try:
+                self.channel.stop_consuming()
+            except Exception as e:
+                logger.error(f"Error stopping channel: {e}")
+        if self.connection and self.connection.is_open:
+            try:
+                self.connection.close()
+            except Exception as e:
+                logger.error(f"Error closing connection: {e}")
+        logger.info("Stopped user event consumer")
+
+    def _consume_loop(self):
+        """Main consumption loop (runs in background thread)"""
         try:
-            # Set QoS - process one message at a time
-            channel.basic_qos(prefetch_count=1)
-
-            # Start consuming
-            channel.basic_consume(
+            logger.info(f"User event consumer started, listening to queue: {self.queue_name}")
+            self.channel.basic_consume(
                 queue=self.queue_name,
                 on_message_callback=self.callback,
                 auto_ack=False  # Manual acknowledgment
             )
-
-            logger.info(f"🚀 Started consuming from queue: {self.queue_name}")
-            logger.info("Waiting for user creation events. Press CTRL+C to exit.")
-
-            channel.start_consuming()
-
-        except KeyboardInterrupt:
-            logger.info("Stopping consumer...")
-            channel.stop_consuming()
-
+            self.channel.start_consuming()
         except Exception as e:
-            logger.error(f"Error in consumer: {e}", exc_info=True)
-
-        finally:
-            connection.close()
-            logger.info("Connection closed")
+            logger.error(f"Consumer loop error: {e}", exc_info=True)
+            self.is_running = False
 
 
 def main():
-    """Main entry point for running consumer"""
+    """Main entry point for running consumer standalone"""
     # Configure logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+    # Load .env file if running standalone
+    from pathlib import Path
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent.parent / ".env"
+    load_dotenv(dotenv_path=env_path)
+
     # Create and start consumer
     consumer = UserEventConsumer()
-    consumer.start_consuming()
+    consumer.connect()
+    # For standalone script, use blocking consume loop
+    consumer._consume_loop()
 
 
 if __name__ == "__main__":
     main()
+
+
+# Global consumer instance for use in main application
+user_consumer = UserEventConsumer()

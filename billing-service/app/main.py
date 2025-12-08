@@ -5,25 +5,25 @@ Manages subscription plans, billing, and payment processing for ChatCraft tenant
 """
 
 import os
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
 import time
-
 # Load environment variables from .env file FIRST
 from dotenv import load_dotenv
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 from .core.config import settings
-from .core.database import engine, Base
 from .core.logging_config import setup_logging, get_logger
-from .api import plans, subscriptions, payments, usage
+from .api import plans, subscriptions, payments, usage, restrictions, plan_management, invoices, analytics
 from .services.usage_consumer import usage_consumer
+from .messaging.user_consumer import user_consumer
+from .services.scheduler import start_scheduler, stop_scheduler
 
 # Setup logging
 setup_logging()
@@ -38,12 +38,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     logger.info(f"API Version: {settings.API_V1_STR}")
 
-    # Create database tables
-    try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables created successfully")
-    except Exception as e:
-        logger.error(f"Failed to create database tables: {e}")
+    # Note: Database tables are managed by Alembic migrations
+    # Run: alembic upgrade head (before starting service)
 
     # Start RabbitMQ usage event consumer
     try:
@@ -55,10 +51,36 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to start usage event consumer: {e}")
         logger.warning("Service will continue but usage events will not be processed")
 
+    # Start RabbitMQ user creation event consumer
+    try:
+        logger.info("Connecting to RabbitMQ for user creation events...")
+        user_consumer.connect()
+        user_consumer.start_consuming()
+        logger.info("User creation event consumer started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start user creation event consumer: {e}")
+        logger.warning("Service will continue but user creation events will not be processed")
+
+    # Start background job scheduler
+    try:
+        logger.info("Starting background job scheduler...")
+        start_scheduler()
+        logger.info("Background job scheduler started successfully")
+    except Exception as e:
+        logger.error(f"Failed to start scheduler: {e}")
+        logger.warning("Service will continue but scheduled jobs will not run")
+
     yield
 
     # Shutdown
     logger.info("Shutting down Billing Service...")
+
+    # Stop background job scheduler
+    try:
+        stop_scheduler()
+        logger.info("Background job scheduler stopped")
+    except Exception as e:
+        logger.error(f"Error stopping scheduler: {e}")
 
     # Stop usage event consumer
     try:
@@ -66,6 +88,13 @@ async def lifespan(app: FastAPI):
         logger.info("Usage event consumer stopped")
     except Exception as e:
         logger.error(f"Error stopping usage event consumer: {e}")
+
+    # Stop user creation event consumer
+    try:
+        user_consumer.stop_consuming()
+        logger.info("User creation event consumer stopped")
+    except Exception as e:
+        logger.error(f"Error stopping user creation event consumer: {e}")
 
 
 # Create FastAPI application
@@ -77,15 +106,6 @@ app = FastAPI(
 )
 
 # CORS is handled by the gateway service - no need to configure it here
-# If running billing service standalone (without gateway), uncomment below:
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["http://localhost:4200", "http://127.0.0.1:4200"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
 
 # Request logging middleware
 @app.middleware("http")
@@ -147,6 +167,30 @@ app.include_router(
     usage.router,
     prefix=f"{settings.API_V1_STR}/usage",
     tags=["usage"]
+)
+
+app.include_router(
+    restrictions.router,
+    prefix=f"{settings.API_V1_STR}/restrictions",
+    tags=["restrictions"]
+)
+
+app.include_router(
+    plan_management.router,
+    prefix=settings.API_V1_STR,
+    tags=["plan-management"]
+)
+
+app.include_router(
+    invoices.router,
+    prefix=f"{settings.API_V1_STR}/invoices",
+    tags=["invoices"]
+)
+
+app.include_router(
+    analytics.router,
+    prefix=settings.API_V1_STR,
+    tags=["analytics"]
 )
 
 
