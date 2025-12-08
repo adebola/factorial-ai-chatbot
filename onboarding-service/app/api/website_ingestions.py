@@ -41,15 +41,15 @@ async def ingest_website(
     # Check website ingestion limit via Billing Service API
     # This happens BEFORE starting the expensive scraping process
     billing_client = BillingClient(claims.access_token)
-    limit_check = await billing_client.check_usage_limit("websites")
+
+    # Use new restrictions API endpoint for comprehensive subscription + limit check
+    limit_check = await billing_client.check_can_ingest_website(claims.tenant_id)
 
     if not limit_check.get("allowed", False):
+        reason = limit_check.get("reason", "Website ingestion not allowed")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=limit_check.get(
-                "reason",
-                "Website ingestion limit exceeded. Please upgrade your plan to ingest more websites."
-            )
+            detail=reason
         )
 
     try:

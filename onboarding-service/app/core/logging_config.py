@@ -69,13 +69,20 @@ def setup_logging(
         format="%(name)s - %(levelname)s - %(message)s"
     )
     
-    # Configure structlog  
+    # Configure structlog
     if json_logs:
-        # Production: JSON logs
+        # Production: JSON logs with timestamp
         processors = [
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso", utc=True),  # Add ISO 8601 timestamp
+            structlog.processors.CallsiteParameterAdder(  # Add function/line info
+                parameters=[
+                    structlog.processors.CallsiteParameter.FUNC_NAME,
+                    structlog.processors.CallsiteParameter.LINENO,
+                ]
+            ),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
@@ -83,11 +90,18 @@ def setup_logging(
             structlog.processors.JSONRenderer()
         ]
     else:
-        # Development: Pretty console logs
+        # Development: Pretty console logs with timestamp and location
         processors = [
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
+            structlog.processors.TimeStamper(fmt="iso", utc=True),  # Add ISO 8601 timestamp
+            structlog.processors.CallsiteParameterAdder(  # Add function/line info
+                parameters=[
+                    structlog.processors.CallsiteParameter.FUNC_NAME,
+                    structlog.processors.CallsiteParameter.LINENO,
+                ]
+            ),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),

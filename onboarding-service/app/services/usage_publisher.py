@@ -6,14 +6,108 @@ Publishes usage events to the billing service when documents/websites are added 
 
 import json
 import os
+import time
 from datetime import datetime
 from typing import Optional
+from functools import wraps
 import pika
-from pika.exceptions import AMQPConnectionError
+from pika.exceptions import (
+    AMQPConnectionError,
+    AMQPChannelError,
+    StreamLostError,
+    ConnectionClosedByBroker
+)
 
 from ..core.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _with_publish_retry(max_retries: int = 3, initial_delay: float = 0.5, backoff_factor: float = 2.0):
+    """
+    Decorator to add retry logic with exponential backoff to publish methods.
+
+    Handles stale RabbitMQ connections by forcing fresh reconnection on each retry.
+    Particularly useful for infrequent operations (like website removal) where
+    connections may become stale over long periods (days).
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: 3)
+        initial_delay: Initial delay in seconds before first retry (default: 0.5)
+        backoff_factor: Multiplier for delay on each retry (default: 2.0)
+
+    Returns:
+        Decorated function that returns bool (True on success, False on failure)
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            method_name = func.__name__
+
+            # Extract context for logging (tenant_id is first arg in all publish methods)
+            tenant_id = kwargs.get('tenant_id', args[0] if args else 'unknown')
+
+            for attempt in range(max_retries + 1):
+                try:
+                    # Force fresh reconnection on retry attempts (handles stale connections)
+                    if attempt > 0:
+                        logger.warning(
+                            f"Retry attempt {attempt}/{max_retries} for {method_name}",
+                            tenant_id=tenant_id,
+                            method=method_name,
+                            retry_attempt=attempt
+                        )
+                        self._force_reconnection()
+
+                    # Call the original publish method
+                    return func(self, *args, **kwargs)
+
+                except (AttributeError, StreamLostError, ConnectionClosedByBroker,
+                        AMQPConnectionError, AMQPChannelError) as e:
+                    # Transient errors - retry with exponential backoff
+                    error_type = type(e).__name__
+
+                    if attempt < max_retries:
+                        delay = initial_delay * (backoff_factor ** attempt)
+                        logger.warning(
+                            f"Transient error in {method_name}, retrying in {delay}s",
+                            tenant_id=tenant_id,
+                            method=method_name,
+                            error_type=error_type,
+                            error_message=str(e),
+                            retry_attempt=attempt + 1,
+                            retry_delay=delay
+                        )
+                        time.sleep(delay)
+                    else:
+                        # Max retries exhausted
+                        logger.error(
+                            f"Failed to publish after {max_retries} retries",
+                            tenant_id=tenant_id,
+                            method=method_name,
+                            error_type=error_type,
+                            error_message=str(e),
+                            total_attempts=max_retries + 1
+                        )
+                        return False
+
+                except Exception as e:
+                    # Non-transient errors - fail fast without retry
+                    logger.error(
+                        f"Non-retryable error in {method_name}",
+                        tenant_id=tenant_id,
+                        method=method_name,
+                        error_type=type(e).__name__,
+                        error_message=str(e),
+                        exc_info=True
+                    )
+                    return False
+
+            # Should never reach here, but return False as safety
+            return False
+
+        return wrapper
+    return decorator
 
 
 class UsageEventPublisher:
@@ -156,6 +250,31 @@ class UsageEventPublisher:
             self.connection.close()
             logger.info("Closed RabbitMQ usage publisher connection")
 
+    def _force_reconnection(self):
+        """
+        Force a fresh RabbitMQ connection by closing existing connection and reconnecting.
+
+        This is critical for handling stale connections that can occur during long idle
+        periods (e.g., days between website removal operations). Even if a connection
+        appears open, it may be stale and cause publish failures.
+        """
+        # Close existing connection (ignore any errors during close)
+        if self.connection:
+            try:
+                self.connection.close()
+            except Exception as e:
+                logger.debug(f"Error closing connection during force reconnect: {e}")
+
+        # Reset connection and channel to None to force fresh connection
+        self.connection = None
+        self.channel = None
+
+        # Establish fresh connection
+        self.connect()
+
+        logger.debug("Forced fresh RabbitMQ reconnection")
+
+    @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_document_added(
         self,
         tenant_id: str,
@@ -217,6 +336,7 @@ class UsageEventPublisher:
             )
             return False
 
+    @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_document_removed(
         self,
         tenant_id: str,
@@ -275,6 +395,7 @@ class UsageEventPublisher:
             )
             return False
 
+    @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_website_added(
         self,
         tenant_id: str,
@@ -337,6 +458,7 @@ class UsageEventPublisher:
             )
             return False
 
+    @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_website_removed(
         self,
         tenant_id: str,

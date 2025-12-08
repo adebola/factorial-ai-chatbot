@@ -202,3 +202,123 @@ class BillingClient:
                 "allowed": True,
                 "reason": "billing_service_unexpected_error"
             }
+
+    async def check_can_upload_document(self, tenant_id: str) -> Dict[str, Any]:
+        """
+        Check if tenant can upload a document based on subscription limits.
+
+        This uses the new restrictions API which checks both subscription status
+        and document upload limits.
+
+        Args:
+            tenant_id: Tenant ID to check
+
+        Returns:
+            Dict with keys:
+                - allowed (bool): Whether document upload is allowed
+                - reason (str|None): Reason if not allowed
+
+        Note:
+            Uses fail-open strategy - allows operation if billing service unavailable.
+        """
+        endpoint = f"{self.billing_url}/api/v1/restrictions/check/can-upload-document/{tenant_id}"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                logger.debug(
+                    "Checking document upload permission",
+                    tenant_id=tenant_id,
+                    endpoint=endpoint
+                )
+
+                response = await client.get(
+                    endpoint,
+                    timeout=5.0
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info(
+                        "Document upload check completed",
+                        tenant_id=tenant_id,
+                        allowed=data.get("allowed"),
+                        reason=data.get("reason")
+                    )
+                    return data
+                else:
+                    logger.warning(
+                        f"Billing service returned non-2xx status for document upload check",
+                        tenant_id=tenant_id,
+                        status_code=response.status_code
+                    )
+                    # Fail-open
+                    return {"allowed": True, "reason": "billing_service_error"}
+
+        except Exception as e:
+            logger.error(
+                f"Error checking document upload permission - allowing (fail-open)",
+                tenant_id=tenant_id,
+                error=str(e),
+                exc_info=True
+            )
+            return {"allowed": True, "reason": "billing_service_error"}
+
+    async def check_can_ingest_website(self, tenant_id: str) -> Dict[str, Any]:
+        """
+        Check if tenant can ingest a website based on subscription limits.
+
+        This uses the new restrictions API which checks both subscription status
+        and website ingestion limits.
+
+        Args:
+            tenant_id: Tenant ID to check
+
+        Returns:
+            Dict with keys:
+                - allowed (bool): Whether website ingestion is allowed
+                - reason (str|None): Reason if not allowed
+
+        Note:
+            Uses fail-open strategy - allows operation if billing service unavailable.
+        """
+        endpoint = f"{self.billing_url}/api/v1/restrictions/check/can-ingest-website/{tenant_id}"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                logger.debug(
+                    "Checking website ingestion permission",
+                    tenant_id=tenant_id,
+                    endpoint=endpoint
+                )
+
+                response = await client.get(
+                    endpoint,
+                    timeout=5.0
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.info(
+                        "Website ingestion check completed",
+                        tenant_id=tenant_id,
+                        allowed=data.get("allowed"),
+                        reason=data.get("reason")
+                    )
+                    return data
+                else:
+                    logger.warning(
+                        f"Billing service returned non-2xx status for website ingestion check",
+                        tenant_id=tenant_id,
+                        status_code=response.status_code
+                    )
+                    # Fail-open
+                    return {"allowed": True, "reason": "billing_service_error"}
+
+        except Exception as e:
+            logger.error(
+                f"Error checking website ingestion permission - allowing (fail-open)",
+                tenant_id=tenant_id,
+                error=str(e),
+                exc_info=True
+            )
+            return {"allowed": True, "reason": "billing_service_error"}

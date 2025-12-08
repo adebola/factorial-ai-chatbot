@@ -43,15 +43,15 @@ async def upload_document_with_categorization(
     # Check document upload limit via Billing Service API
     # This happens BEFORE processing to avoid wasted resources
     billing_client = BillingClient(claims.access_token)
-    limit_check = await billing_client.check_usage_limit("documents")
+
+    # Use new restrictions API endpoint for comprehensive subscription + limit check
+    limit_check = await billing_client.check_can_upload_document(claims.tenant_id)
 
     if not limit_check.get("allowed", False):
+        reason = limit_check.get("reason", "Document upload not allowed")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=limit_check.get(
-                "reason",
-                "Document upload limit exceeded. Please upgrade your plan to upload more documents."
-            )
+            detail=reason
         )
 
     try:

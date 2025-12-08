@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="DataSourcePerFileMappings">
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/0a253530-0113-46ae-b609-2b638e14aa92/console.sql" value="0a253530-0113-46ae-b609-2b638e14aa92" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/0a253530-0113-46ae-b609-2b638e14aa92/console_1.sql" value="0a253530-0113-46ae-b609-2b638e14aa92" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/0d8bf599-2dd5-4961-84b4-d16d70123fce/console.sql" value="0d8bf599-2dd5-4961-84b4-d16d70123fce" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/31694a18-c7fe-42ac-ada5-387afdb24bc7/console.sql" value="31694a18-c7fe-42ac-ada5-387afdb24bc7" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/46827a10-c50d-4674-a912-b8df780e0ba2/console.sql" value="46827a10-c50d-4674-a912-b8df780e0ba2" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/46827a10-c50d-4674-a912-b8df780e0ba2/console_1.sql" value="46827a10-c50d-4674-a912-b8df780e0ba2" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/5e7e8c83-52fd-458e-84ba-d1f6e8fce4fa/console.sql" value="5e7e8c83-52fd-458e-84ba-d1f6e8fce4fa" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/62bf79dd-311c-453b-9a54-044345aab411/console.sql" value="62bf79dd-311c-453b-9a54-044345aab411" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/7b9e3fba-3b16-454d-994c-d25150f0d8dc/console.sql" value="7b9e3fba-3b16-454d-994c-d25150f0d8dc" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/dd0b1bc6-efdb-4cf6-861a-d642872b3bf6/console.sql" value="dd0b1bc6-efdb-4cf6-861a-d642872b3bf6" />
-    <file url="file://$APPLICATION_CONFIG_DIR$/consoles/db/e50c6f0f-6d64-4f01-9d2e-d43ecbd14b06/console.sql" value="e50c6f0f-6d64-4f01-9d2e-d43ecbd14b06" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query.sql" value="e50c6f0f-6d64-4f01-9d2e-d43ecbd14b06" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_1.sql" value="7b9e3fba-3b16-454d-994c-d25150f0d8dc" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_10.sql" value="31694a18-c7fe-42ac-ada5-387afdb24bc7" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_2.sql" value="5e7e8c83-52fd-458e-84ba-d1f6e8fce4fa" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_3.sql" value="46827a10-c50d-4674-a912-b8df780e0ba2" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_4.sql" value="46827a10-c50d-4674-a912-b8df780e0ba2" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_5.sql" value="0a253530-0113-46ae-b609-2b638e14aa92" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_6.sql" value="0a253530-0113-46ae-b609-2b638e14aa92" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_7.sql" value="0d8bf599-2dd5-4961-84b4-d16d70123fce" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_8.sql" value="62bf79dd-311c-453b-9a54-044345aab411" />
+    <file url="file://$PROJECT_DIR$/.idea/queries/Query_9.sql" value="dd0b1bc6-efdb-4cf6-861a-d642872b3bf6" />
   </component>
 </project>
