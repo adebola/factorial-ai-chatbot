@@ -153,7 +153,7 @@ app.include_router(
 
 app.include_router(
     subscriptions.router,
-    prefix=settings.API_V1_STR,
+    prefix=f"{settings.API_V1_STR}/subscriptions",
     tags=["subscriptions"]
 )
 

@@ -150,7 +150,7 @@ class SubscriptionChecker:
 
         # Check document limit
         if plan.document_limit is not None:
-            if usage.documents_uploaded >= plan.document_limit:
+            if usage.documents_used >= plan.document_limit:
                 return False, f"Document limit reached ({plan.document_limit} documents allowed on {plan.name} plan)"
 
         return True, None
@@ -190,7 +190,7 @@ class SubscriptionChecker:
 
         # Check website limit
         if plan.website_limit is not None:
-            if usage.websites_ingested >= plan.website_limit:
+            if usage.websites_used >= plan.website_limit:
                 return False, f"Website limit reached ({plan.website_limit} websites allowed on {plan.name} plan)"
 
         return True, None
@@ -283,14 +283,14 @@ class SubscriptionChecker:
             "subscription_status": subscription.status.value,
             "plan_name": plan.name,
             "documents": {
-                "used": usage.documents_uploaded,
+                "used": usage.documents_used,
                 "limit": plan.document_limit,
-                "remaining": max(0, plan.document_limit - usage.documents_uploaded) if plan.document_limit else None
+                "remaining": max(0, plan.document_limit - usage.documents_used) if plan.document_limit else None
             },
             "websites": {
-                "used": usage.websites_ingested,
+                "used": usage.websites_used,
                 "limit": plan.website_limit,
-                "remaining": max(0, plan.website_limit - usage.websites_ingested) if plan.website_limit else None
+                "remaining": max(0, plan.website_limit - usage.websites_used) if plan.website_limit else None
             },
             "monthly_chats": {
                 "used": usage.monthly_chats_used,

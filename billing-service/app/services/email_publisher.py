@@ -766,7 +766,7 @@ class EmailPublisher:
                         This is an automated email. Please do not reply to this message.
                     </p>
                     <p style="font-size: 12px; color: #888; margin: 10px 0 0 0;">
-                        © 2025 ChatCraft. All rights reserved.
+                        © {datetime.now().year} ChatCraft. All rights reserved.
                     </p>
                 </div>
             </div>
@@ -963,7 +963,7 @@ The ChatCraft Team
                         This is an automated notification. Please do not reply to this message.
                     </p>
                     <p style="font-size: 12px; color: #888; margin: 10px 0 0 0;">
-                        © 2025 ChatCraft. All rights reserved.
+                        © {datetime.now().year} ChatCraft. All rights reserved.
                     </p>
                 </div>
             </div>
@@ -1118,7 +1118,7 @@ The ChatCraft Team
                         Keep this email for your records.
                     </p>
                     <p style="font-size: 12px; color: #888; margin: 10px 0 0 0;">
-                        © 2025 ChatCraft. All rights reserved.
+                        © {datetime.now().year} ChatCraft. All rights reserved.
                     </p>
                 </div>
             </div>

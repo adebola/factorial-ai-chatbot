@@ -25,7 +25,7 @@ default_plans = [
     {
         "id": "a45a17b2-44ed-40e0-ad52-2689b9d56ca9",
         "name": "Free",
-        "description": "Perfect for trying out FactorialBot",
+        "description": "Perfect for trying out CharCraft",
         "document_limit": 5,
         "website_limit": 1,
         "daily_chat_limit": 10,

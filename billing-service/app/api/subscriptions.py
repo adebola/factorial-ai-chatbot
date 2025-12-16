@@ -64,7 +64,7 @@ class SubscriptionCancelRequest(BaseModel):
     reason: Optional[str] = Field(None, description="Cancellation reason")
 
 
-@router.get("/subscriptions/usage/current", response_model=Dict[str, Any])
+@router.get("/usage/current", response_model=Dict[str, Any])
 async def get_current_usage(
     claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
