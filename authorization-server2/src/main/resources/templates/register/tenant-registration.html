@@ -183,7 +183,7 @@
     <!-- Footer -->
     <footer class="auth-footer">
         <div class="container">
-            <p>&copy; 2024 ChatCraft Authorization Server</p>
+            <p>&copy; <span th:text="${#temporals.year(#temporals.createNow())}">2024</span> ChatCraft Authorization Server</p>
         </div>
     </footer>
 

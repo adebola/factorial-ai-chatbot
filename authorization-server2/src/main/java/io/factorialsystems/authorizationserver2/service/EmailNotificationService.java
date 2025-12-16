@@ -170,14 +170,15 @@ public class EmailNotificationService {
                     <p>If you didn't create an account with ChatCraft, you can safely ignore this email.</p>
                 </div>
                 <div class="footer">
-                    <p>&copy; 2024 ChatCraft. All rights reserved.</p>
+                    <p>&copy; %d ChatCraft. All rights reserved.</p>
                 </div>
             </body>
             </html>
             """.formatted(
                 data.get("firstName"),
                 data.get("verificationUrl"),
-                data.get("verificationUrl")
+                data.get("verificationUrl"),
+                java.time.Year.now().getValue()
             );
     }
 
@@ -240,13 +241,14 @@ public class EmailNotificationService {
                     <p>If you have any questions or need help getting started, feel free to contact our support team.</p>
                 </div>
                 <div class="footer">
-                    <p>&copy; 2024 ChatCraft. All rights reserved.</p>
+                    <p>&copy; %d ChatCraft. All rights reserved.</p>
                 </div>
             </body>
             </html>
             """.formatted(
                 data.get("firstName"),
-                data.get("loginUrl")
+                data.get("loginUrl"),
+                java.time.Year.now().getValue()
             );
     }
 
