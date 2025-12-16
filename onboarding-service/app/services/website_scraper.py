@@ -278,6 +278,9 @@ class WebsiteScraper:
             ingestion.pages_failed = pages_failed
             self.db.commit()
 
+            # Log session statistics
+            self._log_session_statistics(tenant_id, ingestion_id)
+
             logger.info(
                 "✅ Website ingestion completed successfully",
                 tenant_id=tenant_id,
@@ -311,6 +314,27 @@ class WebsiteScraper:
             )
             raise
 
+    def _log_session_statistics(self, tenant_id: str, ingestion_id: str):
+        """Log session-level statistics about domain preferences and scraping effectiveness"""
+        if not self.domain_preferences:
+            return
+
+        requests_domains = sum(1 for method in self.domain_preferences.values() if method == "requests")
+        playwright_domains = sum(1 for method in self.domain_preferences.values() if method == "playwright")
+        total_domains = len(self.domain_preferences)
+
+        logger.info(
+            "📊 Session Statistics: Domain Preferences",
+            tenant_id=tenant_id,
+            ingestion_id=ingestion_id,
+            total_domains_cached=total_domains,
+            requests_preferred_domains=requests_domains,
+            playwright_preferred_domains=playwright_domains,
+            requests_percentage=round((requests_domains / total_domains) * 100, 1) if total_domains > 0 else 0,
+            playwright_percentage=round((playwright_domains / total_domains) * 100, 1) if total_domains > 0 else 0,
+            cache_effectiveness="high" if total_domains > 5 else "building"
+        )
+
     async def _scrape_page_with_strategy(
         self, tenant_id: str, ingestion_id: str, url: str
     ) -> Optional[Document]:
@@ -323,36 +347,57 @@ class WebsiteScraper:
             # Check domain cache first
             if domain in self.domain_preferences:
                 if self.domain_preferences[domain] == "playwright":
-                    logger.debug(
-                        "🎭 Using Playwright (cached preference)",
+                    logger.info(
+                        "🎭 Scraper Decision: Playwright (cached preference)",
                         tenant_id=tenant_id,
+                        ingestion_id=ingestion_id,
                         url=url,
-                        domain=domain
+                        domain=domain,
+                        decision_reason="domain_cache_hit",
+                        cached_method="playwright",
+                        strategy="AUTO",
+                        cache_size=len(self.domain_preferences)
                     )
                     return await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
                 else:
-                    logger.debug(
-                        "⚡ Using requests (cached preference)",
+                    logger.info(
+                        "⚡ Scraper Decision: Requests (cached preference)",
                         tenant_id=tenant_id,
+                        ingestion_id=ingestion_id,
                         url=url,
-                        domain=domain
+                        domain=domain,
+                        decision_reason="domain_cache_hit",
+                        cached_method="requests",
+                        strategy="AUTO",
+                        cache_size=len(self.domain_preferences)
                     )
                     result = self._scrape_single_page(tenant_id, ingestion_id, url)
                     if result:
                         return result
                     # Cached method failed, try Playwright
-                    logger.debug(
-                        "↪️  Requests failed, falling back to Playwright",
+                    logger.warning(
+                        "↪️  Fallback Decision: Cached method failed, trying Playwright",
                         tenant_id=tenant_id,
-                        url=url
+                        ingestion_id=ingestion_id,
+                        url=url,
+                        domain=domain,
+                        fallback_reason="cached_method_failed",
+                        cached_method="requests",
+                        strategy="AUTO"
                     )
                     return await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
 
             # No cache - try requests first (fast path)
-            logger.debug(
-                "⚡ Trying requests first (AUTO strategy)",
+            logger.info(
+                "⚡ Scraper Decision: Requests (fast path attempt)",
                 tenant_id=tenant_id,
-                url=url
+                ingestion_id=ingestion_id,
+                url=url,
+                domain=domain,
+                decision_reason="no_cache_fast_path",
+                strategy="AUTO",
+                will_fallback_if_insufficient="yes",
+                content_threshold=500
             )
             result = self._scrape_single_page(tenant_id, ingestion_id, url)
 
@@ -360,69 +405,100 @@ class WebsiteScraper:
                 # Success with requests! Cache this preference
                 duration = time.time() - strategy_start_time
                 logger.info(
-                    "✅ Requests succeeded, caching preference",
+                    "✅ Cache Update: Domain prefers Requests",
                     tenant_id=tenant_id,
+                    ingestion_id=ingestion_id,
                     domain=domain,
+                    cached_method="requests",
                     content_length=len(result.page_content),
-                    duration_seconds=round(duration, 2)
+                    duration_ms=round(duration * 1000, 2),
+                    cache_operation="write",
+                    cache_size_after=len(self.domain_preferences) + 1
                 )
                 self.domain_preferences[domain] = "requests"
                 return result
 
             # Requests failed or returned minimal content - try Playwright
-            logger.debug(
-                "↪️  Requests returned insufficient content, trying Playwright",
+            logger.warning(
+                "↪️  Fallback Decision: Switching to Playwright",
                 tenant_id=tenant_id,
-                url=url
+                ingestion_id=ingestion_id,
+                url=url,
+                domain=domain,
+                fallback_reason="insufficient_content" if result else "no_content",
+                requests_content_length=len(result.page_content) if result else 0,
+                content_threshold=500,
+                requests_duration_ms=round((time.time() - strategy_start_time) * 1000, 2),
+                strategy="AUTO"
             )
             result = await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
             if result:
                 duration = time.time() - strategy_start_time
-                logger.debug(
-                    "✅ Playwright succeeded, caching preference",
+                logger.info(
+                    "✅ Cache Update: Domain prefers Playwright",
                     tenant_id=tenant_id,
+                    ingestion_id=ingestion_id,
                     domain=domain,
+                    cached_method="playwright",
                     content_length=len(result.page_content),
-                    duration_seconds=round(duration, 2)
+                    duration_ms=round(duration * 1000, 2),
+                    cache_operation="write",
+                    cache_size_after=len(self.domain_preferences) + 1
                 )
                 self.domain_preferences[domain] = "playwright"
             return result
 
         # Strategy: REQUESTS_FIRST - Try requests with fallback
         elif self.strategy == ScrapingStrategy.REQUESTS_FIRST:
-            logger.debug(
-                "⚡ Trying requests first (REQUESTS_FIRST strategy)",
+            logger.info(
+                "⚡ Scraper Decision: Requests (REQUESTS_FIRST strategy)",
                 tenant_id=tenant_id,
-                url=url
+                ingestion_id=ingestion_id,
+                url=url,
+                decision_reason="strategy_requests_first",
+                strategy="REQUESTS_FIRST",
+                fallback_enabled=getattr(settings, 'ENABLE_FALLBACK', True)
             )
             result = self._scrape_single_page(tenant_id, ingestion_id, url)
             if result:
                 return result
 
             if getattr(settings, 'ENABLE_FALLBACK', True):
-                logger.info(
-                    "↪️  Requests failed, falling back to Playwright",
+                logger.warning(
+                    "↪️  Fallback Decision: Requests failed, switching to Playwright",
                     tenant_id=tenant_id,
-                    url=url
+                    ingestion_id=ingestion_id,
+                    url=url,
+                    fallback_reason="requests_failed",
+                    strategy="REQUESTS_FIRST",
+                    fallback_enabled=True
                 )
                 return await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
             return None
 
         # Strategy: PLAYWRIGHT_ONLY
         elif self.strategy == ScrapingStrategy.PLAYWRIGHT_ONLY:
-            logger.debug(
-                "🎭 Using Playwright (PLAYWRIGHT_ONLY strategy)",
+            logger.info(
+                "🎭 Scraper Decision: Playwright (PLAYWRIGHT_ONLY strategy)",
                 tenant_id=tenant_id,
-                url=url
+                ingestion_id=ingestion_id,
+                url=url,
+                decision_reason="strategy_playwright_only",
+                strategy="PLAYWRIGHT_ONLY",
+                fallback_enabled=False
             )
             return await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
 
         # Strategy: REQUESTS_ONLY
         elif self.strategy == ScrapingStrategy.REQUESTS_ONLY:
-            logger.debug(
-                "⚡ Using requests (REQUESTS_ONLY strategy)",
+            logger.info(
+                "⚡ Scraper Decision: Requests (REQUESTS_ONLY strategy)",
                 tenant_id=tenant_id,
-                url=url
+                ingestion_id=ingestion_id,
+                url=url,
+                decision_reason="strategy_requests_only",
+                strategy="REQUESTS_ONLY",
+                fallback_enabled=False
             )
             return self._scrape_single_page(tenant_id, ingestion_id, url)
 
@@ -556,7 +632,19 @@ class WebsiteScraper:
             page_record.status = DocumentStatus.COMPLETED
             page_record.scraped_at = datetime.now()
             self.db.commit()
-            
+
+            # Log successful scraping
+            logger.info(
+                "✅ Requests: Scraping successful",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                url=url,
+                scraping_method="requests",
+                content_length=len(content),
+                title=title_text,
+                content_hash=content_hash[:12] if len(content_hash) >= 12 else content_hash
+            )
+
             # Create document
             document = Document(
                 page_content=content,
@@ -680,7 +768,9 @@ class WebsiteScraper:
                 try:
                     # Navigate to the page
                     playwright_timeout = getattr(settings, 'PLAYWRIGHT_TIMEOUT', 30000)
-                    response = await page.goto(url, wait_until='domcontentloaded', timeout=playwright_timeout)
+                    # Use 'networkidle' instead of 'domcontentloaded' to support SPAs (React, Vue, Angular)
+                    # networkidle waits for JavaScript bundles to load and React to render
+                    response = await page.goto(url, wait_until='networkidle', timeout=playwright_timeout)
 
                     if not response or response.status >= 400:
                         page_record.status = DocumentStatus.FAILED
@@ -782,6 +872,18 @@ class WebsiteScraper:
                     page_record.status = DocumentStatus.COMPLETED
                     page_record.scraped_at = datetime.now()
                     self.db.commit()
+
+                    # Log successful scraping
+                    logger.info(
+                        "✅ Playwright: Scraping successful",
+                        tenant_id=tenant_id,
+                        ingestion_id=ingestion_id,
+                        url=url,
+                        scraping_method="playwright",
+                        content_length=len(content),
+                        title=title_text,
+                        content_hash=content_hash[:12] if len(content_hash) >= 12 else content_hash
+                    )
 
                     await browser.close()
 

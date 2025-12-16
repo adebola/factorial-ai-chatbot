@@ -148,8 +148,8 @@ class UsageEventPublisher:
         # Force close any stale connections to prevent EOF errors
         if self.connection:
             try:
-                if not self.connection.is_closed:
-                    # Connection exists and is open
+                if not self.connection.is_closed and self.channel and self.channel.is_open:
+                    # Connection and channel both exist and are open
                     return
                 # Connection exists but is closed, clean it up
                 self.connection.close()
@@ -294,47 +294,37 @@ class UsageEventPublisher:
         Returns:
             True if published successfully, False otherwise
         """
-        try:
-            # Ensure connection (connect() handles connection state internally)
-            self.connect()
+        # Ensure connection (connect() handles connection state internally)
+        self.connect()
 
-            event = {
-                "event_type": "usage.document.added",
-                "tenant_id": tenant_id,
-                "document_id": document_id,
-                "filename": filename,
-                "file_size": file_size,
-                "count": 1,  # Incrementing by 1
-                "timestamp": datetime.utcnow().isoformat()
-            }
+        event = {
+            "event_type": "usage.document.added",
+            "tenant_id": tenant_id,
+            "document_id": document_id,
+            "filename": filename,
+            "file_size": file_size,
+            "count": 1,  # Incrementing by 1
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
-            self.channel.basic_publish(
-                exchange=self.usage_exchange,
-                routing_key="usage.document.added",
-                body=json.dumps(event, default=str),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent
-                    content_type="application/json"
-                )
+        self.channel.basic_publish(
+            exchange=self.usage_exchange,
+            routing_key="usage.document.added",
+            body=json.dumps(event, default=str),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # Persistent
+                content_type="application/json"
             )
+        )
 
-            logger.debug(
-                "Published usage.document.added event",
-                tenant_id=tenant_id,
-                document_id=document_id,
-                filename=filename
-            )
+        logger.debug(
+            "Published usage.document.added event",
+            tenant_id=tenant_id,
+            document_id=document_id,
+            filename=filename
+        )
 
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Failed to publish usage.document.added event: {e}",
-                tenant_id=tenant_id,
-                document_id=document_id,
-                exc_info=True
-            )
-            return False
+        return True
 
     @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_document_removed(
@@ -354,46 +344,36 @@ class UsageEventPublisher:
         Returns:
             True if published successfully, False otherwise
         """
-        try:
-            # Ensure connection (connect() handles connection state internally)
-            self.connect()
+        # Ensure connection (connect() handles connection state internally)
+        self.connect()
 
-            event = {
-                "event_type": "usage.document.removed",
-                "tenant_id": tenant_id,
-                "document_id": document_id,
-                "filename": filename,
-                "count": -1,  # Decrementing by 1
-                "timestamp": datetime.utcnow().isoformat()
-            }
+        event = {
+            "event_type": "usage.document.removed",
+            "tenant_id": tenant_id,
+            "document_id": document_id,
+            "filename": filename,
+            "count": -1,  # Decrementing by 1
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
-            self.channel.basic_publish(
-                exchange=self.usage_exchange,
-                routing_key="usage.document.removed",
-                body=json.dumps(event, default=str),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent
-                    content_type="application/json"
-                )
+        self.channel.basic_publish(
+            exchange=self.usage_exchange,
+            routing_key="usage.document.removed",
+            body=json.dumps(event, default=str),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # Persistent
+                content_type="application/json"
             )
+        )
 
-            logger.debug(
-                "Published usage.document.removed event",
-                tenant_id=tenant_id,
-                document_id=document_id,
-                filename=filename
-            )
+        logger.debug(
+            "Published usage.document.removed event",
+            tenant_id=tenant_id,
+            document_id=document_id,
+            filename=filename
+        )
 
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Failed to publish usage.document.removed event: {e}",
-                tenant_id=tenant_id,
-                document_id=document_id,
-                exc_info=True
-            )
-            return False
+        return True
 
     @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_website_added(
@@ -415,48 +395,38 @@ class UsageEventPublisher:
         Returns:
             True if published successfully, False otherwise
         """
-        try:
-            # Ensure connection (connect() handles connection state internally)
-            self.connect()
+        # Ensure connection (connect() handles connection state internally)
+        self.connect()
 
-            event = {
-                "event_type": "usage.website.added",
-                "tenant_id": tenant_id,
-                "website_id": website_id,
-                "url": url,
-                "pages_scraped": pages_scraped,
-                "count": 1,  # Incrementing by 1
-                "timestamp": datetime.utcnow().isoformat()
-            }
+        event = {
+            "event_type": "usage.website.added",
+            "tenant_id": tenant_id,
+            "website_id": website_id,
+            "url": url,
+            "pages_scraped": pages_scraped,
+            "count": 1,  # Incrementing by 1
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
-            self.channel.basic_publish(
-                exchange=self.usage_exchange,
-                routing_key="usage.website.added",
-                body=json.dumps(event, default=str),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent
-                    content_type="application/json"
-                )
+        self.channel.basic_publish(
+            exchange=self.usage_exchange,
+            routing_key="usage.website.added",
+            body=json.dumps(event, default=str),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # Persistent
+                content_type="application/json"
             )
+        )
 
-            logger.debug(
-                "Published usage.website.added event",
-                tenant_id=tenant_id,
-                website_id=website_id,
-                url=url,
-                pages_scraped=pages_scraped
-            )
+        logger.debug(
+            "Published usage.website.added event",
+            tenant_id=tenant_id,
+            website_id=website_id,
+            url=url,
+            pages_scraped=pages_scraped
+        )
 
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Failed to publish usage.website.added event: {e}",
-                tenant_id=tenant_id,
-                website_id=website_id,
-                exc_info=True
-            )
-            return False
+        return True
 
     @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_website_removed(
@@ -476,46 +446,36 @@ class UsageEventPublisher:
         Returns:
             True if published successfully, False otherwise
         """
-        try:
-            # Ensure connection (connect() handles connection state internally)
-            self.connect()
+        # Ensure connection (connect() handles connection state internally)
+        self.connect()
 
-            event = {
-                "event_type": "usage.website.removed",
-                "tenant_id": tenant_id,
-                "website_id": website_id,
-                "url": url,
-                "count": -1,  # Decrementing by 1
-                "timestamp": datetime.utcnow().isoformat()
-            }
+        event = {
+            "event_type": "usage.website.removed",
+            "tenant_id": tenant_id,
+            "website_id": website_id,
+            "url": url,
+            "count": -1,  # Decrementing by 1
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
-            self.channel.basic_publish(
-                exchange=self.usage_exchange,
-                routing_key="usage.website.removed",
-                body=json.dumps(event, default=str),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent
-                    content_type="application/json"
-                )
+        self.channel.basic_publish(
+            exchange=self.usage_exchange,
+            routing_key="usage.website.removed",
+            body=json.dumps(event, default=str),
+            properties=pika.BasicProperties(
+                delivery_mode=2,  # Persistent
+                content_type="application/json"
             )
+        )
 
-            logger.debug(
-                "Published usage.website.removed event",
-                tenant_id=tenant_id,
-                website_id=website_id,
-                url=url
-            )
+        logger.debug(
+            "Published usage.website.removed event",
+            tenant_id=tenant_id,
+            website_id=website_id,
+            url=url
+        )
 
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Failed to publish usage.website.removed event: {e}",
-                tenant_id=tenant_id,
-                website_id=website_id,
-                exc_info=True
-            )
-            return False
+        return True
 
 
 # Global usage event publisher instance

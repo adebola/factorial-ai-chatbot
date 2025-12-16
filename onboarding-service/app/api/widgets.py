@@ -236,7 +236,7 @@ async def download_all_widget_files(
                     zipf.writestr(filename, content)
                 
                 # Add a simple README.txt
-                readme_content = f"""FactorialBot Chat Widget - {current_tenant["name"]}
+                readme_content = f"""ChatCraft Chat Widget - {current_tenant["name"]}
 Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
 
 Files included:
