@@ -79,6 +79,8 @@ build_service() {
 
         if $PUSH_TO_REGISTRY; then
             build_cmd="$build_cmd --push"
+            # Disable provenance/attestation to prevent buildx hanging on macOS
+            build_cmd="$build_cmd --provenance=false --sbom=false"
         else
             build_cmd="$build_cmd --load"
         fi
