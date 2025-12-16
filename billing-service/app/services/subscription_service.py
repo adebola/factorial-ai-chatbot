@@ -83,12 +83,19 @@ class SubscriptionService:
             status = SubscriptionStatus.ACTIVE if amount == 0 else SubscriptionStatus.PENDING
 
         # Calculate subscription end date
-        if billing_cycle == BillingCycle.YEARLY:
-            ends_at = starts_at + timedelta(days=365)
-            current_period_end = starts_at + timedelta(days=365)
+        if custom_trial_end or (start_trial and settings.TRIAL_PERIOD_DAYS > 0):
+            # TRIALING: Period ends when trial ends (14 days from now)
+            # The paid billing period starts AFTER trial ends
+            current_period_end = trial_ends_at
+            ends_at = trial_ends_at
         else:
-            ends_at = starts_at + timedelta(days=30)
-            current_period_end = starts_at + timedelta(days=30)
+            # ACTIVE/PENDING: Standard billing cycle calculation
+            if billing_cycle == BillingCycle.YEARLY:
+                ends_at = starts_at + timedelta(days=365)
+                current_period_end = starts_at + timedelta(days=365)
+            else:
+                ends_at = starts_at + timedelta(days=30)
+                current_period_end = starts_at + timedelta(days=30)
 
         # Create subscription
         subscription = Subscription(
@@ -100,7 +107,7 @@ class SubscriptionService:
             currency=settings.DEFAULT_CURRENCY,
             starts_at=starts_at,
             ends_at=ends_at,
-            current_period_start=starts_at,
+            current_period_start=trial_starts_at if (trial_starts_at and status == SubscriptionStatus.TRIALING) else starts_at,
             current_period_end=current_period_end,
             trial_starts_at=trial_starts_at,
             trial_ends_at=trial_ends_at,

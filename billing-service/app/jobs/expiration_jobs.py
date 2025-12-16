@@ -147,6 +147,13 @@ def check_trial_expired():
                 try:
                     # Update subscription status to EXPIRED
                     subscription.status = SubscriptionStatus.EXPIRED
+
+                    # Ensure period markers are consistent
+                    # If current_period_end is beyond trial_ends_at, fix it
+                    if subscription.current_period_end > subscription.trial_ends_at:
+                        subscription.current_period_end = subscription.trial_ends_at
+                        subscription.ends_at = subscription.trial_ends_at
+
                     db.commit()
 
                     # Check if already notified
