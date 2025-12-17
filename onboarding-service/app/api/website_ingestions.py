@@ -70,7 +70,8 @@ async def ingest_website(
                 openai_api_key=openai_key,
                 user_categories=categories,
                 user_tags=tags,
-                auto_categorize=auto_categorize
+                auto_categorize=auto_categorize,
+                scraping_strategy=scraper.strategy
             )
         )
 
@@ -410,29 +411,59 @@ async def retry_ingestion(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Ingestion not found or does not belong to this tenant"
             )
-        
+
         # Only allow retry for failed ingestions
         if ingestion.status not in ["failed", "completed"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Can only retry failed or completed ingestions"
             )
-        
+
+        # Determine strategy based on ingestion status
+        if ingestion.status == "failed":
+            # Failed ingestion: use AUTO to try to determine best method
+            strategy = ScrapingStrategy.AUTO
+            logger.info(
+                "Using AUTO strategy for failed ingestion retry",
+                ingestion_id=ingestion_id,
+                tenant_id=claims.tenant_id
+            )
+        else:
+            # Completed ingestion: use the strategy that worked before
+            # Fallback to AUTO if not set (for old records)
+            strategy = ScrapingStrategy(ingestion.scraping_strategy or "auto")
+            logger.info(
+                "Using preserved strategy for completed ingestion retry",
+                ingestion_id=ingestion_id,
+                tenant_id=claims.tenant_id,
+                strategy=strategy.value
+            )
+
+        # Create scraper with the determined strategy
+        scraper_with_strategy = WebsiteScraper(db, strategy=strategy)
+
         # Reset ingestion status and restart
-        scraper.reset_ingestion_for_retry(ingestion_id)
-        
+        scraper_with_strategy.reset_ingestion_for_retry(ingestion_id)
+
         # Start processing in the background
         import os
         openai_key = os.environ.get("OPENAI_API_KEY")
         asyncio.create_task(
-            background_website_ingestion(claims.tenant_id, ingestion.base_url, ingestion_id, openai_key)
+            background_website_ingestion(
+                tenant_id=claims.tenant_id,
+                website_url=ingestion.base_url,
+                ingestion_id=ingestion_id,
+                openai_api_key=openai_key,
+                scraping_strategy=strategy
+            )
         )
-        
+
         return {
             "message": "Website ingestion retry started",
             "ingestion_id": ingestion_id,
             "base_url": ingestion.base_url,
             "status": "in_progress",
+            "strategy": strategy.value,
             "tenant_id": claims.tenant_id,
         }
         
@@ -452,14 +483,16 @@ async def background_website_ingestion(
     openai_api_key: str = None,
     user_categories: Optional[List[str]] = None,
     user_tags: Optional[List[str]] = None,
-    auto_categorize: bool = True
+    auto_categorize: bool = True,
+    scraping_strategy: ScrapingStrategy = None
 ):
     """Background task for website ingestion with categorization - creates its own database session"""
     logger.info(
         "Background ingestion task started",
         tenant_id=tenant_id,
         ingestion_id=ingestion_id,
-        website_url=website_url
+        website_url=website_url,
+        scraping_strategy=scraping_strategy.value if scraping_strategy else "auto"
     )
 
     # Create FRESH database session for this background task
@@ -512,7 +545,7 @@ async def background_website_ingestion(
         )
 
         from ..core.config import settings
-        scraper = WebsiteScraper(db)
+        scraper = WebsiteScraper(db, strategy=scraping_strategy)
 
         # Get the existing ingestion record instead of creating a new one
         ingestion = scraper.get_ingestion_status(tenant_id, ingestion_id)

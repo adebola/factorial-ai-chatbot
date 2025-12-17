@@ -87,7 +87,7 @@ class Document(Base):
 
 class WebsiteIngestion(Base):
     __tablename__ = "website_ingestions"
-    
+
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
     tenant_id = Column(String(36), nullable=False, index=True)
     base_url = Column(String(500), nullable=False)
@@ -96,6 +96,7 @@ class WebsiteIngestion(Base):
     pages_processed = Column(Integer, default=0)
     pages_failed = Column(Integer, default=0)
     error_message = Column(Text)
+    scraping_strategy = Column(String(50), default="auto", nullable=False)
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())

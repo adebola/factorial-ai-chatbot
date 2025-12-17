@@ -69,19 +69,20 @@ class WebsiteScraper:
     
     def start_website_ingestion(self, tenant_id: str, base_url: str) -> WebsiteIngestion:
         """Start website ingestion process"""
-        
-        # Create an ingestion record
+
+        # Create an ingestion record with the current scraping strategy
         ingestion = WebsiteIngestion(
             tenant_id=tenant_id,
             base_url=base_url,
             status=IngestionStatus.PENDING,
+            scraping_strategy=self.strategy.value,
             started_at=datetime.now()
         )
-        
+
         self.db.add(ingestion)
         self.db.commit()
         self.db.refresh(ingestion)
-        
+
         return ingestion
     
     def scrape_website(self, tenant_id: str, base_url: str) -> List[Document]:
