@@ -34,7 +34,7 @@ class UsageEventConsumer:
     def __init__(self):
         self.host = os.environ.get("RABBITMQ_HOST", "localhost")
         self.port = int(os.environ.get("RABBITMQ_PORT", "5672"))
-        self.username = os.environ.get("RABBITMQ_USERNAME", "guest")
+        self.username = os.environ.get("RABBITMQ_USER", "guest")  # Match chat-service
         self.password = os.environ.get("RABBITMQ_PASSWORD", "guest")
         self.vhost = os.environ.get("RABBITMQ_VHOST", "/")
 

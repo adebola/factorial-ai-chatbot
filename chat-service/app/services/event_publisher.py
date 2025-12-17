@@ -6,6 +6,7 @@ Publishes chat message events with quality metrics to the quality events exchang
 
 import json
 import time
+import uuid
 from datetime import datetime
 from typing import Dict, Any, Optional
 import pika
@@ -329,6 +330,7 @@ class ChatEventPublisher:
 
             # Build event payload
             event = {
+                "event_id": str(uuid.uuid4()),
                 "event_type": "usage.chat.message",
                 "tenant_id": tenant_id,
                 "session_id": session_id,

@@ -206,7 +206,16 @@ class ChatWebSocket:
                     usage_cache.increment_local_cache(tenant_id, message_count=1)
                 except Exception as e:
                     # Log but don't fail on event publishing errors
-                    print(f"Failed to publish usage event: {str(e)}")
+                    logger.error(
+                        "Failed to publish usage event",
+                        extra={
+                            "tenant_id": tenant_id,
+                            "session_id": session_id,
+                            "error": str(e),
+                            "error_type": type(e).__name__
+                        },
+                        exc_info=True
+                    )
 
                 # Check if there's an active workflow for this session
                 try:
