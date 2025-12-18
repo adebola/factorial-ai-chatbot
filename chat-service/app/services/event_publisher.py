@@ -349,7 +349,7 @@ class ChatEventPublisher:
                 )
             )
 
-            logger.debug(
+            logger.info(
                 f"Published usage.chat.message event to usage exchange",
                 tenant_id=tenant_id,
                 session_id=session_id,

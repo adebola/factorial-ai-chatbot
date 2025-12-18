@@ -40,7 +40,7 @@ class UsageEventConsumer:
 
         self.exchange = os.environ.get("RABBITMQ_USAGE_EXCHANGE", "usage.events")
         self.queue = os.environ.get("RABBITMQ_USAGE_QUEUE", "billing.usage.tracking")
-        self.routing_key_pattern = "usage.*"
+        self.routing_key_pattern = "usage.#"  # Match all usage.* routing keys (# matches zero or more words)
 
         self.connection = None
         self.channel = None
@@ -158,11 +158,16 @@ class UsageEventConsumer:
         """Main consumption loop (runs in background thread)"""
         try:
             logger.info(f"Usage event consumer started, listening to queue: {self.queue}")
+            logger.info(f"Consumer will listen for routing keys matching: {self.routing_key_pattern}")
+            logger.info(f"Exchange: {self.exchange}, Queue: {self.queue}")
+
             self.channel.basic_consume(
                 queue=self.queue,
                 on_message_callback=self._on_message,
                 auto_ack=False  # Manual acknowledgment for reliability
             )
+
+            logger.info("Starting to consume messages...")
             self.channel.start_consuming()
         except Exception as e:
             logger.error(f"Consumer loop error: {e}", exc_info=True)
@@ -178,13 +183,15 @@ class UsageEventConsumer:
             properties: Message properties
             body: Message body (JSON)
         """
+        logger.info(f"🔔 _on_message callback triggered! Routing key: {method.routing_key}")
+
         try:
             # Parse message
             event = json.loads(body)
             event_type = method.routing_key
 
-            logger.debug(
-                f"Received usage event",
+            logger.info(
+                f"✅ Received usage event",
                 extra={
                     "event_type": event_type,
                     "tenant_id": event.get("tenant_id"),
@@ -271,16 +278,34 @@ class UsageEventConsumer:
                 logger.info(f"Incremented documents for tenant {tenant_id}: {usage.documents_used}")
 
             elif event_type in ["usage.document.deleted", "usage.document.removed"]:
+                previous_count = usage.documents_used
                 usage.documents_used = max(0, usage.documents_used - 1)
-                logger.info(f"Decremented documents for tenant {tenant_id}: {usage.documents_used}")
+
+                if previous_count == 0:
+                    logger.warning(
+                        f"Attempted to decrement documents when already at 0 for tenant {tenant_id}. "
+                        f"This indicates a missed 'added' event or duplicate 'removed' event. "
+                        f"Counter protected and remains at 0."
+                    )
+                else:
+                    logger.info(f"Decremented documents for tenant {tenant_id}: {usage.documents_used}")
 
             elif event_type in ["usage.website.created", "usage.website.added"]:
                 usage.websites_used += 1
                 logger.info(f"Incremented websites for tenant {tenant_id}: {usage.websites_used}")
 
             elif event_type in ["usage.website.deleted", "usage.website.removed"]:
+                previous_count = usage.websites_used
                 usage.websites_used = max(0, usage.websites_used - 1)
-                logger.info(f"Decremented websites for tenant {tenant_id}: {usage.websites_used}")
+
+                if previous_count == 0:
+                    logger.warning(
+                        f"Attempted to decrement websites when already at 0 for tenant {tenant_id}. "
+                        f"This indicates a missed 'added' event or duplicate 'removed' event. "
+                        f"Counter protected and remains at 0."
+                    )
+                else:
+                    logger.info(f"Decremented websites for tenant {tenant_id}: {usage.websites_used}")
 
             elif event_type == "usage.chat.message":
                 # Chat messages increment both daily and monthly
@@ -317,7 +342,7 @@ class UsageEventConsumer:
             db.commit()
 
             # Check limits and publish warning if exceeded
-            self._check_and_publish_limit_warning(tenant_id, usage, subscription, event_type)
+            self._check_and_publish_limit_warning(db, tenant_id, usage, subscription, event_type)
 
             return True
 
@@ -330,6 +355,7 @@ class UsageEventConsumer:
 
     def _check_and_publish_limit_warning(
         self,
+        db: Session,
         tenant_id: str,
         usage: UsageTracking,
         subscription: Any,
@@ -339,14 +365,19 @@ class UsageEventConsumer:
         Check if usage limits are exceeded and publish warning events.
 
         Args:
+            db: Database session
             tenant_id: Tenant ID
             usage: UsageTracking record
             subscription: Subscription record
             event_type: Type of usage event that triggered this check
         """
         try:
-            # Get plan limits
-            plan = subscription.plan if subscription else None
+            # Get plan limits by querying the Plan using plan_id
+            from ..models.plan import Plan
+            plan = None
+            if subscription and subscription.plan_id:
+                plan = db.query(Plan).filter(Plan.id == subscription.plan_id).first()
+
             if not plan:
                 return
 
