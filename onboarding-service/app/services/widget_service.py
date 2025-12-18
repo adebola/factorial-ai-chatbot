@@ -509,8 +509,25 @@ class WidgetService:
                 .factorial-chat-logo {
                     height: 20px;
                     width: auto;
+                    transition: transform 0.2s ease;
                 }
-                
+
+                .factorial-chat-logo-link {
+                    display: inline-flex;
+                    align-items: center;
+                    text-decoration: none;
+                    cursor: pointer;
+                    transition: opacity 0.2s ease;
+                }
+
+                .factorial-chat-logo-link:hover {
+                    opacity: 0.7;
+                }
+
+                .factorial-chat-logo-link:hover .factorial-chat-logo {
+                    transform: scale(1.05);
+                }
+
                 .factorial-chat-logo-text {
                     font-weight: bold;
                     color: ${CONFIG.colors.primary};
@@ -696,7 +713,9 @@ class WidgetService:
                     
                     <div class="factorial-chat-footer">
                         <span>Powered by</span>
-                        <img src="{{ backend_url }}/api/v1/widget/static/chatcraft-logo2.png" alt="ChatCraft" class="factorial-chat-logo">
+                        <a href="https://www.chatcraft.cc" target="_blank" rel="noopener noreferrer" class="factorial-chat-logo-link">
+                            <img src="{{ backend_url }}/api/v1/widget/static/chatcraft-logo2.png" alt="ChatCraft" class="factorial-chat-logo">
+                        </a>
                     </div>
                 </div>
             `;
