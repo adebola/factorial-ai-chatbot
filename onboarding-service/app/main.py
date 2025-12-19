@@ -55,10 +55,21 @@ async def startup_event():
     # Connect usage event publisher
     try:
         usage_publisher.connect()
-        logger.info("✓ Usage event publisher connected successfully")
+
+        # Verify connection succeeded
+        if usage_publisher._is_connected():
+            logger.info("✓ Usage event publisher connected successfully")
+        else:
+            logger.error(
+                "Usage event publisher connection FAILED: Channel not available. "
+                "Service will continue but usage events will not be published until RabbitMQ is available."
+            )
     except Exception as e:
-        logger.error(f"Failed to connect usage publisher: {e}", exc_info=True)
-        logger.warning("Onboarding service will continue without usage event publishing")
+        logger.error(
+            f"Failed to connect usage publisher: {e}. "
+            f"Service will continue but usage events will not be published until RabbitMQ is available.",
+            exc_info=True
+        )
 
     logger.info("Onboarding Service startup completed")
 

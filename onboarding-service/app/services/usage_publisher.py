@@ -57,7 +57,22 @@ def _with_publish_retry(max_retries: int = 3, initial_delay: float = 0.5, backof
                             method=method_name,
                             retry_attempt=attempt
                         )
-                        self._force_reconnection()
+
+                        # Attempt reconnection
+                        reconnect_success = self._force_reconnection()
+
+                        if not reconnect_success:
+                            # Reconnection failed, continue to retry with exponential backoff
+                            logger.warning(
+                                f"Reconnection failed on attempt {attempt}, will retry",
+                                tenant_id=tenant_id,
+                                method=method_name
+                            )
+                            # Don't call the function if reconnection failed
+                            # Just continue to next retry iteration
+                            delay = initial_delay * (backoff_factor ** (attempt - 1))
+                            time.sleep(delay)
+                            continue
 
                     # Call the original publish method
                     return func(self, *args, **kwargs)
@@ -194,6 +209,12 @@ class UsageEventPublisher:
                     exchange=self.usage_exchange
                 )
 
+                # Verify and log connection state
+                if self._is_connected():
+                    logger.info("✓ RabbitMQ connection verified: channel is open and ready")
+                else:
+                    logger.error("✗ RabbitMQ connection verification FAILED: channel not available")
+
                 return
 
             except AMQPConnectionError as e:
@@ -250,29 +271,73 @@ class UsageEventPublisher:
             self.connection.close()
             logger.info("Closed RabbitMQ usage publisher connection")
 
-    def _force_reconnection(self):
+    def _is_connected(self) -> bool:
+        """
+        Check if RabbitMQ connection and channel are valid and open.
+
+        Returns:
+            True if connection and channel are both open, False otherwise
+        """
+        try:
+            return (
+                self.connection is not None and
+                not self.connection.is_closed and
+                self.channel is not None and
+                self.channel.is_open
+            )
+        except Exception as e:
+            # If checking connection state throws, connection is invalid
+            logger.debug(f"Error checking connection state: {e}")
+            return False
+
+    def _force_reconnection(self) -> bool:
         """
         Force a fresh RabbitMQ connection by closing existing connection and reconnecting.
 
-        This is critical for handling stale connections that can occur during long idle
-        periods (e.g., days between website removal operations). Even if a connection
-        appears open, it may be stale and cause publish failures.
+        Returns:
+            True if reconnection succeeded, False otherwise
         """
-        # Close existing connection (ignore any errors during close)
-        if self.connection:
-            try:
-                self.connection.close()
-            except Exception as e:
-                logger.debug(f"Error closing connection during force reconnect: {e}")
+        # Save old connection references
+        old_connection = self.connection
+        old_channel = self.channel
 
-        # Reset connection and channel to None to force fresh connection
+        # Reset to None to signal we're reconnecting
         self.connection = None
         self.channel = None
 
-        # Establish fresh connection
-        self.connect()
+        try:
+            # Attempt fresh connection
+            self.connect()
 
-        logger.debug("Forced fresh RabbitMQ reconnection")
+            # Verify connection succeeded
+            if not self._is_connected():
+                logger.error("Force reconnection failed: connection not valid after connect()")
+                return False
+
+            # Success - close old connection if it exists
+            if old_connection:
+                try:
+                    old_connection.close()
+                except Exception as e:
+                    logger.debug(f"Error closing old connection: {e}")
+
+            logger.info("Forced fresh RabbitMQ reconnection successful")
+            return True
+
+        except Exception as e:
+            logger.error(f"Force reconnection failed with exception: {e}", exc_info=True)
+
+            # Reconnection failed - restore old connection if it was still valid
+            if old_connection and old_channel:
+                try:
+                    if not old_connection.is_closed and old_channel.is_open:
+                        self.connection = old_connection
+                        self.channel = old_channel
+                        logger.warning("Restored previous connection after failed reconnection")
+                except Exception:
+                    pass
+
+            return False
 
     @_with_publish_retry(max_retries=3, initial_delay=0.5)
     def publish_document_added(
@@ -296,6 +361,16 @@ class UsageEventPublisher:
         """
         # Ensure connection (connect() handles connection state internally)
         self.connect()
+
+        # CRITICAL: Verify channel is valid before attempting publish
+        if not self._is_connected():
+            logger.error(
+                f"Cannot publish document_added event: RabbitMQ channel is not available",
+                tenant_id=tenant_id,
+                document_id=document_id
+            )
+            # Raise exception to trigger retry mechanism
+            raise AMQPConnectionError("Channel is None or closed")
 
         event = {
             "event_type": "usage.document.added",
@@ -346,6 +421,16 @@ class UsageEventPublisher:
         """
         # Ensure connection (connect() handles connection state internally)
         self.connect()
+
+        # CRITICAL: Verify channel is valid before attempting publish
+        if not self._is_connected():
+            logger.error(
+                f"Cannot publish document_removed event: RabbitMQ channel is not available",
+                tenant_id=tenant_id,
+                document_id=document_id
+            )
+            # Raise exception to trigger retry mechanism
+            raise AMQPConnectionError("Channel is None or closed")
 
         event = {
             "event_type": "usage.document.removed",
@@ -398,6 +483,16 @@ class UsageEventPublisher:
         # Ensure connection (connect() handles connection state internally)
         self.connect()
 
+        # CRITICAL: Verify channel is valid before attempting publish
+        if not self._is_connected():
+            logger.error(
+                f"Cannot publish website_added event: RabbitMQ channel is not available",
+                tenant_id=tenant_id,
+                website_id=website_id
+            )
+            # Raise exception to trigger retry mechanism
+            raise AMQPConnectionError("Channel is None or closed")
+
         event = {
             "event_type": "usage.website.added",
             "tenant_id": tenant_id,
@@ -448,6 +543,16 @@ class UsageEventPublisher:
         """
         # Ensure connection (connect() handles connection state internally)
         self.connect()
+
+        # CRITICAL: Verify channel is valid before attempting publish
+        if not self._is_connected():
+            logger.error(
+                f"Cannot publish website_removed event: RabbitMQ channel is not available",
+                tenant_id=tenant_id,
+                website_id=website_id
+            )
+            # Raise exception to trigger retry mechanism
+            raise AMQPConnectionError("Channel is None or closed")
 
         event = {
             "event_type": "usage.website.removed",
