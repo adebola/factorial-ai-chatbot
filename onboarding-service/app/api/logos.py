@@ -29,26 +29,42 @@ async def upload_logo(
     try:
         settings_service = SettingsService(db)
         
-        # Upload logo and get the permanent public URL returned by MinIO
-        permanent_logo_url = settings_service.upload_company_logo(tenant_id, file)
+        # Upload logo and get the permanent public URL (using public endpoint, not presigned URL)
+        public_logo_url = settings_service.upload_company_logo(tenant_id, file)
 
-        logger.info(f"Uploaded company logo for tenant {tenant_id}, public name {permanent_logo_url}")
-        
-        # Publish logo uploaded event to RabbitMQ
+        logger.info(
+            f"Uploaded company logo for tenant {tenant_id}",
+            extra={
+                "tenant_id": tenant_id,
+                "logo_url": public_logo_url,
+                "filename": file.filename
+            }
+        )
+
+        # Publish logo uploaded event to RabbitMQ with permanent URL
         try:
             rabbitmq_service.publish_logo_uploaded(
                 tenant_id=tenant_id,
-                logo_url=permanent_logo_url
+                logo_url=public_logo_url
+            )
+            logger.info(
+                f"Published logo uploaded event to OAuth2 server",
+                extra={
+                    "tenant_id": tenant_id,
+                    "logo_url": public_logo_url
+                }
             )
         except Exception as e:
             logger.warning(f"Failed to publish logo uploaded event: {e}")
-        
+
         return {
             "message": "Company logo uploaded successfully",
-            "logo_url": permanent_logo_url,
+            "logo_url": public_logo_url,
             "filename": file.filename,
             "tenant_id": tenant_id,
-            "uploaded_by": claims.tenant_id
+            "uploaded_by": claims.tenant_id,
+            "expires": False,
+            "endpoint": f"/api/v1/settings-logo/{tenant_id}"
         }
         
     except ValueError as e:

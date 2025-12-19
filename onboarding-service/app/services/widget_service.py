@@ -301,16 +301,16 @@ class WidgetService:
                 }
                 
                 .factorial-chat-button-logo {
-                    width: 36px;
-                    height: 36px;
+                    width: 54px;
+                    height: 54px;
                     border-radius: 50%;
                     object-fit: cover;
                     object-position: center;
                 }
-                
+
                 .factorial-chat-button-initials {
-                    width: 36px;
-                    height: 36px;
+                    width: 54px;
+                    height: 54px;
                     border-radius: 50%;
                     background: linear-gradient(135deg, ${CONFIG.colors.primary}, ${CONFIG.colors.secondary});
                     color: ${CONFIG.colors.white};
@@ -318,7 +318,7 @@ class WidgetService:
                     align-items: center;
                     justify-content: center;
                     font-weight: bold;
-                    font-size: 14px;
+                    font-size: 20px;
                     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     transition: transform 0.3s ease;
                 }

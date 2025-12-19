@@ -94,8 +94,48 @@ class SettingsService:
         }
         self.max_logo_size = 5 * 1024 * 1024  # 5MB
 
+    def _construct_public_logo_url(self, tenant_id: str) -> str:
+        """
+        Construct public logo URL using the service's public endpoint.
 
-    
+        This URL is permanent (no expiration) and uses the external API hostname
+        instead of internal MinIO hostname.
+
+        Args:
+            tenant_id: Tenant ID
+
+        Returns:
+            Public logo URL like: http://api.domain.com/api/v1/settings-logo/{tenant_id}
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Get base URL from environment
+        backend_url = os.environ.get("BACKEND_URL")
+
+        if not backend_url:
+            logger.warning(
+                "BACKEND_URL not set in environment, using default localhost. "
+                "This may cause issues in production!"
+            )
+            backend_url = "http://localhost:8001"
+
+        # Remove trailing slash if present
+        backend_url = backend_url.rstrip('/')
+
+        # Construct public endpoint URL
+        public_logo_url = f"{backend_url}/api/v1/settings-logo/{tenant_id}"
+
+        logger.debug(
+            f"Constructed public logo URL",
+            extra={
+                "tenant_id": tenant_id,
+                "url": public_logo_url
+            }
+        )
+
+        return public_logo_url
+
     def validate_logo_file(self, file: UploadFile) -> None:
         """Validate logo file type and size"""
         # Check content type
@@ -150,25 +190,34 @@ class SettingsService:
                 filename=file.filename,
                 content_type=file.content_type
             )
-            
-            # Generate a presigned URL (expires in 30 days)
-            from datetime import timedelta
-            permanent_logo_url = self.storage_service.get_public_url(object_name, timedelta(days=7))
-            
+
+            # Construct permanent public URL (using public endpoint, not presigned URL)
+            public_logo_url = self._construct_public_logo_url(tenant_id)
+
             # Send a message to OAuth2 server to update tenant settings logo URL
             try:
                 from .rabbitmq_service import rabbitmq_service
                 rabbitmq_service.publish_logo_uploaded(
                     tenant_id=tenant_id,
-                    logo_url=permanent_logo_url
+                    logo_url=public_logo_url
+                )
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(
+                    f"Published logo uploaded event to OAuth2 server",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "logo_url": public_logo_url,
+                        "object_name": object_name
+                    }
                 )
             except Exception as e:
                 # Log error but don't fail the logo upload
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.error(f"Failed to publish logo update message: {e}")
-            
-            return permanent_logo_url  # Return the permanent URL
+
+            return public_logo_url  # Return the permanent public URL
             
         except Exception as e:
             self.db.rollback()
