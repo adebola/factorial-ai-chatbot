@@ -411,19 +411,29 @@ class SubscriptionService:
         if was_trialing and new_amount > old_amount:
             now = datetime.now(timezone.utc)
             subscription.status = SubscriptionStatus.ACTIVE
-            subscription.trial_ends_at = None  # End trial immediately
-            subscription.starts_at = now  # Update start date to now
 
-            # Reset billing period to full cycle from upgrade date (no trial remainder)
-            subscription.current_period_start = now
+            # NEW: Extend from trial end date instead of resetting
+            # User gets remaining trial days + full billing cycle
+            original_trial_end = subscription.trial_ends_at
+
+            # Validate that trial_ends_at exists
+            if not original_trial_end:
+                # Fallback to current behavior if trial end date is missing
+                original_trial_end = now
+
+            subscription.trial_ends_at = None  # Trial is now complete
+            subscription.starts_at = original_trial_end  # Paid period starts when trial would have ended
+
+            # Calculate end date from trial end (not from now)
+            subscription.current_period_start = original_trial_end
             if billing_cycle == BillingCycle.MONTHLY:
-                subscription.current_period_end = now + timedelta(days=30)
+                subscription.current_period_end = original_trial_end + timedelta(days=30)
                 # Also update ends_at to match new billing period (was using trial period)
-                subscription.ends_at = now + timedelta(days=30)
+                subscription.ends_at = original_trial_end + timedelta(days=30)
             else:  # YEARLY
-                subscription.current_period_end = now + timedelta(days=365)
+                subscription.current_period_end = original_trial_end + timedelta(days=365)
                 # Also update ends_at to match new billing period (was using trial period)
-                subscription.ends_at = now + timedelta(days=365)
+                subscription.ends_at = original_trial_end + timedelta(days=365)
 
         # Clear any pending plan changes (user upgraded before scheduled downgrade)
         if subscription.pending_plan_id:

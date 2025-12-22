@@ -1074,6 +1074,54 @@ async def switch_tenant_plan(
 
                     logger.info(f"Payment verified for tenant {tenant_id}: reference={plan_switch.payment_reference}")
 
+                    # Create Payment record for successful upgrade payment
+                    from ..models.subscription import Payment, PaymentStatus, TransactionType
+
+                    upgrade_payment = Payment(
+                        subscription_id=existing_subscription.id,
+                        tenant_id=tenant_id,
+                        amount=Decimal(str(prorated_amount)),
+                        currency=existing_subscription.currency or "NGN",
+                        status=PaymentStatus.COMPLETED,  # Already verified with Paystack
+                        payment_method=payment_verified.get("channel"),  # card, bank, ussd, etc.
+                        transaction_type=TransactionType.UPGRADE,
+
+                        # Paystack details
+                        paystack_reference=plan_switch.payment_reference,
+                        paystack_access_code=None,  # Not available in verify response
+                        paystack_transaction_id=str(payment_verified.get("transaction_id")),
+
+                        # Processing details
+                        gateway_response=payment_verified.get("data", {}),
+                        processed_at=datetime.now(timezone.utc),
+
+                        # Description
+                        description=f"Plan upgrade from {current_plan.name if current_plan else 'Free'} to {new_plan.name}",
+
+                        # Metadata
+                        payment_metadata={
+                            "old_plan_id": current_plan.id if current_plan else None,
+                            "old_plan_name": current_plan.name if current_plan else "Free",
+                            "new_plan_id": new_plan.id,
+                            "new_plan_name": new_plan.name,
+                            "billing_cycle": plan_switch.billing_cycle,
+                            "is_trial_upgrade": is_trial_upgrade,
+                            "paid_at": payment_verified.get("paid_at"),
+                            "paystack_customer": payment_verified.get("customer", {}),
+                            "paystack_authorization": payment_verified.get("authorization", {})
+                        }
+                    )
+
+                    # Save to database
+                    db.add(upgrade_payment)
+                    db.commit()
+                    db.refresh(upgrade_payment)
+
+                    logger.info(
+                        f"Created payment record {upgrade_payment.id} for plan upgrade: "
+                        f"tenant={tenant_id}, amount={prorated_amount}, reference={plan_switch.payment_reference}"
+                    )
+
             # Switch subscription plan
             switch_result = subscription_service.switch_subscription_plan(
                 subscription_id=existing_subscription.id,

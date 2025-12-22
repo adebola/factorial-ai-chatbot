@@ -17,7 +17,7 @@ class RabbitMQService:
     def __init__(self):
         self.host = os.environ.get("RABBITMQ_HOST", "localhost")
         self.port = int(os.environ.get("RABBITMQ_PORT", "5672"))
-        self.username = os.environ.get("RABBITMQ_USERNAME", "guest")
+        self.username = os.environ.get("RABBITMQ_USER", "guest")
         self.password = os.environ.get("RABBITMQ_PASSWORD", "guest")
         self.exchange = os.environ.get("RABBITMQ_EXCHANGE", "topic-exchange")
         self.plan_update_routing_key = os.environ.get("RABBITMQ_PLAN_UPDATE_ROUTING_KEY", "plan.update")

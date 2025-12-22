@@ -41,10 +41,10 @@ class EmailPublisher:
     """
 
     def __init__(self):
-        """Initialize email publisher with RabbitMQ connection settings."""
+        """Initialize the email publisher with RabbitMQ connection settings."""
         self.rabbitmq_host = os.environ.get("RABBITMQ_HOST", "localhost")
         self.rabbitmq_port = int(os.environ.get("RABBITMQ_PORT", "5672"))
-        self.rabbitmq_user = os.environ.get("RABBITMQ_USERNAME", "guest")
+        self.rabbitmq_user = os.environ.get("RABBITMQ_USER", "guest")
         self.rabbitmq_password = os.environ.get("RABBITMQ_PASSWORD", "guest")
         self.rabbitmq_vhost = os.environ.get("RABBITMQ_VHOST", "/")
 
