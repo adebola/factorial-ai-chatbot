@@ -39,7 +39,7 @@ class RabbitMQPublisher:
 
         self.host = os.environ.get("RABBITMQ_HOST", "localhost")
         self.port = int(os.environ.get("RABBITMQ_PORT", "5672"))
-        self.username = os.environ.get("RABBITMQ_USERNAME", "guest")
+        self.username = os.environ.get("RABBITMQ_USER", "guest")
         self.password = os.environ.get("RABBITMQ_PASSWORD", "guest")
         self.exchange = os.environ.get("RABBITMQ_EXCHANGE", "communications-exchange")
 
