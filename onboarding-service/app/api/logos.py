@@ -164,36 +164,45 @@ async def download_logo(
     db: Session = Depends(get_db)
 ) -> StreamingResponse:
     """Download the company logo file for OAuth2 proxy (requires Bearer token authentication)"""
+    from ..services.storage_service import StorageService
 
     tenant_id = claims.tenant_id
 
     try:
-        settings_service = SettingsService(db)
-        settings = settings_service.get_tenant_settings(tenant_id)
+        storage_service = StorageService()
 
-        if not settings or not settings.company_logo_object_name:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Logo not found"
-            )
-        
-        # Download logo from storage
-        logo_data = settings_service.storage_service.download_file(settings.company_logo_object_name)
-        
-        # Determine content type based on file extension
-        _, ext = os.path.splitext(settings.company_logo_object_name)
+        # Try common logo extensions to find the file
+        logo_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.svg']
         content_type_map = {
             '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg', 
+            '.jpeg': 'image/jpeg',
             '.png': 'image/png',
             '.webp': 'image/webp',
             '.svg': 'image/svg+xml'
         }
-        content_type = content_type_map.get(ext.lower(), 'application/octet-stream')
-        
-        # Create filename from original logo object name
-        filename = os.path.basename(settings.company_logo_object_name) or f"logo-{tenant_id}{ext}"
-        
+
+        logo_data = None
+        found_extension = None
+        object_name = None
+
+        for ext in logo_extensions:
+            try:
+                object_name = f"tenant_{tenant_id}/logos/logo{ext}"
+                logo_data = storage_service.download_file(object_name)
+                found_extension = ext
+                break
+            except Exception:
+                continue
+
+        if logo_data is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Logo not found"
+            )
+
+        content_type = content_type_map.get(found_extension.lower(), 'application/octet-stream')
+        filename = f"logo-{tenant_id}{found_extension}"
+
         return StreamingResponse(
             io.BytesIO(logo_data),
             media_type=content_type,
@@ -202,7 +211,7 @@ async def download_logo(
                 "Cache-Control": "no-cache"
             }
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -214,20 +223,12 @@ async def download_logo(
 
 def _serve_tenant_logo(tenant_id: str, db: Session) -> Response:
     """Helper function to serve tenant logo from MinIO storage"""
-    settings_service = SettingsService(db)
-    settings = settings_service.get_tenant_settings(tenant_id)
+    from ..services.storage_service import StorageService
 
-    if not settings or not settings.company_logo_object_name:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Logo not found"
-        )
+    storage_service = StorageService()
 
-    # Download logo from storage and serve it
-    logo_data = settings_service.storage_service.download_file(settings.company_logo_object_name)
-
-    # Determine content type based on file extension
-    _, ext = os.path.splitext(settings.company_logo_object_name)
+    # Try common logo extensions in order of preference
+    logo_extensions = ['.png', '.jpg', '.jpeg', '.webp', '.svg']
     content_type_map = {
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
@@ -235,13 +236,42 @@ def _serve_tenant_logo(tenant_id: str, db: Session) -> Response:
         '.webp': 'image/webp',
         '.svg': 'image/svg+xml'
     }
-    content_type = content_type_map.get(ext.lower(), 'image/jpeg')
+
+    logo_data = None
+    found_extension = None
+
+    # Try to find logo with any of the supported extensions
+    for ext in logo_extensions:
+        try:
+            object_name = f"tenant_{tenant_id}/logos/logo{ext}"
+            logo_data = storage_service.download_file(object_name)
+            found_extension = ext
+            logger.info(
+                f"Successfully loaded logo for tenant {tenant_id}",
+                extra={"tenant_id": tenant_id, "object_name": object_name}
+            )
+            break
+        except Exception:
+            # Try next extension
+            continue
+
+    if logo_data is None:
+        logger.warning(
+            f"Logo not found for tenant {tenant_id}",
+            extra={"tenant_id": tenant_id, "tried_extensions": logo_extensions}
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Logo not found"
+        )
+
+    content_type = content_type_map.get(found_extension.lower(), 'image/jpeg')
 
     return Response(
         content=logo_data,
         media_type=content_type,
         headers={
-            "Cache-Control": "public, max-age=3600",  # Cache for 1 hour
+            "Cache-Control": "public, max-age=86400, immutable",  # Cache for 24 hours
             "ETag": f'"{tenant_id}-logo"'
         }
     )

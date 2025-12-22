@@ -7,6 +7,7 @@ Publishes usage events to the billing service when documents/websites are added 
 import json
 import os
 import time
+import threading
 from datetime import datetime
 from typing import Optional
 from functools import wraps
@@ -70,6 +71,18 @@ def _with_publish_retry(max_retries: int = 3, initial_delay: float = 0.5, backof
                             )
                             # Don't call the function if reconnection failed
                             # Just continue to next retry iteration
+                            delay = initial_delay * (backoff_factor ** (attempt - 1))
+                            time.sleep(delay)
+                            continue
+
+                        # Immediate validation after reconnection
+                        if not self._is_connected():
+                            logger.warning(
+                                f"Channel not available after reconnection for {method_name}, will retry",
+                                tenant_id=tenant_id,
+                                method=method_name,
+                                retry_attempt=attempt
+                            )
                             delay = initial_delay * (backoff_factor ** (attempt - 1))
                             time.sleep(delay)
                             continue
@@ -140,6 +153,9 @@ class UsageEventPublisher:
         self.connection = None
         self.channel = None
 
+        # Threading lock for connection management
+        self._connection_lock = threading.RLock()
+
         # Get RabbitMQ config from environment
         self.rabbitmq_host = os.environ.get("RABBITMQ_HOST", "localhost")
         self.rabbitmq_port = int(os.environ.get("RABBITMQ_PORT", "5672"))
@@ -158,118 +174,135 @@ class UsageEventPublisher:
             max_retries: Maximum number of connection attempts (default: 3)
             retry_delay: Delay in seconds between retries (default: 5)
         """
-        import time
+        with self._connection_lock:
+            import time
 
-        # Force close any stale connections to prevent EOF errors
-        if self.connection:
-            try:
-                if not self.connection.is_closed and self.channel and self.channel.is_open:
-                    # Connection and channel both exist and are open
+            # Force close any stale connections to prevent EOF errors
+            if self.connection:
+                try:
+                    if not self.connection.is_closed and self.channel and self.channel.is_open:
+                        # Connection and channel both exist and are open
+                        # Verify channel is actually usable by testing exchange accessibility
+                        try:
+                            self.channel.exchange_declare(
+                                exchange=self.usage_exchange,
+                                exchange_type="topic",
+                                durable=True,
+                                passive=True  # Just check existence, don't create
+                            )
+                            logger.debug("Existing channel is valid and exchange is declared")
+                            return  # Channel is confirmed valid
+                        except Exception as e:
+                            logger.warning(
+                                f"Existing channel appears open but is not usable: {e}. "
+                                "Will recreate channel."
+                            )
+                            # Fall through to recreate channel
+                    # Connection exists but is closed, clean it up
+                    self.connection.close()
+                except Exception as e:
+                    logger.warning(f"Error checking/closing stale connection: {e}")
+                finally:
+                    # Always reset connection objects when reconnecting
+                    self.connection = None
+                    self.channel = None
+
+            retry_count = 0
+            while retry_count < max_retries:
+                try:
+                    credentials = pika.PlainCredentials(
+                        self.rabbitmq_user,
+                        self.rabbitmq_password
+                    )
+                    parameters = pika.ConnectionParameters(
+                        host=self.rabbitmq_host,
+                        port=self.rabbitmq_port,
+                        virtual_host=self.rabbitmq_vhost,
+                        credentials=credentials,
+                        heartbeat=600,
+                        blocked_connection_timeout=300
+                    )
+
+                    self.connection = pika.BlockingConnection(parameters)
+                    self.channel = self.connection.channel()
+
+                    # Declare usage exchange (idempotent)
+                    self.channel.exchange_declare(
+                        exchange=self.usage_exchange,
+                        exchange_type="topic",
+                        durable=True
+                    )
+
+                    # Log successful connection
+                    logger.info(
+                        "✓ Successfully connected to RabbitMQ usage event publisher",
+                        host=self.rabbitmq_host,
+                        port=self.rabbitmq_port,
+                        exchange=self.usage_exchange
+                    )
+
+                    # Verify and log connection state
+                    if self._is_connected():
+                        logger.info("✓ RabbitMQ connection verified: channel is open and ready")
+                    else:
+                        logger.error("✗ RabbitMQ connection verification FAILED: channel not available")
+
                     return
-                # Connection exists but is closed, clean it up
-                self.connection.close()
-            except Exception as e:
-                logger.warning(f"Error checking/closing stale connection: {e}")
-            finally:
-                # Always reset connection objects when reconnecting
-                self.connection = None
-                self.channel = None
 
-        retry_count = 0
-        while retry_count < max_retries:
-            try:
-                credentials = pika.PlainCredentials(
-                    self.rabbitmq_user,
-                    self.rabbitmq_password
-                )
-                parameters = pika.ConnectionParameters(
-                    host=self.rabbitmq_host,
-                    port=self.rabbitmq_port,
-                    virtual_host=self.rabbitmq_vhost,
-                    credentials=credentials,
-                    heartbeat=600,
-                    blocked_connection_timeout=300
-                )
+                except AMQPConnectionError as e:
+                    retry_count += 1
+                    self.connection = None
+                    self.channel = None
 
-                self.connection = pika.BlockingConnection(parameters)
-                self.channel = self.connection.channel()
+                    error_msg = str(e) if str(e) else repr(e)
 
-                # Declare usage exchange (idempotent)
-                self.channel.exchange_declare(
-                    exchange=self.usage_exchange,
-                    exchange_type="topic",
-                    durable=True
-                )
+                    if retry_count >= max_retries:
+                        logger.error(
+                            f"Failed to connect usage publisher to RabbitMQ after {max_retries} attempts",
+                            host=self.rabbitmq_host,
+                            port=self.rabbitmq_port,
+                            error=error_msg
+                        )
+                        raise
 
-                # Log successful connection
-                logger.info(
-                    "✓ Successfully connected to RabbitMQ usage event publisher",
-                    host=self.rabbitmq_host,
-                    port=self.rabbitmq_port,
-                    exchange=self.usage_exchange
-                )
-
-                # Verify and log connection state
-                if self._is_connected():
-                    logger.info("✓ RabbitMQ connection verified: channel is open and ready")
-                else:
-                    logger.error("✗ RabbitMQ connection verification FAILED: channel not available")
-
-                return
-
-            except AMQPConnectionError as e:
-                retry_count += 1
-                self.connection = None
-                self.channel = None
-
-                error_msg = str(e) if str(e) else repr(e)
-
-                if retry_count >= max_retries:
-                    logger.error(
-                        f"Failed to connect usage publisher to RabbitMQ after {max_retries} attempts",
+                    logger.warning(
+                        f"Failed to connect usage publisher (attempt {retry_count}/{max_retries}): {error_msg}. "
+                        f"Retrying in {retry_delay} seconds...",
                         host=self.rabbitmq_host,
-                        port=self.rabbitmq_port,
-                        error=error_msg
+                        port=self.rabbitmq_port
                     )
-                    raise
+                    time.sleep(retry_delay)
 
-                logger.warning(
-                    f"Failed to connect usage publisher (attempt {retry_count}/{max_retries}): {error_msg}. "
-                    f"Retrying in {retry_delay} seconds...",
-                    host=self.rabbitmq_host,
-                    port=self.rabbitmq_port
-                )
-                time.sleep(retry_delay)
+                except Exception as e:
+                    retry_count += 1
+                    self.connection = None
+                    self.channel = None
 
-            except Exception as e:
-                retry_count += 1
-                self.connection = None
-                self.channel = None
+                    error_msg = str(e) if str(e) else repr(e)
 
-                error_msg = str(e) if str(e) else repr(e)
+                    if retry_count >= max_retries:
+                        logger.error(
+                            f"Unexpected error connecting usage publisher after {max_retries} attempts",
+                            host=self.rabbitmq_host,
+                            port=self.rabbitmq_port,
+                            error=error_msg
+                        )
+                        raise
 
-                if retry_count >= max_retries:
-                    logger.error(
-                        f"Unexpected error connecting usage publisher after {max_retries} attempts",
+                    logger.warning(
+                        f"Unexpected error connecting usage publisher (attempt {retry_count}/{max_retries}): {error_msg}. "
+                        f"Retrying in {retry_delay} seconds...",
                         host=self.rabbitmq_host,
-                        port=self.rabbitmq_port,
-                        error=error_msg
+                        port=self.rabbitmq_port
                     )
-                    raise
-
-                logger.warning(
-                    f"Unexpected error connecting usage publisher (attempt {retry_count}/{max_retries}): {error_msg}. "
-                    f"Retrying in {retry_delay} seconds...",
-                    host=self.rabbitmq_host,
-                    port=self.rabbitmq_port
-                )
-                time.sleep(retry_delay)
+                    time.sleep(retry_delay)
 
     def close(self):
         """Close RabbitMQ connection"""
-        if self.connection and self.connection.is_open:
-            self.connection.close()
-            logger.info("Closed RabbitMQ usage publisher connection")
+        with self._connection_lock:
+            if self.connection and self.connection.is_open:
+                self.connection.close()
+                logger.info("Closed RabbitMQ usage publisher connection")
 
     def _is_connected(self) -> bool:
         """
@@ -297,35 +330,48 @@ class UsageEventPublisher:
         Returns:
             True if reconnection succeeded, False otherwise
         """
-        # Save old connection references
-        old_connection = self.connection
-        old_channel = self.channel
+        with self._connection_lock:
+            # Save old connection references
+            old_connection = self.connection
+            old_channel = self.channel
 
-        # Reset to None to signal we're reconnecting
-        self.connection = None
-        self.channel = None
+            # Reset to None to signal we're reconnecting
+            self.connection = None
+            self.channel = None
 
-        try:
-            # Attempt fresh connection
-            self.connect()
+            try:
+                # Attempt fresh connection (will reacquire lock, but RLock allows reentrant)
+                self.connect()
 
-            # Verify connection succeeded
-            if not self._is_connected():
-                logger.error("Force reconnection failed: connection not valid after connect()")
-                return False
+                # Verify connection succeeded
+                if not self._is_connected():
+                    logger.error("Force reconnection failed: connection not valid after connect()")
+                    return False
 
-            # Success - close old connection if it exists
-            if old_connection:
+                # Additional test: verify exchange is accessible
                 try:
-                    old_connection.close()
+                    self.channel.exchange_declare(
+                        exchange=self.usage_exchange,
+                        exchange_type="topic",
+                        durable=True,
+                        passive=True  # Just check existence
+                    )
                 except Exception as e:
-                    logger.debug(f"Error closing old connection: {e}")
+                    logger.error(f"Force reconnection failed: channel exists but exchange is not accessible: {e}")
+                    return False
 
-            logger.info("Forced fresh RabbitMQ reconnection successful")
-            return True
+                # Success - close old connection if it exists
+                if old_connection:
+                    try:
+                        old_connection.close()
+                    except Exception as e:
+                        logger.debug(f"Error closing old connection: {e}")
 
-        except Exception as e:
-            logger.error(f"Force reconnection failed with exception: {e}", exc_info=True)
+                logger.info("Forced fresh RabbitMQ reconnection successful")
+                return True
+
+            except Exception as e:
+                logger.error(f"Force reconnection failed with exception: {e}", exc_info=True)
 
             # Reconnection failed - restore old connection if it was still valid
             if old_connection and old_channel:
