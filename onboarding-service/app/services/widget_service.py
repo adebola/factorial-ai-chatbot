@@ -236,23 +236,51 @@ class WidgetService:
     // Chat Widget Class
     class FactorialChatWidget {
         constructor() {
-            this.isOpen = false;
-            this.socket = null;
-            this.messages = [];
-            this.isConnected = false;
-            this.chatContainer = null;
-            this.messagesContainer = null;
-            this.inputField = null;
-            this.sessionId = null;
-            this.feedbackSubmitted = new Set();
+            console.log('FactorialChatWidget: Constructor called');
 
-            this.init();
+            // Prevent multiple instances
+            if (window.__factorialChatWidgetInstance) {
+                console.error('FactorialChatWidget: Instance already exists! Returning existing instance.');
+                return window.__factorialChatWidgetInstance;
+            }
+
+            try {
+                this.isOpen = false;
+                this.socket = null;
+                this.messages = [];
+                this.isConnected = false;
+                this.chatContainer = null;
+                this.messagesContainer = null;
+                this.inputField = null;
+                this.sessionId = null;
+                this.feedbackSubmitted = new Set();
+
+                this.init();
+
+                // Store instance globally
+                window.__factorialChatWidgetInstance = this;
+                console.log('FactorialChatWidget: Initialization complete');
+            } catch (error) {
+                console.error('FactorialChatWidget: Initialization failed:', error);
+                throw error;
+            }
         }
         
         init() {
-            this.injectCSS();
-            this.createWidget();
-            this.attachEventListeners();
+            console.log('FactorialChatWidget: Init started');
+            try {
+                this.injectCSS();
+                console.log('FactorialChatWidget: CSS injected');
+
+                this.createWidget();
+                console.log('FactorialChatWidget: Widget created');
+
+                this.attachEventListeners();
+                console.log('FactorialChatWidget: Event listeners attached');
+            } catch (error) {
+                console.error('FactorialChatWidget: Init failed:', error);
+                throw error;
+            }
         }
         
         injectCSS() {
@@ -280,7 +308,8 @@ class WidgetService:
                     border-radius: 50%;
                     background: linear-gradient(45deg, ${CONFIG.colors.primary}, ${CONFIG.colors.secondary});
                     border: none;
-                    cursor: pointer;
+                    cursor: pointer !important;
+                    pointer-events: auto !important;
                     box-shadow: 0 4px 12px rgba(93, 62, 193, 0.3);
                     transition: all 0.3s ease;
                     display: flex;
@@ -670,10 +699,17 @@ class WidgetService:
         }
         
         createWidget() {
+            // Check if widget already exists in DOM
+            const existingWidget = document.getElementById(CONFIG.widgetId);
+            if (existingWidget) {
+                console.error('FactorialChatWidget: Widget already exists in DOM, removing duplicate');
+                existingWidget.remove();
+            }
+
             const widgetContainer = document.createElement('div');
             widgetContainer.className = 'factorial-chat-widget';
             widgetContainer.id = CONFIG.widgetId;
-            
+
             widgetContainer.innerHTML = `
                 <button class="factorial-chat-button" id="factorial-chat-toggle" title="${CONFIG.hoverText}">
                     {% if logo_info.type == 'url' and logo_info.source %}
@@ -732,44 +768,90 @@ class WidgetService:
             const closeButton = document.getElementById('factorial-chat-close');
             const sendButton = document.getElementById('factorial-chat-send');
             const inputField = this.inputField;
-            
-            toggleButton.addEventListener('click', () => this.toggleChat());
-            closeButton.addEventListener('click', () => this.closeChat());
-            sendButton.addEventListener('click', () => this.sendMessage());
-            
+
+            // Validate all required elements exist
+            if (!toggleButton) {
+                console.error('FactorialChatWidget: Toggle button not found!');
+                return;
+            }
+            if (!closeButton) {
+                console.error('FactorialChatWidget: Close button not found!');
+                return;
+            }
+            if (!sendButton) {
+                console.error('FactorialChatWidget: Send button not found!');
+                return;
+            }
+            if (!inputField) {
+                console.error('FactorialChatWidget: Input field not found!');
+                return;
+            }
+
+            console.log('FactorialChatWidget: All elements found, attaching listeners...');
+
+            // Attach click handler for toggle button
+            toggleButton.addEventListener('click', (e) => {
+                console.log('FactorialChatWidget: Toggle button clicked');
+                e.stopPropagation();
+                e.preventDefault();
+                this.toggleChat();
+            }, false);
+
+            closeButton.addEventListener('click', (e) => {
+                console.log('FactorialChatWidget: Close button clicked');
+                e.stopPropagation();
+                e.preventDefault();
+                this.closeChat();
+            });
+
+            sendButton.addEventListener('click', (e) => {
+                console.log('FactorialChatWidget: Send button clicked');
+                e.stopPropagation();
+                e.preventDefault();
+                this.sendMessage();
+            });
+
             inputField.addEventListener('input', (e) => {
                 sendButton.disabled = !e.target.value.trim();
             });
-            
+
             inputField.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey && e.target.value.trim()) {
                     e.preventDefault();
                     this.sendMessage();
                 }
             });
+
+            console.log('FactorialChatWidget: All event listeners attached successfully');
         }
         
         toggleChat() {
+            console.log('FactorialChatWidget: toggleChat() called, current state:', this.isOpen ? 'open' : 'closed');
             if (this.isOpen) {
                 this.closeChat();
             } else {
                 this.openChat();
             }
         }
-        
+
         openChat() {
+            console.log('FactorialChatWidget: openChat() called');
             this.isOpen = true;
             this.chatContainer.classList.add('open');
             this.inputField.focus();
-            
+
             if (!this.isConnected) {
+                console.log('FactorialChatWidget: Not connected, initializing WebSocket...');
                 this.connectWebSocket();
             }
+            console.log('FactorialChatWidget: Chat window opened');
         }
-        
+
         closeChat() {
+            console.log('FactorialChatWidget: closeChat() called');
             this.isOpen = false;
             this.chatContainer.classList.remove('open');
+            console.log('FactorialChatWidget: Chat window closed');
         }
         
         connectWebSocket() {
@@ -1067,12 +1149,23 @@ class WidgetService:
         }
     }
 
-    // Initialize widget when DOM is ready
+    // Initialize widget when DOM is ready (Singleton pattern)
+    if (window.__factorialChatWidgetInitialized) {
+        console.warn('FactorialChatWidget: Already initialized, skipping duplicate initialization');
+        return;
+    }
+
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
+            if (window.__factorialChatWidgetInitialized) {
+                console.warn('FactorialChatWidget: Already initialized, skipping duplicate initialization');
+                return;
+            }
+            window.__factorialChatWidgetInitialized = true;
             new FactorialChatWidget();
         });
     } else {
+        window.__factorialChatWidgetInitialized = true;
         new FactorialChatWidget();
     }
 })();
