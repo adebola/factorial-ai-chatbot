@@ -28,6 +28,7 @@ spring:
                 allowedOriginPatterns:
                   - https://app.chatcraft.cc
                   - https://factorai-370af.web.app
+                  - https://www.emobilespecialisthospital.health
                 allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                 allowedHeaders: "*"
                 exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
