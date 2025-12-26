@@ -137,10 +137,16 @@ class RabbitMQConsumer:
             to_name = message_data.get("toName") or message_data.get("to_name")
             html_content = message_data.get("htmlContent") or message_data.get("html_content")
             text_content = message_data.get("textContent") or message_data.get("text_content")
+            attachments = message_data.get("attachments")
 
             logger.info(f"Sending Mail for Tenant {tenant_id}")
             logger.info(f"Sending mail to {to_email}")
-            logger.info(f"Sending content {html_content}")
+
+            if attachments:
+                logger.info(f"Email has {len(attachments)} attachment(s)")
+                for att in attachments:
+                    logger.info(f"  - {att.get('filename', 'unknown')} ({att.get('content_type', 'unknown')})")
+            # logger.info(f"Sending content {html_content}")
 
             # Set request context
             set_request_context(
@@ -169,6 +175,7 @@ class RabbitMQConsumer:
                 html_content=html_content,
                 text_content=text_content,
                 to_name=to_name,
+                attachments=attachments,
                 template_data=message_data.get("templateData") or message_data.get("template_data")
             )
 
