@@ -273,8 +273,8 @@ async def payment_callback_status(
         else:
             return {
                 "success": False,
-                "status": payment.status.value.lower(),
-                "message": f"Payment status: {payment.status.value}",
+                "status": payment.status.lower(),  # Already a string from DB
+                "message": f"Payment status: {payment.status}",
                 "reference": reference
             }
 
@@ -402,7 +402,7 @@ async def get_payment_methods(
             "payment_methods": [
                 {
                     "id": pm.id,
-                    "type": pm.type.value,
+                    "type": pm.type,  # Already a string from DB
                     "is_default": pm.is_default,
                     "card_last_four": pm.card_last_four,
                     "card_brand": pm.card_brand,
@@ -510,11 +510,11 @@ async def get_payment_history(
                     "subscription_id": payment.subscription_id,
                     "amount": float(payment.amount),
                     "currency": payment.currency,
-                    "status": payment.status.value,
-                    "payment_method": payment.payment_method.value if payment.payment_method else None,
+                    "status": payment.status,  # Already a string from DB
+                    "payment_method": payment.payment_method,  # Already a string from DB
                     "paystack_reference": payment.paystack_reference,
-                    "transaction_id": payment.transaction_id,
-                    "paid_at": payment.paid_at.isoformat() if payment.paid_at else None,
+                    "transaction_id": payment.paystack_transaction_id,  # Correct attribute name
+                    "paid_at": payment.processed_at.isoformat() if payment.processed_at else None,  # Correct attribute name
                     "created_at": payment.created_at.isoformat(),
                     "failure_reason": payment.failure_reason
                 }

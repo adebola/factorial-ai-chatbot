@@ -218,7 +218,15 @@ class Invoice(Base):
     # Invoice data
     line_items = Column(JSON, default=[])  # Detailed billing items
     notes = Column(Text, nullable=True)
-    
+
+    # Document type and payment relationship
+    document_type = Column(String(20), default="invoice", nullable=False)  # invoice, refund, credit_memo
+    related_payment_id = Column(String(36), nullable=True, index=True)
+
+    # PDF generation tracking
+    pdf_generated_at = Column(DateTime(timezone=True), nullable=True)
+    pdf_generation_error = Column(Text, nullable=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

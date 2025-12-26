@@ -553,7 +553,7 @@ async def get_current_subscription(
                     "id": payment.id,
                     "amount": str(payment.amount),
                     "status": payment.status,
-                    "transaction_type": payment.transaction_type.value,
+                    "transaction_type": payment.transaction_type,  # Already a string from DB
                     "created_at": payment.created_at.isoformat(),
                     "processed_at": payment.processed_at.isoformat() if payment.processed_at else None
                 }

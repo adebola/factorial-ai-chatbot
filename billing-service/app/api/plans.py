@@ -1122,6 +1122,49 @@ async def switch_tenant_plan(
                         f"tenant={tenant_id}, amount={prorated_amount}, reference={plan_switch.payment_reference}"
                     )
 
+                    # Generate invoice for upgrade payment
+                    try:
+                        from ..services.invoice_service import InvoiceService
+                        from ..services.pdf_generator import PDFGenerator
+                        from ..services.email_publisher import email_publisher
+
+                        invoice_service = InvoiceService(db)
+                        invoice, pdf_bytes = invoice_service.create_invoice_with_pdf(
+                            upgrade_payment,
+                            document_type="invoice"
+                        )
+
+                        if invoice:
+                            logger.info(f"Created invoice {invoice.invoice_number} for upgrade payment {upgrade_payment.id}")
+
+                            # Send invoice email with PDF attachment
+                            pdf_attachment = None
+                            if pdf_bytes:
+                                pdf_gen = PDFGenerator()
+                                pdf_attachment = pdf_gen.generate_attachment_dict(pdf_bytes, invoice.invoice_number)
+                                logger.info(f"Generated PDF attachment for invoice {invoice.invoice_number}")
+
+                            email_publisher.publish_invoice_email(
+                                tenant_id=existing_subscription.tenant_id,
+                                to_email=claims.email,
+                                to_name=claims.full_name or "Valued Customer",
+                                invoice_number=invoice.invoice_number,
+                                total_amount=float(invoice.total_amount),
+                                currency=invoice.currency,
+                                due_date=invoice.due_date,
+                                status=invoice.status,
+                                pdf_attachment=pdf_attachment
+                            )
+                            logger.info(f"Sent invoice email for {invoice.invoice_number} to {claims.email}")
+                        else:
+                            logger.error(f"Failed to create invoice for upgrade payment {upgrade_payment.id}")
+
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to generate invoice for upgrade payment {upgrade_payment.id}: {str(e)}",
+                            exc_info=True
+                        )
+
             # Switch subscription plan
             switch_result = subscription_service.switch_subscription_plan(
                 subscription_id=existing_subscription.id,

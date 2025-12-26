@@ -10,7 +10,7 @@ Handles:
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
@@ -22,6 +22,7 @@ from ..models.subscription import (
 )
 from ..models.plan import Plan
 from ..core.logging_config import get_logger
+from ..utils.logo_utils import get_logo_data_url
 
 logger = get_logger("invoice-service")
 
@@ -432,6 +433,9 @@ class InvoiceService:
             </tr>
             """
 
+        # Get logo data URL for PDF (base64-embedded)
+        logo_data_url = get_logo_data_url("chatcraft-logo.png")
+
         # Generate HTML
         html = f"""
         <!DOCTYPE html>
@@ -442,10 +446,11 @@ class InvoiceService:
             <style>
                 body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                 .invoice-container {{ max-width: 800px; margin: 0 auto; padding: 20px; }}
-                .header {{ display: flex; justify-content: space-between; margin-bottom: 30px; }}
+                .header {{ display: flex; justify-content: space-between; margin-bottom: 30px; align-items: center; }}
                 .company-info {{ }}
                 .invoice-info {{ text-align: right; }}
-                .invoice-title {{ font-size: 32px; font-weight: bold; color: #5D3EC1; margin-bottom: 10px; }}
+                .invoice-title {{ font-size: 32px; font-weight: bold; color: #2B55FF; margin-bottom: 10px; }}
+                .logo {{ max-width: 60px; height: auto; margin-bottom: 8px; }}
                 .status-badge {{ display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 12px; font-weight: bold; }}
                 .status-completed {{ background-color: #4CAF50; color: white; }}
                 .status-pending {{ background-color: #FF9800; color: white; }}
@@ -454,7 +459,8 @@ class InvoiceService:
                 th {{ background-color: #f5f5f5; padding: 12px; text-align: left; border-bottom: 2px solid #ddd; }}
                 .totals {{ margin-top: 20px; text-align: right; }}
                 .totals-row {{ margin: 10px 0; }}
-                .grand-total {{ font-size: 20px; font-weight: bold; color: #5D3EC1; }}
+                .grand-total {{ font-size: 20px; font-weight: bold; color: #2B55FF; }}
+                .highlight-bar {{ background-color: #CDF547; height: 4px; width: 60px; margin: 10px 0; }}
                 .footer {{ margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #888; font-size: 12px; }}
             </style>
         </head>
@@ -463,10 +469,12 @@ class InvoiceService:
                 <!-- Header -->
                 <div class="header">
                     <div class="company-info">
+                        {f'<img src="{logo_data_url}" alt="ChatCraft Logo" class="logo">' if logo_data_url else ''}
+                        <div class="highlight-bar"></div>
                         <div class="invoice-title">ChatCraft</div>
                         <p>
-                            support@chatcraft.com<br>
-                            www.chatcraft.com
+                            support@chatcraft.cc<br>
+                            https://www.chatcraft.cc
                         </p>
                     </div>
                     <div class="invoice-info">
@@ -491,7 +499,7 @@ class InvoiceService:
                 </div>
 
                 <!-- Billing Period -->
-                <div style="margin-bottom: 20px; padding: 15px; background-color: #f9f9f9; border-left: 4px solid #5D3EC1;">
+                <div style="margin-bottom: 20px; padding: 15px; background-color: #f9f9f9; border-left: 4px solid #2B55FF;">
                     <strong>Billing Period:</strong> {invoice.period_start.strftime('%B %d, %Y')} - {invoice.period_end.strftime('%B %d, %Y')}
                 </div>
 
@@ -530,7 +538,10 @@ class InvoiceService:
                 <!-- Footer -->
                 <div class="footer">
                     <p>Thank you for your business!</p>
-                    <p>This is a computer-generated invoice. For questions, contact support@chatcraft.com</p>
+                    <p>This is a computer-generated invoice. For questions, contact support@chatcraft.cc</p>
+                    <p style="margin-top: 10px; color: #2B55FF;">
+                        <strong>ChatCraft</strong> - AI-Powered Chat Solutions
+                    </p>
                 </div>
             </div>
         </body>
@@ -538,3 +549,98 @@ class InvoiceService:
         """
 
         return html
+
+    def generate_invoice_pdf(self, invoice_id: str) -> Tuple[Optional[bytes], Optional[str]]:
+        """
+        Generate PDF for an existing invoice.
+
+        Args:
+            invoice_id: ID of the invoice to generate PDF for
+
+        Returns:
+            Tuple of (pdf_bytes, error_message)
+            - On success: (pdf_bytes, None)
+            - On failure: (None, error_message)
+        """
+        from datetime import datetime, timezone
+        from .pdf_generator import PDFGenerator
+
+        try:
+            # Get invoice from database
+            invoice = self.db.query(Invoice).filter(Invoice.id == invoice_id).first()
+            if not invoice:
+                return None, "Invoice not found"
+
+            # Generate HTML
+            html_content = self.generate_invoice_html(invoice_id)
+
+            # Generate PDF
+            pdf_generator = PDFGenerator()
+            pdf_bytes, error = pdf_generator.generate_invoice_pdf(
+                html_content=html_content,
+                invoice_number=invoice.invoice_number
+            )
+
+            # Update invoice record
+            if pdf_bytes:
+                invoice.pdf_generated_at = datetime.now(timezone.utc)
+                invoice.pdf_generation_error = None
+            else:
+                invoice.pdf_generation_error = error
+
+            self.db.commit()
+
+            return pdf_bytes, error
+
+        except Exception as e:
+            logger.error(f"Failed to generate PDF for invoice {invoice_id}: {str(e)}", exc_info=True)
+            return None, f"PDF generation failed: {str(e)}"
+
+    def create_invoice_with_pdf(
+        self,
+        payment: Payment,
+        document_type: str = "invoice"
+    ) -> Tuple[Optional[Invoice], Optional[bytes]]:
+        """
+        Create an invoice from a payment and generate its PDF in one operation.
+
+        Args:
+            payment: Payment record to create invoice from
+            document_type: Type of document (invoice, refund, credit_memo)
+
+        Returns:
+            Tuple of (invoice, pdf_bytes)
+            - On success: (invoice, pdf_bytes) or (invoice, None) if PDF generation failed
+            - On failure: (None, None)
+        """
+        from .pdf_generator import PDFGenerator
+
+        try:
+            # Create invoice from payment
+            invoice = self.create_invoice_from_payment(payment)
+
+            if not invoice:
+                logger.error(f"Failed to create invoice from payment {payment.id}")
+                return None, None
+
+            # Update document type and payment relationship
+            invoice.document_type = document_type
+            invoice.related_payment_id = payment.id
+            self.db.commit()
+
+            # Generate PDF
+            pdf_bytes, error = self.generate_invoice_pdf(invoice.id)
+
+            if error:
+                logger.warning(
+                    f"Invoice {invoice.invoice_number} created but PDF generation failed: {error}"
+                )
+
+            return invoice, pdf_bytes
+
+        except Exception as e:
+            logger.error(
+                f"Failed to create invoice with PDF for payment {payment.id}: {str(e)}",
+                exc_info=True
+            )
+            return None, None

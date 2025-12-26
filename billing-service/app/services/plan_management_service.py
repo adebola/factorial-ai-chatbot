@@ -81,11 +81,11 @@ class PlanManagementService:
 
         # Get new plan pricing for current billing cycle
         if subscription.billing_cycle == BillingCycle.MONTHLY:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
         elif subscription.billing_cycle == BillingCycle.YEARLY:
-            new_amount = new_plan.price_yearly
+            new_amount = new_plan.yearly_plan_cost
         else:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
 
         new_daily_rate = new_amount / Decimal(cycle_days)
 
@@ -161,11 +161,11 @@ class PlanManagementService:
 
         # Determine new amount based on billing cycle
         if subscription.billing_cycle == BillingCycle.MONTHLY:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
         elif subscription.billing_cycle == BillingCycle.YEARLY:
-            new_amount = new_plan.price_yearly
+            new_amount = new_plan.yearly_plan_cost
         else:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
 
         # Verify this is actually an upgrade
         if new_amount <= subscription.amount:
@@ -281,11 +281,11 @@ class PlanManagementService:
 
         # Determine new amount
         if subscription.billing_cycle == BillingCycle.MONTHLY:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
         elif subscription.billing_cycle == BillingCycle.YEARLY:
-            new_amount = new_plan.price_yearly
+            new_amount = new_plan.yearly_plan_cost
         else:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
 
         # Verify this is actually a downgrade
         if new_amount >= subscription.amount:
@@ -405,11 +405,11 @@ class PlanManagementService:
 
         # Determine new amount
         if subscription.billing_cycle == BillingCycle.MONTHLY:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
         elif subscription.billing_cycle == BillingCycle.YEARLY:
-            new_amount = new_plan.price_yearly
+            new_amount = new_plan.yearly_plan_cost
         else:
-            new_amount = new_plan.price_monthly
+            new_amount = new_plan.monthly_plan_cost
 
         # Determine if upgrade or downgrade
         is_upgrade = new_amount > subscription.amount
@@ -589,9 +589,9 @@ class PlanManagementService:
 
                 # Update amount based on billing cycle
                 if subscription.billing_cycle == BillingCycle.MONTHLY:
-                    subscription.amount = new_plan.price_monthly
+                    subscription.amount = new_plan.monthly_plan_cost
                 elif subscription.billing_cycle == BillingCycle.YEARLY:
-                    subscription.amount = new_plan.price_yearly
+                    subscription.amount = new_plan.yearly_plan_cost
 
                 # Clear pending change
                 subscription.pending_plan_id = None

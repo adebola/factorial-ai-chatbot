@@ -278,13 +278,23 @@ class SubscriptionService:
                     plan_name=plan_name
                 )
 
-                # Create invoice automatically
+                # Create invoice with PDF automatically
                 from ..services.invoice_service import InvoiceService
+                from ..services.pdf_generator import PDFGenerator
                 invoice_service = InvoiceService(self.db)
-                invoice = invoice_service.create_invoice_from_payment(payment)
+                invoice, pdf_bytes = invoice_service.create_invoice_with_pdf(
+                    payment,
+                    document_type="invoice"
+                )
 
-                # Send invoice email
+                # Send invoice email with PDF attachment
                 if invoice:
+                    pdf_attachment = None
+                    if pdf_bytes:
+                        pdf_gen = PDFGenerator()
+                        pdf_attachment = pdf_gen.generate_attachment_dict(pdf_bytes, invoice.invoice_number)
+                        logger.info(f"Generated PDF attachment for invoice {invoice.invoice_number}")
+
                     email_publisher.publish_invoice_email(
                         tenant_id=subscription.tenant_id,
                         to_email=subscription.user_email,
@@ -293,7 +303,8 @@ class SubscriptionService:
                         total_amount=float(invoice.total_amount),
                         currency=invoice.currency,
                         due_date=invoice.due_date,
-                        status=invoice.status
+                        status=invoice.status,
+                        pdf_attachment=pdf_attachment
                     )
 
                 logger.info(

@@ -15,6 +15,7 @@ from typing import Optional
 from datetime import datetime, timezone
 import pika
 from pika.exceptions import AMQPConnectionError
+from ..utils.logo_utils import get_logo_data_url
 
 logger = logging.getLogger(__name__)
 
@@ -57,26 +58,43 @@ class EmailPublisher:
 
         logger.info("Email publisher initialized")
 
+    def _is_connection_valid(self) -> bool:
+        """
+        Verify that both connection and channel are valid and open.
+
+        Returns:
+            bool: True if both connection and channel are healthy, False otherwise
+        """
+        try:
+            return (
+                self.connection is not None
+                and self.channel is not None
+                and self.connection.is_open
+                and self.channel.is_open
+            )
+        except Exception:
+            return False
+
     def _connect(self) -> bool:
         """
-        Establish connection to RabbitMQ.
+        Establish connection to RabbitMQ with robust state management.
 
         Returns:
             bool: True if connection successful, False otherwise
         """
         try:
-            # Force close any stale connections to prevent EOF errors
+            # Check if BOTH connection and channel are valid
+            if self._is_connection_valid():
+                return True
+
+            # Force cleanup of any stale connection state
             if self.connection:
                 try:
                     if not self.connection.is_closed:
-                        # Connection exists and is open
-                        return True
-                    # Connection exists but is closed, clean it up
-                    self.connection.close()
+                        self.connection.close()
                 except Exception as e:
-                    logger.warning(f"Error checking/closing stale connection: {e}")
+                    logger.debug(f"Error closing stale connection: {e}")
                 finally:
-                    # Always reset connection objects when reconnecting
                     self.connection = None
                     self.channel = None
 
@@ -128,10 +146,11 @@ class EmailPublisher:
         subject: str,
         html_content: str,
         to_name: Optional[str] = None,
-        text_content: Optional[str] = None
+        text_content: Optional[str] = None,
+        attachments: Optional[list] = None
     ) -> bool:
         """
-        Publish email message to RabbitMQ for communications-service.
+        Publish email message to RabbitMQ for communications-service with automatic retry.
 
         Args:
             tenant_id: Tenant ID
@@ -140,63 +159,93 @@ class EmailPublisher:
             html_content: HTML email content
             to_name: Recipient name (optional)
             text_content: Plain text content (optional)
+            attachments: List of attachment dicts with filename, content (base64), content_type (optional)
 
         Returns:
             bool: True if published successfully, False otherwise
         """
-        try:
-            # Ensure connection
-            if not self._connect():
-                logger.error("Cannot publish email: RabbitMQ connection failed")
+        max_retries = 2
+
+        for attempt in range(max_retries):
+            try:
+                # Ensure connection is valid
+                if not self._connect():
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Connection failed (attempt {attempt + 1}/{max_retries}), retrying...")
+                        continue
+                    logger.error("Cannot publish email: RabbitMQ connection failed after retries")
+                    return False
+
+                # Build email message in communications-service format
+                message = {
+                    "tenant_id": tenant_id,
+                    "to_email": to_email,
+                    "subject": subject,
+                    "html_content": html_content,
+                    "message_id": str(uuid.uuid4()),
+                    "queued_at": datetime.now(timezone.utc).isoformat()
+                }
+
+                # Add optional fields
+                if to_name:
+                    message["to_name"] = to_name
+                if text_content:
+                    message["text_content"] = text_content
+                if attachments:
+                    message["attachments"] = attachments
+
+                # Publish to communications exchange
+                self.channel.basic_publish(
+                    exchange=self.email_exchange,
+                    routing_key=self.email_routing_key,
+                    body=json.dumps(message),
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,  # Persistent message
+                        content_type="application/json"
+                    )
+                )
+
+                logger.info(
+                    f"📧 Published email to communications-service: {subject}",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "recipient": to_email,
+                        "subject": subject
+                    }
+                )
+                return True
+
+            except (AMQPConnectionError, AttributeError) as e:
+                # Reset connection state on connection-related errors
+                self.connection = None
+                self.channel = None
+
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Publish failed (attempt {attempt + 1}/{max_retries}): {e}, retrying...",
+                        extra={"tenant_id": tenant_id, "recipient": to_email}
+                    )
+                    continue
+                else:
+                    logger.error(
+                        f"Failed to publish email after {max_retries} attempts: {e}",
+                        extra={"tenant_id": tenant_id, "recipient": to_email},
+                        exc_info=True
+                    )
+                    return False
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to publish email: {e}",
+                    extra={
+                        "tenant_id": tenant_id,
+                        "recipient": to_email
+                    },
+                    exc_info=True
+                )
                 return False
 
-            # Build email message in communications-service format
-            message = {
-                "tenant_id": tenant_id,
-                "to_email": to_email,
-                "subject": subject,
-                "html_content": html_content,
-                "message_id": str(uuid.uuid4()),
-                "queued_at": datetime.now(timezone.utc).isoformat()
-            }
-
-            # Add optional fields
-            if to_name:
-                message["to_name"] = to_name
-            if text_content:
-                message["text_content"] = text_content
-
-            # Publish to communications exchange
-            self.channel.basic_publish(
-                exchange=self.email_exchange,
-                routing_key=self.email_routing_key,
-                body=json.dumps(message),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent message
-                    content_type="application/json"
-                )
-            )
-
-            logger.info(
-                f"📧 Published email to communications-service: {subject}",
-                extra={
-                    "tenant_id": tenant_id,
-                    "recipient": to_email,
-                    "subject": subject
-                }
-            )
-            return True
-
-        except Exception as e:
-            logger.error(
-                f"Failed to publish email: {e}",
-                extra={
-                    "tenant_id": tenant_id,
-                    "recipient": to_email
-                },
-                exc_info=True
-            )
-            return False
+        return False
 
     def publish_trial_expiring_email(
         self,
@@ -647,7 +696,8 @@ class EmailPublisher:
         total_amount: float,
         currency: str,
         due_date: datetime,
-        status: str
+        status: str,
+        pdf_attachment: Optional[dict] = None
     ) -> bool:
         """
         Send invoice notification email.
@@ -661,6 +711,7 @@ class EmailPublisher:
             currency: Currency code (NGN, USD, etc.)
             due_date: Invoice due date
             status: Invoice status (pending, completed, etc.)
+            pdf_attachment: Optional PDF attachment dict with filename, content, content_type
 
         Returns:
             True if email was published successfully, False otherwise
@@ -686,6 +737,9 @@ class EmailPublisher:
             status_text = f"Your invoice is ready. Please complete payment by {formatted_due_date}."
             status_color = "#FF9800"
 
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -697,7 +751,9 @@ class EmailPublisher:
         <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
             <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                 <!-- Header -->
-                <div style="background: linear-gradient(135deg, #5D3EC1 0%, #7B5FD9 100%); padding: 30px; text-align: center;">
+                <div style="background: linear-gradient(135deg, #2B55FF 0%, #1E3FCC 100%); padding: 30px; text-align: center; position: relative;">
+                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
                     <h1 style="color: #ffffff; margin: 0; font-size: 28px;">ChatCraft</h1>
                     <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Invoice Notification</p>
                 </div>
@@ -712,8 +768,8 @@ class EmailPublisher:
                     </div>
 
                     <!-- Invoice Details Box -->
-                    <div style="background-color: #f9f9f9; border-left: 4px solid #5D3EC1; padding: 20px; margin: 20px 0;">
-                        <h2 style="margin: 0 0 15px 0; color: #5D3EC1; font-size: 20px;">Invoice Details</h2>
+                    <div style="background-color: #f9f9f9; border-left: 4px solid #2B55FF; padding: 20px; margin: 20px 0;">
+                        <h2 style="margin: 0 0 15px 0; color: #2B55FF; font-size: 20px;">Invoice Details</h2>
                         <table style="width: 100%; border-collapse: collapse;">
                             <tr>
                                 <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Invoice Number:</strong></td>
@@ -721,7 +777,7 @@ class EmailPublisher:
                             </tr>
                             <tr>
                                 <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Amount:</strong></td>
-                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;"><strong style="font-size: 18px; color: #5D3EC1;">{formatted_amount}</strong></td>
+                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;"><strong style="font-size: 18px; color: #2B55FF;">{formatted_amount}</strong></td>
                             </tr>
                             <tr>
                                 <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Status:</strong></td>
@@ -731,9 +787,12 @@ class EmailPublisher:
                         </table>
                     </div>
 
-                    <!-- Action Button -->
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://chatcraft.com/invoices/{invoice_number}" style="display: inline-block; background-color: #5D3EC1; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">View Invoice</a>
+                    <!-- PDF Attachment Notice -->
+                    <div style="background-color: #E3F2FD; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0;">
+                        <p style="margin: 0; color: #1565C0; font-size: 14px;">
+                            📎 <strong>Invoice PDF Attached</strong><br>
+                            Your invoice is attached to this email as a PDF document. You can download and save it for your records.
+                        </p>
                     </div>
 
                     <!-- Additional Information -->
@@ -747,7 +806,7 @@ class EmailPublisher:
                     ''' if status != 'completed' else ''}
 
                     <p style="font-size: 14px; color: #666; margin-top: 30px;">
-                        You can view and download your invoice anytime from your ChatCraft dashboard.
+                        The invoice PDF is attached to this email for your records.
                     </p>
 
                     <p style="font-size: 14px; color: #666; margin-top: 20px;">
@@ -762,8 +821,15 @@ class EmailPublisher:
 
                 <!-- Footer -->
                 <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #eee;">
+                    <div style="height: 2px; width: 60px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 1px;"></div>
                     <p style="font-size: 12px; color: #888; margin: 0;">
                         This is an automated email. Please do not reply to this message.
+                    </p>
+                    <p style="font-size: 12px; color: #888; margin: 10px 0 0 0;">
+                        Need help? Contact us at <a href="mailto:support@chatcraft.cc" style="color: #2B55FF; text-decoration: none;">support@chatcraft.cc</a>
+                    </p>
+                    <p style="font-size: 12px; color: #888; margin: 5px 0 0 0;">
+                        Visit us at <a href="https://www.chatcraft.cc" style="color: #2B55FF; text-decoration: none;">www.chatcraft.cc</a>
                     </p>
                     <p style="font-size: 12px; color: #888; margin: 10px 0 0 0;">
                         © {datetime.now().year} ChatCraft. All rights reserved.
@@ -784,9 +850,10 @@ Invoice Details:
 - Status: {status.title()}
 {f'- Due Date: {formatted_due_date}' if status != 'completed' else ''}
 
-View your invoice online: https://chatcraft.com/invoices/{invoice_number}
+📎 INVOICE PDF ATTACHED
+Your invoice is attached to this email as a PDF document. You can download and save it for your records.
 
-You can view and download your invoice anytime from your ChatCraft dashboard.
+The invoice PDF is attached to this email for your records.
 
 If you have any questions about this invoice, please contact our support team.
 
@@ -794,13 +861,17 @@ Best regards,
 The ChatCraft Team
 """
 
+        # Prepare attachments list
+        attachments = [pdf_attachment] if pdf_attachment else None
+
         return self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
             subject=subject,
             html_content=html_content,
-            text_content=text_content
+            text_content=text_content,
+            attachments=attachments
         )
 
     def publish_usage_warning_email(
