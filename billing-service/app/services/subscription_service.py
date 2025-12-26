@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 
 from ..core.config import settings
+from ..core.logging_config import get_logger
 from ..models.plan import Plan
 from ..models.subscription import (
     Subscription, SubscriptionStatus, BillingCycle, Payment, PaymentStatus,
@@ -15,6 +16,8 @@ from ..models.subscription import (
 )
 from .paystack_service import PaystackService
 from .plan_service import PlanService
+
+logger = get_logger("subscription-service")
 
 
 class SubscriptionService:
@@ -170,7 +173,7 @@ class SubscriptionService:
         )
 
         if result["success"]:
-            # Create payment record
+            # Create a payment record
             payment = Payment(
                 subscription_id=subscription.id,
                 tenant_id=subscription.tenant_id,

@@ -4,6 +4,7 @@ from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 
 from ..core.database import get_db
 from ..models.subscription import (

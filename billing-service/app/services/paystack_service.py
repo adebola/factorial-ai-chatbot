@@ -1,18 +1,16 @@
 import hashlib
 import hmac
-import json
+import os
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timezone
 
 import httpx
-import asyncio
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from ..core.config import settings
-from ..models.subscription import Payment, PaymentStatus, PaystackWebhook
+from ..models.subscription import PaystackWebhook
 
 
 class PaystackService:
@@ -49,7 +47,7 @@ class PaystackService:
         if not reference:
             reference = f"factorialbot_{uuid.uuid4().hex[:16]}"
 
-        # Convert amount to kobo (Paystack requires smallest currency unit)
+        # Convert amount to kobo (Paystack requires the smallest currency unit)
         amount_in_kobo = int(amount * 100)
 
         payload = {
