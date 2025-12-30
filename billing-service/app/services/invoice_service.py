@@ -623,10 +623,16 @@ class InvoiceService:
                 logger.error(f"Failed to create invoice from payment {payment.id}")
                 return None, None
 
-            # Update document type and payment relationship
+            # Update document type and bidirectional payment-invoice relationship
             invoice.document_type = document_type
-            invoice.related_payment_id = payment.id
+            invoice.related_payment_id = payment.id  # Backward compatibility
+            payment.invoice_id = invoice.id  # NEW: Set bidirectional relationship
+
+            self.db.add(invoice)
+            self.db.add(payment)  # Ensure payment is updated
             self.db.commit()
+            self.db.refresh(invoice)
+            self.db.refresh(payment)
 
             # Generate PDF
             pdf_bytes, error = self.generate_invoice_pdf(invoice.id)

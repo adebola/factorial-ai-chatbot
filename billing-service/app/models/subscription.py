@@ -146,13 +146,17 @@ class Payment(Base):
     # Failure information
     failure_reason = Column(Text, nullable=True)
     failure_code = Column(String(50), nullable=True)
-    
+
+    # Invoice association
+    invoice_id = Column(String(36), ForeignKey("invoices.id"), nullable=True, index=True)
+
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     # Relationships
     subscription = relationship("Subscription", back_populates="payments")
+    invoice = relationship("Invoice", foreign_keys=[invoice_id], back_populates="payment")
 
 
 class PaymentMethodRecord(Base):
@@ -230,9 +234,10 @@ class Invoice(Base):
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     # Relationships
     subscription = relationship("Subscription", back_populates="invoices")
+    payment = relationship("Payment", foreign_keys="Payment.invoice_id", back_populates="invoice")
 
 
 class SubscriptionChange(Base):

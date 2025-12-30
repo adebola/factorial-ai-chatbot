@@ -503,7 +503,8 @@ async def get_payment_history(
                     "transaction_id": payment.paystack_transaction_id,  # Correct attribute name
                     "paid_at": payment.processed_at.isoformat() if payment.processed_at else None,  # Correct attribute name
                     "created_at": payment.created_at.isoformat(),
-                    "failure_reason": payment.failure_reason
+                    "failure_reason": payment.failure_reason,
+                    "invoice_id": payment.invoice_id  # NEW: Include invoice_id for invoice retrieval
                 }
                 for payment in payments
             ],
