@@ -235,7 +235,6 @@ def check_subscription_expirations_7day():
                     Subscription.status == SubscriptionStatus.ACTIVE,
                     Subscription.current_period_end >= start_of_day,
                     Subscription.current_period_end < end_of_day,
-                    Subscription.auto_renew == False,  # Only warn non-renewing subscriptions
                     Subscription.user_email.isnot(None)
                 )
             ).all()
@@ -322,14 +321,15 @@ def check_subscription_expired():
         db = SessionLocal()
 
         try:
-            # Find subscriptions that have expired (ended before now and not auto-renew)
+            # Find subscriptions that have expired (ended before now)
+            # NOTE: Mark ALL subscriptions as expired when period ends, regardless of auto_renew
+            # The auto_renew flag should control AUTOMATIC renewal behavior, not expiration detection
             now = datetime.now(timezone.utc)
 
             expired_subscriptions = db.query(Subscription).filter(
                 and_(
                     Subscription.status == SubscriptionStatus.ACTIVE,
                     Subscription.current_period_end < now,
-                    Subscription.auto_renew == False,
                     Subscription.user_email.isnot(None)
                 )
             ).all()

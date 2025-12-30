@@ -475,7 +475,11 @@ class EmailPublisher:
         tenant_id: str,
         to_email: str,
         to_name: str,
-        plan_name: str
+        plan_name: str,
+        renewal_amount: Optional[float] = None,
+        currency: Optional[str] = None,
+        new_period_end: Optional['datetime'] = None,
+        payment_reference: Optional[str] = None
     ) -> bool:
         """
         Publish subscription renewed notification.
@@ -485,23 +489,52 @@ class EmailPublisher:
             to_email: Recipient email
             to_name: Recipient name
             plan_name: Name of the subscription plan
+            renewal_amount: Amount charged for renewal (optional)
+            currency: Currency code (NGN, USD, etc.) (optional)
+            new_period_end: End of new billing period (optional)
+            payment_reference: Payment reference for tracking (optional)
 
         Returns:
             bool: True if published successfully
         """
+        # Format amount if provided
+        amount_html = ""
+        amount_text = ""
+        if renewal_amount is not None and currency:
+            symbol = "₦" if currency == "NGN" else "$" if currency == "USD" else currency
+            amount_html = f"<p>Renewal Amount: <strong>{symbol}{renewal_amount:,.2f}</strong></p>"
+            amount_text = f"Renewal Amount: {symbol}{renewal_amount:,.2f}\n"
+
+        # Format billing period if provided
+        period_html = ""
+        period_text = ""
+        if new_period_end:
+            period_html = f"<p>Your subscription is now active until <strong>{new_period_end.strftime('%B %d, %Y')}</strong></p>"
+            period_text = f"Your subscription is now active until {new_period_end.strftime('%B %d, %Y')}\n"
+
+        # Format reference if provided
+        reference_html = ""
+        reference_text = ""
+        if payment_reference:
+            reference_html = f"<p><small>Payment Reference: {payment_reference}</small></p>"
+            reference_text = f"\nPayment Reference: {payment_reference}"
+
         subject = f"Your ChatCraft {plan_name} Subscription Has Been Renewed"
         html_content = f"""
         <html>
         <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
             <h2>Hello {to_name},</h2>
             <p>Great news! Your ChatCraft <strong>{plan_name}</strong> subscription has been successfully renewed.</p>
+            {amount_html}
+            {period_html}
             <p>You can continue enjoying all the features and benefits of your subscription without interruption.</p>
+            {reference_html}
             <p>Thank you for being a valued ChatCraft customer!</p>
             <p>Best regards,<br>The ChatCraft Team</p>
         </body>
         </html>
         """
-        text_content = f"Hello {to_name},\n\nGreat news! Your ChatCraft {plan_name} subscription has been successfully renewed.\n\nYou can continue enjoying all the features and benefits of your subscription without interruption.\n\nThank you for being a valued ChatCraft customer!\n\nBest regards,\nThe ChatCraft Team"
+        text_content = f"Hello {to_name},\n\nGreat news! Your ChatCraft {plan_name} subscription has been successfully renewed.\n\n{amount_text}{period_text}\nYou can continue enjoying all the features and benefits of your subscription without interruption.{reference_text}\n\nThank you for being a valued ChatCraft customer!\n\nBest regards,\nThe ChatCraft Team"
 
         return self.publish_email(
             tenant_id=tenant_id,

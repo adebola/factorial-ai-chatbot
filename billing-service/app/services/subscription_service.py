@@ -251,7 +251,138 @@ class SubscriptionService:
         if auth_data.get("authorization_code"):
             self._store_payment_method(payment.tenant_id, auth_data, verification_result.get("customer", {}))
 
-        # Activate subscription
+        # Get subscription
+        subscription = self.get_subscription_by_id(payment.subscription_id)
+        if not subscription:
+            payment.status = PaymentStatus.FAILED
+            payment.failure_reason = "Subscription not found"
+            self.db.commit()
+            return {"success": False, "error": "Subscription not found"}
+
+        # Handle RENEWAL transactions
+        if payment.transaction_type == TransactionType.RENEWAL:
+            # Extract new period dates from payment metadata
+            metadata = payment.payment_metadata or {}
+            new_period_start_str = metadata.get("new_period_start")
+            new_period_end_str = metadata.get("new_period_end")
+
+            if new_period_start_str and new_period_end_str:
+                from dateutil import parser
+                new_period_start = parser.isoparse(new_period_start_str)
+                new_period_end = parser.isoparse(new_period_end_str)
+
+                # Update subscription period
+                subscription.current_period_start = new_period_start
+                subscription.current_period_end = new_period_end
+                subscription.ends_at = new_period_end
+
+                # Reactivate if was EXPIRED
+                if subscription.status == SubscriptionStatus.EXPIRED:
+                    subscription.status = SubscriptionStatus.ACTIVE
+                    subscription.starts_at = new_period_start
+
+                # Keep plan_id, amount, billing_cycle unchanged
+                # User is renewing the SAME plan at SAME price
+
+                logger.info(
+                    f"Subscription renewed successfully",
+                    extra={
+                        "subscription_id": subscription.id,
+                        "payment_id": payment.id,
+                        "new_period_end": new_period_end.isoformat()
+                    }
+                )
+
+            # Log renewal in audit trail
+            self._log_subscription_change(
+                subscription=subscription,
+                change_type="renewed",
+                reason="Subscription renewed via payment",
+                new_amount=payment.amount
+            )
+
+            self.db.commit()
+
+            # Send renewal email
+            try:
+                if subscription.user_email:
+                    plan = self.plan_service.get_plan_by_id(subscription.plan_id)
+                    plan_name = plan.name if plan else "Subscription"
+
+                    from ..services.email_publisher import email_publisher
+                    email_publisher.publish_subscription_renewed_email(
+                        tenant_id=subscription.tenant_id,
+                        to_email=subscription.user_email,
+                        to_name=subscription.user_full_name or "Valued Customer",
+                        plan_name=plan_name
+                    )
+
+                    logger.info(
+                        f"Renewal notification sent",
+                        extra={"subscription_id": subscription.id, "email": subscription.user_email}
+                    )
+            except Exception as e:
+                logger.error(f"Failed to send renewal notification: {e}", exc_info=True)
+
+            # Create renewal invoice with PDF
+            try:
+                from ..services.invoice_service import InvoiceService
+                from ..services.pdf_generator import PDFGenerator
+
+                invoice_service = InvoiceService(self.db)
+                invoice, pdf_bytes = invoice_service.create_invoice_with_pdf(
+                    payment,
+                    document_type="invoice"
+                )
+
+                if invoice:
+                    # Update invoice description for renewal
+                    plan = self.plan_service.get_plan_by_id(subscription.plan_id)
+                    plan_name = plan.name if plan else "Subscription"
+                    invoice.notes = f"Subscription Renewal - {plan_name}"
+                    self.db.commit()
+
+                    logger.info(f"Renewal invoice created: {invoice.invoice_number}")
+
+                    # Send invoice email with PDF
+                    if subscription.user_email and pdf_bytes:
+                        pdf_gen = PDFGenerator()
+                        pdf_attachment = pdf_gen.generate_attachment_dict(
+                            pdf_bytes,
+                            invoice.invoice_number
+                        )
+
+                        from ..services.email_publisher import email_publisher
+                        email_publisher.publish_invoice_email(
+                            tenant_id=subscription.tenant_id,
+                            to_email=subscription.user_email,
+                            to_name=subscription.user_full_name or "Valued Customer",
+                            invoice_number=invoice.invoice_number,
+                            total_amount=float(invoice.total_amount),
+                            currency=invoice.currency,
+                            due_date=invoice.due_date,
+                            status=invoice.status,
+                            pdf_attachment=pdf_attachment
+                        )
+
+                        logger.info(
+                            f"Renewal invoice email sent",
+                            extra={"invoice_id": invoice.id, "subscription_id": subscription.id}
+                        )
+            except Exception as e:
+                logger.error(f"Failed to create/send renewal invoice: {e}", exc_info=True)
+
+            return {
+                "success": True,
+                "payment_id": payment.id,
+                "subscription_id": payment.subscription_id,
+                "amount": float(paid_amount),
+                "transaction_id": payment.paystack_transaction_id,
+                "transaction_type": "renewal",
+                "new_period_end": subscription.current_period_end.isoformat()
+            }
+
+        # Handle regular subscription activation (initial subscriptions)
         subscription = self.get_subscription_by_id(payment.subscription_id)
         if subscription:
             subscription.status = SubscriptionStatus.ACTIVE
@@ -371,9 +502,11 @@ class SubscriptionService:
             new_amount = new_plan.monthly_plan_cost
             old_amount = current_plan.monthly_plan_cost if current_plan else Decimal(0)
 
-        # Calculate prorated amount if needed (for both ACTIVE and TRIALING subscriptions)
+        # Calculate prorated amount if needed
+        # NOTE: Do NOT prorate for trial upgrades - user should pay full amount
+        # Only prorate for ACTIVE subscriptions (paid-to-paid upgrades)
         prorated_amount = None
-        if prorate and subscription.status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]:
+        if prorate and subscription.status == SubscriptionStatus.ACTIVE:
             prorated_amount = self._calculate_proration(
                 subscription, old_amount, new_amount, billing_cycle
             )
@@ -426,28 +559,19 @@ class SubscriptionService:
             now = datetime.now(timezone.utc)
             subscription.status = SubscriptionStatus.ACTIVE
 
-            # NEW: Extend from trial end date instead of resetting
-            # User gets remaining trial days + full billing cycle
-            original_trial_end = subscription.trial_ends_at
-
-            # Validate that trial_ends_at exists
-            if not original_trial_end:
-                # Fallback to current behavior if trial end date is missing
-                original_trial_end = now
-
+            # FIX: Start fresh billing period from NOW (not from trial end date)
+            # When user upgrades from trial, they get a full 30/365 day period starting immediately
             subscription.trial_ends_at = None  # Trial is now complete
-            subscription.starts_at = original_trial_end  # Paid period starts when trial would have ended
+            subscription.starts_at = now  # Paid period starts NOW
 
-            # Calculate end date from trial end (not from now)
-            subscription.current_period_start = original_trial_end
+            # Calculate end date from NOW (not from trial end)
+            subscription.current_period_start = now
             if billing_cycle == BillingCycle.MONTHLY:
-                subscription.current_period_end = original_trial_end + timedelta(days=30)
-                # Also update ends_at to match new billing period (was using trial period)
-                subscription.ends_at = original_trial_end + timedelta(days=30)
+                subscription.current_period_end = now + timedelta(days=30)
+                subscription.ends_at = now + timedelta(days=30)
             else:  # YEARLY
-                subscription.current_period_end = original_trial_end + timedelta(days=365)
-                # Also update ends_at to match new billing period (was using trial period)
-                subscription.ends_at = original_trial_end + timedelta(days=365)
+                subscription.current_period_end = now + timedelta(days=365)
+                subscription.ends_at = now + timedelta(days=365)
 
         # Clear any pending plan changes (user upgraded before scheduled downgrade)
         if subscription.pending_plan_id:
@@ -535,13 +659,19 @@ class SubscriptionService:
         return self.db.query(Subscription).filter(Subscription.id == subscription_id).first()
 
     def get_subscription_by_tenant(self, tenant_id: str) -> Optional[Subscription]:
-        """Get active subscription for a tenant"""
+        """
+        Get current subscription for a tenant.
+
+        Returns the most recent subscription including EXPIRED ones
+        (for renewal flow and displaying expiration info to users).
+        Excludes only CANCELLED subscriptions.
+        """
         return self.db.query(Subscription).filter(
             and_(
                 Subscription.tenant_id == tenant_id,
-                Subscription.status.in_(['active', 'trialing', 'past_due', 'pending'])
+                Subscription.status.in_(['active', 'trialing', 'past_due', 'pending', 'expired'])
             )
-        ).first()
+        ).order_by(Subscription.created_at.desc()).first()
 
     def get_tenant_subscription_history(self, tenant_id: str) -> List[Subscription]:
         """Get all subscriptions for a tenant"""
@@ -695,3 +825,226 @@ class SubscriptionService:
         )
 
         self.db.add(payment_method)
+
+    async def renew_subscription(
+        self,
+        subscription_id: str,
+        user_email: str,
+        user_full_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Renew subscription by initializing payment for next billing period.
+
+        Users can renew:
+        - ACTIVE subscriptions: Extends from current_period_end
+        - EXPIRED subscriptions: Starts fresh from today
+
+        Always charges FULL plan cost (no proration).
+
+        Args:
+            subscription_id: ID of subscription to renew
+            user_email: User email for payment
+            user_full_name: User full name for notifications
+
+        Returns:
+            Dict with payment initialization details and new period dates
+
+        Raises:
+            ValueError: If subscription cannot be renewed
+        """
+        subscription = self.get_subscription_by_id(subscription_id)
+        if not subscription:
+            raise ValueError("Subscription not found")
+
+        # Validation: Check subscription status
+        if subscription.status == SubscriptionStatus.CANCELLED:
+            raise ValueError("Cannot renew cancelled subscription. Please create a new subscription.")
+
+        if subscription.status == SubscriptionStatus.PENDING:
+            raise ValueError("Cannot renew pending subscription. Please activate it first by completing initial payment.")
+
+        # Validation: Check for pending plan changes
+        if subscription.pending_plan_id:
+            raise ValueError(
+                f"Cannot renew subscription with pending plan change. "
+                f"The subscription is scheduled to change to a different plan on "
+                f"{subscription.pending_plan_effective_date.date()}. "
+                f"Please wait for the plan change to complete or cancel the scheduled change."
+            )
+
+        # Calculate renewal amount (full plan cost, no proration)
+        renewal_amount = subscription.amount
+
+        # Calculate new billing period dates
+        now = datetime.now(timezone.utc)
+
+        if subscription.status == SubscriptionStatus.ACTIVE:
+            # Extend from current period end
+            new_period_start = subscription.current_period_end
+        else:
+            # EXPIRED: Start fresh from today
+            new_period_start = now
+
+        # Calculate new period end based on billing cycle
+        if subscription.billing_cycle == BillingCycle.MONTHLY:
+            new_period_end = new_period_start + timedelta(days=30)
+        else:  # YEARLY
+            new_period_end = new_period_start + timedelta(days=365)
+
+        # Generate payment reference
+        reference = f"renewal_{subscription.id}_{uuid.uuid4().hex[:8]}"
+
+        # Prepare payment metadata
+        payment_metadata = {
+            "subscription_id": subscription.id,
+            "tenant_id": subscription.tenant_id,
+            "plan_id": subscription.plan_id,
+            "billing_cycle": str(subscription.billing_cycle),
+            "transaction_type": TransactionType.RENEWAL.value,
+            "old_period_end": subscription.current_period_end.isoformat(),
+            "new_period_start": new_period_start.isoformat(),
+            "new_period_end": new_period_end.isoformat(),
+            "previous_status": str(subscription.status)
+        }
+
+        # Initialize payment with Paystack
+        result = await self.paystack.initialize_transaction(
+            email=user_email,
+            amount=renewal_amount,
+            currency=subscription.currency,
+            reference=reference,
+            metadata=payment_metadata
+        )
+
+        if result["success"]:
+            # Create payment record
+            payment = Payment(
+                subscription_id=subscription.id,
+                tenant_id=subscription.tenant_id,
+                amount=renewal_amount,
+                currency=subscription.currency,
+                status=PaymentStatus.PENDING,
+                transaction_type=TransactionType.RENEWAL,
+                paystack_reference=reference,
+                paystack_access_code=result["access_code"],
+                description=f"Subscription renewal for {subscription.billing_cycle} plan",
+                payment_metadata=payment_metadata
+            )
+
+            self.db.add(payment)
+            self.db.commit()
+            self.db.refresh(payment)
+
+            logger.info(
+                f"Renewal payment initialized for subscription {subscription_id}",
+                extra={
+                    "subscription_id": subscription_id,
+                    "payment_id": payment.id,
+                    "amount": float(renewal_amount),
+                    "reference": reference
+                }
+            )
+
+            return {
+                "success": True,
+                "message": "Renewal payment initialized successfully",
+                "subscription_id": subscription.id,
+                "payment_id": payment.id,
+                "payment_url": result["authorization_url"],
+                "payment_reference": reference,
+                "amount": float(renewal_amount),
+                "currency": subscription.currency,
+                "new_period_start": new_period_start.isoformat(),
+                "new_period_end": new_period_end.isoformat()
+            }
+        else:
+            logger.error(
+                f"Failed to initialize renewal payment: {result['error']}",
+                extra={"subscription_id": subscription_id}
+            )
+            raise ValueError(f"Payment initialization failed: {result['error']}")
+
+    def check_and_update_subscription_status(self, subscription: Subscription) -> Subscription:
+        """
+        Check if subscription status needs updating based on current time and update if necessary.
+
+        This method provides real-time status calculation to ensure the API returns accurate
+        status even if the scheduled expiration job hasn't run yet.
+
+        Checks performed:
+        - TRIALING → EXPIRED: If trial_ends_at has passed
+        - ACTIVE → EXPIRED: If current_period_end has passed
+
+        Args:
+            subscription: Subscription to check
+
+        Returns:
+            Subscription: Updated subscription (committed to database if changed)
+        """
+        if not subscription:
+            return subscription
+
+        try:
+            now = datetime.now(timezone.utc)
+            status_changed = False
+            old_status = subscription.status
+
+            # Check if TRIALING subscription has expired
+            if (subscription.status == SubscriptionStatus.TRIALING and
+                subscription.trial_ends_at and
+                subscription.trial_ends_at < now):
+
+                subscription.status = SubscriptionStatus.EXPIRED
+                # Align period markers with trial end
+                if subscription.current_period_end > subscription.trial_ends_at:
+                    subscription.current_period_end = subscription.trial_ends_at
+                    subscription.ends_at = subscription.trial_ends_at
+
+                status_changed = True
+                logger.info(
+                    f"Real-time status update: Trial subscription {subscription.id} expired",
+                    extra={
+                        "subscription_id": subscription.id,
+                        "tenant_id": subscription.tenant_id,
+                        "old_status": str(old_status),
+                        "new_status": str(SubscriptionStatus.EXPIRED),
+                        "trial_ended_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None
+                    }
+                )
+
+            # Check if ACTIVE subscription has expired
+            elif (subscription.status == SubscriptionStatus.ACTIVE and
+                  subscription.current_period_end and
+                  subscription.current_period_end < now):
+
+                subscription.status = SubscriptionStatus.EXPIRED
+                status_changed = True
+                logger.info(
+                    f"Real-time status update: Active subscription {subscription.id} expired",
+                    extra={
+                        "subscription_id": subscription.id,
+                        "tenant_id": subscription.tenant_id,
+                        "old_status": str(old_status),
+                        "new_status": str(SubscriptionStatus.EXPIRED),
+                        "period_ended_at": subscription.current_period_end.isoformat() if subscription.current_period_end else None
+                    }
+                )
+
+            # Commit changes if status changed
+            if status_changed:
+                self.db.commit()
+                self.db.refresh(subscription)
+
+        except Exception as e:
+            logger.error(
+                f"Error checking subscription status: {e}",
+                exc_info=True,
+                extra={
+                    "subscription_id": subscription.id if subscription else None,
+                    "tenant_id": subscription.tenant_id if subscription else None
+                }
+            )
+            # Don't fail the request - just return subscription as-is
+            # The scheduled job will handle the status update later
+
+        return subscription

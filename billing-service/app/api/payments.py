@@ -167,13 +167,8 @@ async def payment_callback(
             # Get frontend URL from environment
             frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
-            # Redirect to the success page with payment details
-            success_url = (
-                f"{frontend_url}/payments/success"
-                f"?reference={reference}"
-                f"&subscription_id={result['subscription_id']}"
-                f"&amount={result['amount']}"
-            )
+            # Redirect to the payment callback page for verification
+            success_url = f"{frontend_url}/payment/callback?reference={reference}"
 
             return RedirectResponse(url=success_url, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -183,12 +178,8 @@ async def payment_callback(
             # Get frontend URL from environment
             frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
-            # Redirect to failure page with error details
-            failure_url = (
-                f"{frontend_url}/payments/failed"
-                f"?reference={reference}"
-                f"&error={result.get('error', 'Payment verification failed')}"
-            )
+            # Redirect to payment callback page for verification (will show error)
+            failure_url = f"{frontend_url}/payment/callback?reference={reference}"
 
             return RedirectResponse(url=failure_url, status_code=status.HTTP_303_SEE_OTHER)
 
@@ -198,12 +189,8 @@ async def payment_callback(
         # Get frontend URL from environment
         frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
 
-        # Redirect to error page
-        error_url = (
-            f"{frontend_url}/payments/error"
-            f"?reference={reference}"
-            f"&error=An unexpected error occurred"
-        )
+        # Redirect to payment callback page for verification (will show error)
+        error_url = f"{frontend_url}/payment/callback?reference={reference}"
 
         return RedirectResponse(url=error_url, status_code=status.HTTP_303_SEE_OTHER)
 

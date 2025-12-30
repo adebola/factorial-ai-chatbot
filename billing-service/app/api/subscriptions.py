@@ -512,18 +512,26 @@ async def get_current_subscription(
     claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Get the current tenant's active subscription"""
-    
+    """
+    Get the current tenant's active subscription.
+
+    Performs real-time status check to ensure expired subscriptions are marked correctly,
+    even if the scheduled expiration job hasn't run yet.
+    """
+
     try:
         subscription_service = SubscriptionService(db)
         subscription = subscription_service.get_subscription_by_tenant(claims.tenant_id)
-        
+
         if not subscription:
             return {
                 "subscription": None,
                 "has_subscription": False,
                 "message": "No active subscription found"
             }
+
+        # Check and update subscription status if needed (real-time expiration check)
+        subscription = subscription_service.check_and_update_subscription_status(subscription)
         
         # Get payment history
         payments = db.query(Payment).filter(
@@ -673,6 +681,75 @@ async def cancel_subscription(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to cancel subscription: {str(e)}"
+        )
+
+
+@router.post("/{subscription_id}/renew", response_model=Dict[str, Any])
+async def renew_subscription(
+    subscription_id: str,
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Renew subscription before or after expiration.
+
+    **Features**:
+    - Can renew ACTIVE subscriptions (extends current billing period)
+    - Can renew EXPIRED subscriptions (reactivates with new period)
+    - Always charges FULL plan cost (no proration)
+    - Returns Paystack payment URL for user to complete payment
+
+    **Validation**:
+    - Subscription must belong to authenticated tenant
+    - Cannot renew CANCELLED subscriptions
+    - Cannot renew PENDING subscriptions (never activated)
+    - Cannot renew subscriptions with pending plan changes
+
+    **Returns**:
+    - Payment initialization details (payment_url, reference, amount)
+    - New billing period dates (new_period_start, new_period_end)
+    """
+    try:
+        subscription_service = SubscriptionService(db)
+
+        # Verify subscription exists and belongs to tenant
+        subscription = subscription_service.get_subscription_by_id(subscription_id)
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Subscription not found"
+            )
+
+        if subscription.tenant_id != claims.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only renew your own subscriptions"
+            )
+
+        # Renew subscription (initializes payment)
+        result = await subscription_service.renew_subscription(
+            subscription_id=subscription_id,
+            user_email=claims.email,
+            user_full_name=claims.full_name
+        )
+
+        return {
+            "success": True,
+            "message": "Renewal payment initialized successfully",
+            "renewal": result
+        }
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to renew subscription: {str(e)}"
         )
 
 
