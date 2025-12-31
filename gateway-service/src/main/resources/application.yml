@@ -107,6 +107,13 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+              # Payment callback endpoint - external redirect to frontend
+              # MUST come BEFORE billing-payments route to match first
+              - id: billing-payment-callback
+                uri: http://localhost:8004
+                predicates:
+                  - Path=/api/v1/payments/callback
+
               - id: billing-payments
                 uri: http://localhost:8004
                 predicates:
