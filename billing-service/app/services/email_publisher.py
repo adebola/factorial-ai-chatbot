@@ -267,14 +267,65 @@ class EmailPublisher:
             bool: True if published successfully
         """
         subject = f"Your ChatCraft Trial Expires in {days_remaining} Days"
+
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         html_content = f"""
+        <!DOCTYPE html>
         <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Your ChatCraft trial period will expire in <strong>{days_remaining} days</strong>.</p>
-            <p>To continue using ChatCraft without interruption, please upgrade your subscription.</p>
-            <p>If you have any questions, please don't hesitate to contact our support team.</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{subject}</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+            <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #FF9800 0%, #F57C00 100%); padding: 30px; text-align: center; position: relative;">
+                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px;">ChatCraft</h1>
+                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Trial Expiration Notice</p>
+                </div>
+
+                <!-- Body -->
+                <div style="padding: 30px;">
+                    <p style="font-size: 16px; color: #333; margin-bottom: 20px;">Hello {to_name},</p>
+
+                    <div style="background-color: #FFF3E0; border-left: 4px solid #FF9800; padding: 20px; margin: 20px 0; border-radius: 4px;">
+                        <p style="margin: 0; font-size: 16px; color: #E65100;">
+                            ⏰ <strong>Your trial period will expire in {days_remaining} days.</strong>
+                        </p>
+                    </div>
+
+                    <p style="font-size: 16px; color: #333; line-height: 1.6;">
+                        To continue using ChatCraft without interruption, please upgrade your subscription before your trial ends.
+                    </p>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://chatcraft.com/billing/upgrade" style="background-color: #FF9800; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Upgrade Now</a>
+                    </div>
+
+                    <p style="font-size: 14px; color: #666; line-height: 1.6;">
+                        If you have any questions, please don't hesitate to contact our support team.
+                    </p>
+
+                    <p style="font-size: 16px; color: #333; margin-top: 30px;">
+                        Best regards,<br>
+                        <strong>The ChatCraft Team</strong>
+                    </p>
+                </div>
+
+                <!-- Footer -->
+                <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0;">
+                    <p style="margin: 0; font-size: 12px; color: #999;">
+                        This is an automated email. Please do not reply.<br>
+                        <a href="https://chatcraft.com" style="color: #FF9800; text-decoration: none;">Visit ChatCraft</a> |
+                        <a href="mailto:support@chatcraft.com" style="color: #FF9800; text-decoration: none;">Contact Support</a>
+                    </p>
+                </div>
+            </div>
         </body>
         </html>
         """
@@ -307,14 +358,65 @@ class EmailPublisher:
             bool: True if published successfully
         """
         subject = "Your ChatCraft Trial Has Expired"
+
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         html_content = f"""
+        <!DOCTYPE html>
         <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Your ChatCraft trial period has expired.</p>
-            <p>To continue using ChatCraft, please upgrade to a paid subscription.</p>
-            <p>If you have any questions or need assistance, please contact our support team.</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>{subject}</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+            <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); padding: 30px; text-align: center; position: relative;">
+                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px;">ChatCraft</h1>
+                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Trial Expired</p>
+                </div>
+
+                <!-- Body -->
+                <div style="padding: 30px;">
+                    <p style="font-size: 16px; color: #333; margin-bottom: 20px;">Hello {to_name},</p>
+
+                    <div style="background-color: #FFEBEE; border-left: 4px solid #F44336; padding: 20px; margin: 20px 0; border-radius: 4px;">
+                        <p style="margin: 0; font-size: 16px; color: #B71C1C;">
+                            ⚠️ <strong>Your trial period has expired.</strong>
+                        </p>
+                    </div>
+
+                    <p style="font-size: 16px; color: #333; line-height: 1.6;">
+                        To continue using ChatCraft and access all features, please upgrade to a paid subscription.
+                    </p>
+
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="https://chatcraft.com/billing/upgrade" style="background-color: #F44336; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">Upgrade Now</a>
+                    </div>
+
+                    <p style="font-size: 14px; color: #666; line-height: 1.6;">
+                        If you have any questions or need assistance, please contact our support team.
+                    </p>
+
+                    <p style="font-size: 16px; color: #333; margin-top: 30px;">
+                        Best regards,<br>
+                        <strong>The ChatCraft Team</strong>
+                    </p>
+                </div>
+
+                <!-- Footer -->
+                <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #e0e0e0;">
+                    <p style="margin: 0; font-size: 12px; color: #999;">
+                        This is an automated email. Please do not reply.<br>
+                        <a href="https://chatcraft.com" style="color: #F44336; text-decoration: none;">Visit ChatCraft</a> |
+                        <a href="mailto:support@chatcraft.com" style="color: #F44336; text-decoration: none;">Contact Support</a>
+                    </p>
+                </div>
+            </div>
         </body>
         </html>
         """
@@ -350,15 +452,90 @@ class EmailPublisher:
         Returns:
             bool: True if published successfully
         """
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         subject = f"Your ChatCraft {plan_name} Subscription Expires in {days_remaining} Days"
         html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Your ChatCraft <strong>{plan_name}</strong> subscription will expire in <strong>{days_remaining} days</strong>.</p>
-            <p>To continue enjoying uninterrupted service, please renew your subscription.</p>
-            <p>If you have any questions, please don't hesitate to contact our support team.</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Subscription Expiring</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">{plan_name} Plan</p>
+                                </td>
+                            </tr>
+
+                            <!-- Main Content -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        Your ChatCraft <strong>{plan_name}</strong> subscription will expire in <strong style="color: #1E88E5;">{days_remaining} days</strong>.
+                                    </p>
+
+                                    <!-- Warning Box -->
+                                    <div style="background-color: #E3F2FD; border-left: 4px solid #1E88E5; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #1565C0; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Action Required:</strong> To continue enjoying uninterrupted service, please renew your subscription before it expires.
+                                        </p>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        After your subscription expires, you will lose access to:
+                                    </p>
+
+                                    <ul style="color: #555555; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0; padding-left: 20px;">
+                                        <li>Document and website knowledge base</li>
+                                        <li>AI-powered chat responses</li>
+                                        <li>All premium features</li>
+                                    </ul>
+
+                                    <!-- CTA Button -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/subscriptions" style="background-color: #1E88E5; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block;">
+                                            Renew Subscription
+                                        </a>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 14px; line-height: 1.6; margin: 20px 0 0 0;">
+                                        If you have any questions, please don't hesitate to contact our support team.
+                                    </p>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Best regards,<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #1E88E5; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #1E88E5; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #1E88E5; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """
@@ -392,15 +569,95 @@ class EmailPublisher:
         Returns:
             bool: True if published successfully
         """
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         subject = f"Your ChatCraft {plan_name} Subscription Has Expired"
         html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Your ChatCraft <strong>{plan_name}</strong> subscription has expired.</p>
-            <p>To restore access to your account, please renew your subscription.</p>
-            <p>If you have any questions or need assistance, please contact our support team.</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Subscription Expired</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #F44336 0%, #D32F2F 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">{plan_name} Plan</p>
+                                </td>
+                            </tr>
+
+                            <!-- Main Content -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        Your ChatCraft <strong>{plan_name}</strong> subscription has <strong style="color: #F44336;">expired</strong>.
+                                    </p>
+
+                                    <!-- Critical Alert Box -->
+                                    <div style="background-color: #FFEBEE; border-left: 4px solid #F44336; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #C62828; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Immediate Action Required:</strong> Your account access has been suspended. Renew your subscription to restore full access.
+                                        </p>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        You currently do not have access to:
+                                    </p>
+
+                                    <ul style="color: #555555; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0; padding-left: 20px;">
+                                        <li>Document and website knowledge base</li>
+                                        <li>AI-powered chat responses</li>
+                                        <li>All premium features</li>
+                                        <li>Your data and conversation history</li>
+                                    </ul>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        Renew now to restore immediate access to all your data and features.
+                                    </p>
+
+                                    <!-- CTA Button -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/subscriptions" style="background-color: #F44336; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block;">
+                                            Renew Subscription Now
+                                        </a>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 14px; line-height: 1.6; margin: 20px 0 0 0;">
+                                        If you have any questions or need assistance, please contact our support team.
+                                    </p>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Best regards,<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #F44336; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #F44336; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #F44336; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """
@@ -438,6 +695,9 @@ class EmailPublisher:
         Returns:
             bool: True if published successfully
         """
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         # Format amount based on currency
         if currency == "NGN":
             formatted_amount = f"₦{amount:,.2f}"
@@ -448,14 +708,90 @@ class EmailPublisher:
 
         subject = "Payment Successful - ChatCraft Subscription"
         html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Thank you for your payment!</p>
-            <p>We have successfully received your payment of <strong>{formatted_amount}</strong> for your <strong>{plan_name}</strong> subscription.</p>
-            <p>Your subscription is now active and you can continue using ChatCraft without interruption.</p>
-            <p>If you have any questions, please don't hesitate to contact our support team.</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Payment Successful</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Payment Successful</p>
+                                </td>
+                            </tr>
+
+                            <!-- Main Content -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        Thank you for your payment!
+                                    </p>
+
+                                    <!-- Success Box -->
+                                    <div style="background-color: #E8F5E9; border-left: 4px solid #4CAF50; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #2E7D32; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Payment Confirmed:</strong> We have successfully received your payment of <strong>{formatted_amount}</strong> for your <strong>{plan_name}</strong> subscription.
+                                        </p>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        Your subscription is now <strong style="color: #4CAF50;">active</strong> and you can continue using ChatCraft without interruption.
+                                    </p>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        What you can do now:
+                                    </p>
+
+                                    <ul style="color: #555555; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0; padding-left: 20px;">
+                                        <li>Upload documents and ingest websites</li>
+                                        <li>Chat with your AI-powered knowledge base</li>
+                                        <li>Access all premium features</li>
+                                        <li>Embed chat widgets on your website</li>
+                                    </ul>
+
+                                    <!-- CTA Button -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/dashboard" style="background-color: #4CAF50; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block;">
+                                            Go to Dashboard
+                                        </a>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 14px; line-height: 1.6; margin: 20px 0 0 0;">
+                                        If you have any questions, please don't hesitate to contact our support team.
+                                    </p>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Best regards,<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #4CAF50; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #4CAF50; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #4CAF50; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """
@@ -519,18 +855,96 @@ class EmailPublisher:
             reference_html = f"<p><small>Payment Reference: {payment_reference}</small></p>"
             reference_text = f"\nPayment Reference: {payment_reference}"
 
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         subject = f"Your ChatCraft {plan_name} Subscription Has Been Renewed"
         html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Great news! Your ChatCraft <strong>{plan_name}</strong> subscription has been successfully renewed.</p>
-            {amount_html}
-            {period_html}
-            <p>You can continue enjoying all the features and benefits of your subscription without interruption.</p>
-            {reference_html}
-            <p>Thank you for being a valued ChatCraft customer!</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Subscription Renewed</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">{plan_name} Plan</p>
+                                </td>
+                            </tr>
+
+                            <!-- Main Content -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        Great news! Your ChatCraft <strong>{plan_name}</strong> subscription has been <strong style="color: #4CAF50;">successfully renewed</strong>.
+                                    </p>
+
+                                    <!-- Success Box -->
+                                    <div style="background-color: #E8F5E9; border-left: 4px solid #4CAF50; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #2E7D32; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Subscription Renewed:</strong> Your subscription is now active and all features are available.
+                                        </p>
+                                    </div>
+
+                                    {f'<p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">Renewal Amount: <strong>{("₦" if currency == "NGN" else "$" if currency == "USD" else currency) + f"{renewal_amount:,.2f}"}</strong></p>' if renewal_amount is not None and currency else ''}
+                                    {f'<p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">Your subscription is now active until <strong>{new_period_end.strftime("%B %d, %Y")}</strong></p>' if new_period_end else ''}
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        You can continue enjoying all the features and benefits of your subscription without interruption:
+                                    </p>
+
+                                    <ul style="color: #555555; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0; padding-left: 20px;">
+                                        <li>Unlimited access to your knowledge base</li>
+                                        <li>AI-powered chat responses</li>
+                                        <li>Document and website ingestion</li>
+                                        <li>All premium features</li>
+                                    </ul>
+
+                                    {f'<p style="color: #999999; font-size: 12px; line-height: 1.6; margin: 20px 0 0 0;">Payment Reference: {payment_reference}</p>' if payment_reference else ''}
+
+                                    <!-- CTA Button -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/dashboard" style="background-color: #4CAF50; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block;">
+                                            Go to Dashboard
+                                        </a>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0 0 0;">
+                                        Thank you for being a valued ChatCraft customer!
+                                    </p>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Best regards,<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #4CAF50; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #4CAF50; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #4CAF50; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """
@@ -570,6 +984,9 @@ class EmailPublisher:
         Returns:
             bool: True if published successfully
         """
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         # Format amount
         if currency == "NGN":
             formatted_amount = f"₦{proration_amount:,.2f}"
@@ -580,14 +997,90 @@ class EmailPublisher:
 
         subject = f"Your ChatCraft Plan Has Been Upgraded to {new_plan_name}"
         html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Great news! Your ChatCraft subscription has been upgraded from <strong>{old_plan_name}</strong> to <strong>{new_plan_name}</strong>.</p>
-            <p>You now have access to all the enhanced features and limits of the {new_plan_name} plan.</p>
-            <p>A prorated charge of <strong>{formatted_amount}</strong> has been applied for the remaining days in your current billing period.</p>
-            <p>Thank you for choosing ChatCraft!</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Plan Upgraded</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #673AB7 0%, #512DA8 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Plan Upgraded</p>
+                                </td>
+                            </tr>
+
+                            <!-- Main Content -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        Great news! Your ChatCraft subscription has been <strong style="color: #673AB7;">upgraded</strong> from <strong>{old_plan_name}</strong> to <strong>{new_plan_name}</strong>.
+                                    </p>
+
+                                    <!-- Success Box -->
+                                    <div style="background-color: #EDE7F6; border-left: 4px solid #673AB7; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #4527A0; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Upgrade Complete:</strong> You now have access to all the enhanced features and limits of the {new_plan_name} plan.
+                                        </p>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        A prorated charge of <strong>{formatted_amount}</strong> has been applied for the remaining days in your current billing period.
+                                    </p>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        Enhanced features now available:
+                                    </p>
+
+                                    <ul style="color: #555555; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0; padding-left: 20px;">
+                                        <li>Increased document and website limits</li>
+                                        <li>Higher monthly chat capacity</li>
+                                        <li>Priority support</li>
+                                        <li>Advanced features and capabilities</li>
+                                    </ul>
+
+                                    <!-- CTA Button -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/dashboard" style="background-color: #673AB7; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block;">
+                                            Explore New Features
+                                        </a>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0 0 0;">
+                                        Thank you for choosing ChatCraft!
+                                    </p>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Best regards,<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #673AB7; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #673AB7; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #673AB7; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """
@@ -629,6 +1122,9 @@ class EmailPublisher:
         """
         from datetime import datetime
 
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         formatted_date = effective_date.strftime("%B %d, %Y")
 
         if immediate:
@@ -639,14 +1135,87 @@ class EmailPublisher:
             timing_text = f"Your plan will change to {new_plan_name} on <strong>{formatted_date}</strong>."
 
         html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>Your ChatCraft subscription plan is changing from <strong>{old_plan_name}</strong> to <strong>{new_plan_name}</strong>.</p>
-            <p>{timing_text}</p>
-            {'' if immediate else f'<p>You will continue to have access to all {old_plan_name} features until {formatted_date}.</p>'}
-            <p>If you have any questions or would like to keep your current plan, please contact our support team.</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Plan Downgraded</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #607D8B 0%, #455A64 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Plan Change Notice</p>
+                                </td>
+                            </tr>
+
+                            <!-- Main Content -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        Your ChatCraft subscription plan is changing from <strong>{old_plan_name}</strong> to <strong>{new_plan_name}</strong>.
+                                    </p>
+
+                                    <!-- Info Box -->
+                                    <div style="background-color: #ECEFF1; border-left: 4px solid #607D8B; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #37474F; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Plan Change:</strong> {timing_text}
+                                        </p>
+                                    </div>
+
+                                    {f'<p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">You will continue to have access to all <strong>{old_plan_name}</strong> features until <strong>{formatted_date}</strong>.</p>' if not immediate else ''}
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        Your new plan will include:
+                                    </p>
+
+                                    <ul style="color: #555555; font-size: 16px; line-height: 1.8; margin: 0 0 20px 0; padding-left: 20px;">
+                                        <li>Access to core ChatCraft features</li>
+                                        <li>Adjusted usage limits</li>
+                                        <li>Continued support</li>
+                                    </ul>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        If you have any questions or would like to keep your current plan, please contact our support team.
+                                    </p>
+
+                                    <!-- CTA Button -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/subscriptions" style="background-color: #607D8B; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block;">
+                                            View Subscription
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Best regards,<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #607D8B; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #607D8B; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #607D8B; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """
@@ -684,6 +1253,9 @@ class EmailPublisher:
         Returns:
             bool: True if published successfully
         """
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         formatted_date = effective_date.strftime("%B %d, %Y")
 
         if immediate:
@@ -696,16 +1268,88 @@ class EmailPublisher:
             access_text = f"<p>You will continue to have access to all {plan_name} features until {formatted_date}.</p>"
 
         html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2>Hello {to_name},</h2>
-            <p>We're sorry to see you go!</p>
-            <p>Your ChatCraft <strong>{plan_name}</strong> subscription is being cancelled.</p>
-            <p>{timing_text}</p>
-            {access_text}
-            <p>If you change your mind or cancelled by mistake, you can reactivate your subscription anytime from your account settings.</p>
-            <p>We'd love to hear your feedback on how we can improve. Please feel free to reach out to our support team.</p>
-            <p>Best regards,<br>The ChatCraft Team</p>
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Subscription Cancelled</title>
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
+                            <tr>
+                                <td style="background: linear-gradient(135deg, #FFA726 0%, #FB8C00 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Subscription Cancellation</p>
+                                </td>
+                            </tr>
+
+                            <!-- Main Content -->
+                            <tr>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        We're sorry to see you go!
+                                    </p>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        Your ChatCraft <strong>{plan_name}</strong> subscription is being cancelled.
+                                    </p>
+
+                                    <!-- Info Box -->
+                                    <div style="background-color: #FFF3E0; border-left: 4px solid #FFA726; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #E65100; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Cancellation Notice:</strong> {timing_text}
+                                        </p>
+                                    </div>
+
+                                    {f'<p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">You will continue to have access to all <strong>{plan_name}</strong> features until <strong>{formatted_date}</strong>.</p>' if not immediate else ''}
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        If you change your mind or cancelled by mistake, you can reactivate your subscription anytime from your account settings.
+                                    </p>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        We'd love to hear your feedback on how we can improve. Please feel free to reach out to our support team.
+                                    </p>
+
+                                    <!-- CTA Buttons -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/subscriptions" style="background-color: #FFA726; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block; margin: 0 5px;">
+                                            Reactivate Subscription
+                                        </a>
+                                        <a href="https://chatcraft.cc/support" style="background-color: #607D8B; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block; margin: 0 5px;">
+                                            Contact Support
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+
+                            <!-- Footer -->
+                            <tr>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Best regards,<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #FFA726; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #FFA726; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #FFA726; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """
@@ -965,6 +1609,9 @@ The ChatCraft Team
 
         remaining = max(0, limit - current_usage)
 
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -976,7 +1623,9 @@ The ChatCraft Team
         <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
             <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                 <!-- Header -->
-                <div style="background: linear-gradient(135deg, #5D3EC1 0%, #7B5FD9 100%); padding: 30px; text-align: center;">
+                <div style="background: linear-gradient(135deg, #5D3EC1 0%, #7B5FD9 100%); padding: 30px; text-align: center; position: relative;">
+                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
                     <h1 style="color: #ffffff; margin: 0; font-size: 28px;">ChatCraft</h1>
                     <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">{plan_name} Plan</p>
                 </div>
@@ -1136,6 +1785,9 @@ The ChatCraft Team
         Returns:
             True if email published successfully
         """
+        # Get logo data URL for email embedding
+        logo_data_url = get_logo_data_url("chatcraft-logo-white.png")
+
         # Format amount
         if currency == "NGN":
             formatted_amount = f"₦{amount:,.2f}"
@@ -1151,81 +1803,105 @@ The ChatCraft Team
 
         html_content = f"""
         <!DOCTYPE html>
-        <html>
+        <html lang="en">
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>{subject}</title>
         </head>
-        <body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
-            <div style="max-width: 600px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <!-- Header -->
-                <div style="background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%); padding: 30px; text-align: center;">
-                    <div style="font-size: 64px; margin-bottom: 10px;">✅</div>
-                    <h1 style="color: #ffffff; margin: 0; font-size: 28px;">Payment Successful!</h1>
-                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Thank you for your payment</p>
-                </div>
-
-                <!-- Body -->
-                <div style="padding: 30px;">
-                    <p style="font-size: 16px; color: #333; margin-bottom: 20px;">Hello {to_name},</p>
-
-                    <p style="font-size: 16px; color: #333; margin-bottom: 30px;">
-                        We've successfully received your payment. Here are the details:
-                    </p>
-
-                    <!-- Payment Details Box -->
-                    <div style="background-color: #f9f9f9; border-left: 4px solid #4CAF50; padding: 20px; margin: 20px 0;">
-                        <h2 style="margin: 0 0 15px 0; color: #4CAF50; font-size: 20px;">Payment Details</h2>
-                        <table style="width: 100%; border-collapse: collapse;">
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+                <tr>
+                    <td style="padding: 40px 20px;">
+                        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); overflow: hidden;">
+                            <!-- Header with Logo and Branding -->
                             <tr>
-                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Amount Paid:</strong></td>
-                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;"><strong style="font-size: 20px; color: #4CAF50;">{formatted_amount}</strong></td>
+                                <td style="background: linear-gradient(135deg, #4CAF50 0%, #388E3C 100%); padding: 30px; text-align: center; position: relative;">
+                                    {f'<img src="{logo_data_url}" alt="ChatCraft" style="max-width: 150px; height: auto; margin-bottom: 15px;">' if logo_data_url else ''}
+                                    <div style="height: 3px; width: 80px; background-color: #CDF547; margin: 0 auto 15px auto; border-radius: 2px;"></div>
+                                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 600;">ChatCraft</h1>
+                                    <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 16px; opacity: 0.9;">Payment Receipt</p>
+                                </td>
                             </tr>
+
+                            <!-- Main Content -->
                             <tr>
-                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Plan:</strong></td>
-                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;">{plan_name}</td>
+                                <td style="padding: 40px 30px;">
+                                    <h2 style="color: #333333; font-size: 24px; margin: 0 0 20px 0; font-weight: 600;">Hello {to_name},</h2>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 0 0 20px 0;">
+                                        We've successfully received your payment. Thank you for your business!
+                                    </p>
+
+                                    <!-- Success Box -->
+                                    <div style="background-color: #E8F5E9; border-left: 4px solid #4CAF50; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                        <p style="color: #2E7D32; font-size: 14px; line-height: 1.6; margin: 0;">
+                                            <strong>Payment Confirmed:</strong> Your payment has been processed successfully.
+                                        </p>
+                                    </div>
+
+                                    <!-- Payment Details Box -->
+                                    <div style="background-color: #f9f9f9; border-left: 4px solid #4CAF50; padding: 20px; margin: 20px 0; border-radius: 4px;">
+                                        <h3 style="margin: 0 0 15px 0; color: #4CAF50; font-size: 18px; font-weight: 600;">Payment Details</h3>
+                                        <table style="width: 100%; border-collapse: collapse;">
+                                            <tr>
+                                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Amount Paid:</strong></td>
+                                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;"><strong style="font-size: 18px; color: #4CAF50;">{formatted_amount}</strong></td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Plan:</strong></td>
+                                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;">{plan_name}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Payment Date:</strong></td>
+                                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;">{formatted_date}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Reference:</strong></td>
+                                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right; font-family: monospace;">{payment_reference}</td>
+                                            </tr>
+                                        </table>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 16px; line-height: 1.6; margin: 20px 0;">
+                                        Your invoice has been generated and is available in your account dashboard. You can view and download it anytime.
+                                    </p>
+
+                                    <!-- CTA Button -->
+                                    <div style="text-align: center; margin: 30px 0;">
+                                        <a href="https://app.chatcraft.cc/invoices" style="background-color: #4CAF50; color: #ffffff; text-decoration: none; padding: 14px 32px; border-radius: 6px; font-size: 16px; font-weight: 600; display: inline-block;">
+                                            View Invoice
+                                        </a>
+                                    </div>
+
+                                    <p style="color: #555555; font-size: 14px; line-height: 1.6; margin: 20px 0 0 0;">
+                                        If you have any questions about this payment, please don't hesitate to contact our support team.
+                                    </p>
+
+                                    <p style="color: #555555; font-size: 14px; line-height: 1.6; margin: 20px 0 0 0; font-style: italic;">
+                                        Keep this email for your records.
+                                    </p>
+                                </td>
                             </tr>
+
+                            <!-- Footer -->
                             <tr>
-                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Payment Date:</strong></td>
-                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right;">{formatted_date}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px 0; color: #666; font-size: 14px;"><strong>Reference:</strong></td>
-                                <td style="padding: 8px 0; color: #333; font-size: 14px; text-align: right; font-family: monospace;">{payment_reference}</td>
+                                <td style="background-color: #f9f9f9; padding: 30px; text-align: center; border-top: 1px solid #e0e0e0;">
+                                    <p style="color: #666666; font-size: 14px; margin: 0 0 10px 0;">
+                                        Thank you for choosing ChatCraft!<br>
+                                        <strong>The ChatCraft Team</strong>
+                                    </p>
+                                    <p style="color: #999999; font-size: 12px; margin: 15px 0 0 0;">
+                                        <a href="https://chatcraft.cc" style="color: #4CAF50; text-decoration: none;">ChatCraft</a> |
+                                        <a href="https://chatcraft.cc/support" style="color: #4CAF50; text-decoration: none;">Support</a> |
+                                        <a href="https://chatcraft.cc/privacy" style="color: #4CAF50; text-decoration: none;">Privacy Policy</a>
+                                    </p>
+                                </td>
                             </tr>
                         </table>
-                    </div>
-
-                    <!-- View Invoice Button -->
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="https://chatcraft.com/invoices" style="display: inline-block; background-color: #5D3EC1; color: #ffffff; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;">View Invoice</a>
-                    </div>
-
-                    <p style="font-size: 14px; color: #666; margin-top: 30px;">
-                        Your invoice has been generated and is available in your account dashboard. You can view and download it anytime.
-                    </p>
-
-                    <p style="font-size: 14px; color: #666; margin-top: 20px;">
-                        If you have any questions about this payment, please don't hesitate to contact our support team.
-                    </p>
-
-                    <p style="font-size: 14px; color: #333; margin-top: 30px;">
-                        Thank you for choosing ChatCraft!<br>
-                        <strong>The ChatCraft Team</strong>
-                    </p>
-                </div>
-
-                <!-- Footer -->
-                <div style="background-color: #f9f9f9; padding: 20px; text-align: center; border-top: 1px solid #eee;">
-                    <p style="font-size: 12px; color: #888; margin: 0;">
-                        Keep this email for your records.
-                    </p>
-                    <p style="font-size: 12px; color: #888; margin: 10px 0 0 0;">
-                        © {datetime.now().year} ChatCraft. All rights reserved.
-                    </p>
-                </div>
-            </div>
+                    </td>
+                </tr>
+            </table>
         </body>
         </html>
         """

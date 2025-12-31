@@ -220,6 +220,22 @@ class SubscriptionService:
         if not payment:
             return {"success": False, "error": "Payment record not found"}
 
+        # IDEMPOTENCY CHECK: If already completed, return success without reprocessing
+        # This prevents duplicate invoice creation when callback and webhook both verify the same payment
+        if payment.status == PaymentStatus.COMPLETED:
+            logger.info(
+                f"Payment already completed - skipping verification",
+                extra={"payment_id": payment.id, "reference": reference}
+            )
+            return {
+                "success": True,
+                "message": "Payment already verified",
+                "payment_id": payment.id,
+                "subscription_id": payment.subscription_id,
+                "amount": float(payment.amount),
+                "transaction_id": payment.paystack_transaction_id
+            }
+
         # Verify with Paystack
         verification_result = await self.paystack.verify_transaction(reference)
 
@@ -872,8 +888,55 @@ class SubscriptionService:
                 f"Please wait for the plan change to complete or cancel the scheduled change."
             )
 
+        # IDEMPOTENCY CHECK: Check for existing pending renewal payments
+        # This prevents duplicate payments when user double-clicks "Renew" button
+        existing_pending_payment = self.db.query(Payment).filter(
+            and_(
+                Payment.subscription_id == subscription_id,
+                Payment.transaction_type == TransactionType.RENEWAL,
+                Payment.status == PaymentStatus.PENDING,
+                Payment.created_at > datetime.now(timezone.utc) - timedelta(hours=24)
+            )
+        ).first()
+
+        if existing_pending_payment:
+            # Calculate new period dates from existing payment metadata for response
+            metadata = existing_pending_payment.payment_metadata or {}
+            new_period_start_str = metadata.get("new_period_start")
+            new_period_end_str = metadata.get("new_period_end")
+
+            logger.info(
+                f"Renewal payment already in progress - returning existing payment",
+                extra={
+                    "subscription_id": subscription_id,
+                    "payment_id": existing_pending_payment.id,
+                    "reference": existing_pending_payment.paystack_reference
+                }
+            )
+
+            return {
+                "success": True,
+                "message": "Renewal payment already in progress",
+                "subscription_id": subscription.id,
+                "payment_id": existing_pending_payment.id,
+                "payment_url": f"https://checkout.paystack.com/{existing_pending_payment.paystack_access_code}",
+                "payment_reference": existing_pending_payment.paystack_reference,
+                "amount": float(existing_pending_payment.amount),
+                "currency": subscription.currency,
+                "new_period_start": new_period_start_str,
+                "new_period_end": new_period_end_str
+            }
+
         # Calculate renewal amount (full plan cost, no proration)
-        renewal_amount = subscription.amount
+        # For trial subscriptions (amount = 0.00), use the actual plan cost
+        plan = self.plan_service.get_plan_by_id(subscription.plan_id)
+        if not plan:
+            raise ValueError("Plan not found for subscription")
+
+        if subscription.billing_cycle == BillingCycle.MONTHLY:
+            renewal_amount = plan.monthly_plan_cost
+        else:  # YEARLY
+            renewal_amount = plan.yearly_plan_cost
 
         # Calculate new billing period dates
         now = datetime.now(timezone.utc)

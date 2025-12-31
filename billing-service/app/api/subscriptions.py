@@ -712,7 +712,7 @@ async def renew_subscription(
     try:
         subscription_service = SubscriptionService(db)
 
-        # Verify subscription exists and belongs to tenant
+        # Verify the subscription exists and belongs to the tenant
         subscription = subscription_service.get_subscription_by_id(subscription_id)
         if not subscription:
             raise HTTPException(

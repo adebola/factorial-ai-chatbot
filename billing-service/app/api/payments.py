@@ -329,7 +329,27 @@ async def handle_paystack_webhook(
             if event_type == "charge.success":
                 reference = data.get("reference")
                 if reference:
-                    # Verify and process payment
+                    # IDEMPOTENCY CHECK: Check if payment already completed (callback may have processed it)
+                    # This avoids redundant verification when callback already processed the payment
+                    payment = db.query(Payment).filter(
+                        Payment.paystack_reference == reference
+                    ).first()
+
+                    if payment and payment.status == PaymentStatus.COMPLETED:
+                        logger.info(
+                            f"Payment already completed - webhook skipped",
+                            extra={"reference": reference, "payment_id": payment.id}
+                        )
+                        # Mark webhook as processed successfully
+                        paystack_service.mark_webhook_processed(webhook.id, success=True)
+                        return {
+                            "success": True,
+                            "message": "Payment already processed",
+                            "event_type": event_type,
+                            "event_id": event_id
+                        }
+
+                    # Verify and process payment (only if not already completed)
                     await subscription_service.verify_subscription_payment(reference)
             
             elif event_type == "charge.failed":

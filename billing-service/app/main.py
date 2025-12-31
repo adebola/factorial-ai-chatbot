@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Billing Service...")
     logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     logger.info(f"API Version: {settings.API_V1_STR}")
+    logger.info(f"FrontEnd URL: {os.getenv('FRONTEND_URL', 'http://localhost:3000')}")
 
     # Note: Database tables are managed by Alembic migrations
     # Run: alembic upgrade head (before starting service)

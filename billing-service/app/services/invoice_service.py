@@ -164,17 +164,48 @@ class InvoiceService:
             Created invoice or None if already exists
         """
         try:
-            # Check if invoice already exists for this payment
+            # IMPROVED DUPLICATE DETECTION: Check if invoice already exists for this payment
+
+            # First, check if payment already has an invoice linked
+            if payment.invoice_id:
+                existing_invoice = self.db.query(Invoice).filter(
+                    Invoice.id == payment.invoice_id
+                ).first()
+                if existing_invoice:
+                    logger.info(
+                        f"Invoice already exists for payment (linked)",
+                        extra={
+                            "payment_id": payment.id,
+                            "invoice_id": existing_invoice.id,
+                            "invoice_number": existing_invoice.invoice_number
+                        }
+                    )
+                    return existing_invoice
+
+            # Second, check if any invoice was created for this subscription within a small time window
+            # This catches race conditions where callback and webhook create invoices simultaneously
+            from datetime import timedelta
             existing_invoice = self.db.query(Invoice).filter(
                 and_(
                     Invoice.subscription_id == payment.subscription_id,
-                    Invoice.period_start == payment.created_at,
-                    Invoice.status == PaymentStatus.COMPLETED.value
+                    Invoice.created_at > payment.created_at - timedelta(seconds=5),
+                    Invoice.created_at < payment.created_at + timedelta(seconds=5),
+                    Invoice.total_amount == payment.amount
                 )
             ).first()
 
             if existing_invoice:
-                logger.info(f"Invoice already exists for payment {payment.id}")
+                # Link payment to existing invoice
+                payment.invoice_id = existing_invoice.id
+                self.db.commit()
+                logger.info(
+                    f"Found existing invoice - linking to payment",
+                    extra={
+                        "payment_id": payment.id,
+                        "invoice_id": existing_invoice.id,
+                        "invoice_number": existing_invoice.invoice_number
+                    }
+                )
                 return existing_invoice
 
             # Get subscription details
