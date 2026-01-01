@@ -21,7 +21,7 @@ from ..models.subscription import Invoice
 router = APIRouter()
 
 
-@router.get("/", response_model=Dict[str, Any])
+@router.get("", response_model=Dict[str, Any])
 async def get_invoices(
     limit: int = 50,
     offset: int = 0,
