@@ -16,11 +16,15 @@ target/
 .idea/**/uiDesigner.xml
 .idea/**/gradle.xml
 .idea/**/libraries
+
 # Docker Compose Files (may contain sensitive information)
 docker-build/docker-compose*.yml
 docker-build/docker-compose*.yaml
 **/docker-compose*.yml
 **/docker-compose*.yaml
+
+.DS_Store
+**/.DS_Store
 
 # Python Cache
 __pycache__/
