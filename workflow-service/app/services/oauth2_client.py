@@ -14,7 +14,7 @@ class OAuth2ServiceClient:
     
     def __init__(self):
         self.auth_server_url = os.environ.get("AUTHORIZATION_SERVER_URL", "http://localhost:9000")
-        self.client_id = os.environ.get("OAUTH2_CLIENT_ID", "factorialbot-client")
+        self.client_id = os.environ.get("OAUTH2_CLIENT_ID", "chatcraft-client")
         self.client_secret = os.environ.get("OAUTH2_CLIENT_SECRET", "secret")
         self.timeout = 30.0
         

@@ -1,6 +1,6 @@
 # Workflow Service
 
-The Workflow Service is a core component of the FactorialBot platform that enables tenants to create, manage, and execute complex conversational workflows with conditional logic, multi-step interactions, and seamless integration with the existing chat system.
+The Workflow Service is a core component of the ChatCraft platform that enables tenants to create, manage, and execute complex conversational workflows with conditional logic, multi-step interactions, and seamless integration with the existing chat system.
 
 ## Features
 

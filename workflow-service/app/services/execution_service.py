@@ -20,10 +20,12 @@ from ..core.exceptions import (
     WorkflowExecutionError, StepExecutionError, WorkflowNotFoundError, WorkflowStateError
 )
 from ..core.logging_config import get_logger
+from ..core.config import settings
 from .workflow_parser import WorkflowParser
 from .variable_resolver import VariableResolver
 from .action_service import ActionService
 from .state_manager import StateManager
+from .execution.workflow_executor import WorkflowExecutor
 
 logger = get_logger("execution_service")
 
@@ -35,6 +37,10 @@ class ExecutionService:
         self.db = db
         self.action_service = ActionService(db=db)
         self.state_manager = StateManager(db)
+
+        # Always use refactored WorkflowExecutor with Strategy pattern
+        self.workflow_executor = WorkflowExecutor(db)
+        logger.info("Using WorkflowExecutor with Strategy pattern executors")
 
     async def start_execution(
         self,
@@ -53,158 +59,8 @@ class ExecutionService:
         Returns:
             Workflow execution response
         """
-        try:
-            # Get the workflow
-            workflow = self.db.query(Workflow).filter(
-                Workflow.id == request.workflow_id,
-                Workflow.tenant_id == tenant_id
-            ).first()
-
-            if not workflow:
-                logger.error(f"Workflow {request.workflow_id} not found")
-                raise WorkflowNotFoundError(f"Workflow {request.workflow_id} not found")
-
-            if not workflow.is_active:
-                logger.error("Cannot execute inactive workflow")
-                raise WorkflowExecutionError("Cannot execute inactive workflow")
-
-            # Parse workflow definition
-            definition = WorkflowParser.parse_from_dict(workflow.definition)
-
-            # Get the first step
-            first_step = WorkflowParser.get_first_step(definition)
-            if not first_step:
-                raise WorkflowExecutionError("Workflow has no steps")
-
-            # Initialize variables
-            variables = VariableResolver.merge_variables(
-                definition.variables or {},
-                request.initial_variables or {},
-                request.context or {}
-            )
-            variables = VariableResolver.add_system_variables(variables)
-
-            # Create an execution record
-            execution = WorkflowExecution(
-                id=str(uuid.uuid4()),
-                workflow_id=workflow.id,
-                tenant_id=tenant_id,
-                session_id=request.session_id,
-                user_identifier=user_identifier,
-                status=ExecutionStatus.RUNNING.value,
-                current_step_id=first_step.id,
-                variables=variables,
-                total_steps=len(definition.steps)
-            )
-
-            self.db.add(execution)
-            self.db.commit()
-            self.db.refresh(execution)
-
-            # Save the initial state
-            await self.state_manager.save_state(
-                session_id=request.session_id,
-                execution_id=execution.id,
-                workflow_id=workflow.id,
-                tenant_id=tenant_id,
-                current_step_id=first_step.id,
-                variables=variables
-            )
-
-            # Update workflow usage
-            workflow.usage_count += 1
-            workflow.last_used_at = datetime.utcnow()
-            self.db.commit()
-
-            logger.info(f"Started workflow execution {execution.id} for workflow {workflow.id}")
-
-            # Execute the first step and capture the result
-            first_step_result = None
-            if first_step.type != SchemaStepType.INPUT and first_step.type != SchemaStepType.CHOICE:
-                # Execute non-interactive steps immediately
-                first_step_result = await self._execute_step_internal(execution, first_step, definition, variables)
-
-                # If the first step completed and has next_step that's interactive, prepare it
-                if first_step_result and first_step_result.next_step_id and not first_step_result.workflow_completed:
-                    next_step = WorkflowParser.get_step_by_id(definition, first_step_result.next_step_id)
-                    if next_step and next_step.type in [SchemaStepType.CHOICE, SchemaStepType.INPUT]:
-                        # Save the first message
-                        first_message = first_step_result.message
-
-                        # Prepare the interactive step for display
-                        if next_step.type == SchemaStepType.CHOICE:
-                            result = await self._execute_choice_step(next_step, variables, definition)
-                            # Combine first message with choice message
-                            combined_message = f"{first_message}\n\n{result.get('message')}" if result.get('message') else first_message
-                            first_step_result = StepExecutionResult(
-                                success=True,
-                                step_id=next_step.id,
-                                step_type=next_step.type,
-                                message=combined_message,
-                                choices=result.get("choices"),
-                                input_required=result.get("input_required"),
-                                next_step_id=None,
-                                workflow_completed=False
-                            )
-
-                            # Update state to reflect we're waiting for choice
-                            await self.state_manager.advance_step(
-                                execution.session_id,
-                                next_step.id,
-                                waiting_for_input="choice"
-                            )
-                        elif next_step.type == SchemaStepType.INPUT:
-                            result = await self._execute_input_step(next_step, variables, definition)
-                            # Combine first message with input prompt
-                            combined_message = f"{first_message}\n\n{result.get('message')}" if result.get('message') else first_message
-                            first_step_result = StepExecutionResult(
-                                success=True,
-                                step_id=next_step.id,
-                                step_type=next_step.type,
-                                message=combined_message,
-                                input_required=result.get("input_required"),
-                                next_step_id=None,
-                                workflow_completed=False
-                            )
-
-                            # Update state to reflect we're waiting for input
-                            await self.state_manager.advance_step(
-                                execution.session_id,
-                                next_step.id,
-                                waiting_for_input="input"
-                            )
-            else:
-                # For interactive steps (input/choice), just prepare them for display
-                if first_step.type == SchemaStepType.CHOICE:
-                    result = await self._execute_choice_step(first_step, variables, definition)
-                    first_step_result = StepExecutionResult(
-                        success=True,
-                        step_id=first_step.id,
-                        step_type=first_step.type,
-                        message=result.get("message"),
-                        choices=result.get("choices"),
-                        input_required=result.get("input_required"),
-                        next_step_id=None,
-                        workflow_completed=False
-                    )
-                elif first_step.type == SchemaStepType.INPUT:
-                    result = await self._execute_input_step(first_step, variables, definition)
-                    first_step_result = StepExecutionResult(
-                        success=True,
-                        step_id=first_step.id,
-                        step_type=first_step.type,
-                        message=result.get("message"),
-                        input_required=result.get("input_required"),
-                        next_step_id=None,
-                        workflow_completed=False
-                    )
-
-            return self._to_execution_response(execution, first_step_result)
-
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to start execution: {e}")
-            raise
+        # Direct call to refactored implementation
+        return await self._start_execution_refactored(request, tenant_id, user_identifier)
 
     async def execute_step(
         self,
@@ -221,334 +77,8 @@ class ExecutionService:
         Returns:
             Step execution result
         """
-        try:
-            # Get execution
-            execution = self.db.query(WorkflowExecution).filter(
-                WorkflowExecution.id == request.execution_id,
-                WorkflowExecution.tenant_id == tenant_id
-            ).first()
-
-            if not execution:
-                logger.error(f"Execution {request.execution_id} not found")
-                raise WorkflowExecutionError(f"Execution {request.execution_id} not found")
-
-            if execution.status != ExecutionStatus.RUNNING.value:
-                logger.error(f"Execution is not running (status: {execution.status})")
-                raise WorkflowExecutionError(f"Execution is not running (status: {execution.status})")
-
-            # Get workflow and definition
-            workflow = self.db.query(Workflow).filter(
-                Workflow.id == execution.workflow_id
-            ).first()
-
-            if not workflow:
-                logger.error(f"Workflow {execution.workflow_id} not found")
-                raise WorkflowNotFoundError(f"Workflow {execution.workflow_id} not found")
-
-            logger.info(f"Executing Workflow {workflow.id}, Step {execution.id}")
-
-            definition = WorkflowParser.parse_from_dict(workflow.definition)
-
-            # Get the current step
-            current_step = WorkflowParser.get_step_by_id(definition, execution.current_step_id)
-            if not current_step:
-                raise StepExecutionError(execution.current_step_id, "Step not found in workflow definition")
-
-            # Get current variables from the state
-            state = await self.state_manager.get_state(request.session_id)
-            if not state:
-                raise WorkflowStateError(f"No state found for session {request.session_id}")
-
-            variables = state.get("variables", {})
-            logger.info(f"variables: {variables}")
-
-            # Process user input if provided (but not for CHOICE steps - those use user_choice)
-            if request.user_input and current_step.type != SchemaStepType.CHOICE:
-                logger.info(f"Current step {current_step}")
-                logger.info(f"Request Input {request.user_input}")
-                logger.info(f"Variables {variables}")
-
-                variables = self._process_user_input(current_step, request.user_input, variables)
-                logger.info(f"Variables saved to state after processing user input new variable {variables}")
-                # Save updated variables to state immediately (same as user_choice handling)
-                await self.state_manager.update_variables(request.session_id, variables)
-
-            # For CHOICE steps, treat user_input as user_choice if user_choice is not provided
-            # This handles frontends that send user_input instead of user_choice for selections
-            if current_step.type == SchemaStepType.CHOICE and request.user_input and not request.user_choice:
-                logger.info(f"CHOICE step received user_input instead of user_choice, treating as choice: '{request.user_input}'")
-                request.user_choice = request.user_input
-
-
-            if request.user_choice:
-                logger.info(f"BEFORE _process_user_choice: variables keys = {list(variables.keys())}")
-                variables = self._process_user_choice(current_step, request.user_choice, variables)
-                logger.info(f"AFTER _process_user_choice: variables keys = {list(variables.keys())}")
-                logger.info(f"__selected_option_next_step = {variables.get('__selected_option_next_step')}")
-
-                # Save updated variables to state immediately so they're available in _execute_step_internal
-                await self.state_manager.update_variables(request.session_id, variables)
-                logger.info(f"Variables saved to state successfully")
-
-            # Update context if provided
-            if request.context:
-                variables = VariableResolver.merge_variables(variables, request.context)
-
-            # CRITICAL FIX: Check if this is a CHOICE or INPUT step WITHOUT user input
-            # If so, prepare it for display manually instead of executing it
-            # This prevents triggering "already completed" logic that causes workflow to hang
-            if (current_step.type in [SchemaStepType.CHOICE, SchemaStepType.INPUT] and
-                not request.user_choice and not request.user_input):
-
-                logger.info(f"Preparing {current_step.type.value} step for first-time display without execution")
-
-                if current_step.type == SchemaStepType.CHOICE:
-                    # Manually prepare CHOICE step
-                    message = VariableResolver.resolve_content(current_step.content, variables)
-                    choices = []
-
-                    if current_step.options:
-                        for option in current_step.options:
-                            if hasattr(option, 'text'):
-                                choices.append(VariableResolver.resolve_content(option.text, variables))
-
-                    result = StepExecutionResult(
-                        success=True,
-                        step_id=current_step.id,
-                        step_type=current_step.type,
-                        workflow_id=execution.workflow_id,
-                        message=message,
-                        choices=choices,
-                        input_required="choice",
-                        workflow_completed=False,
-                        next_step_id=None
-                    )
-
-                    logger.info(f"CHOICE step prepared: {len(choices)} choices available")
-
-                elif current_step.type == SchemaStepType.INPUT:
-                    # Manually prepare INPUT step
-                    message = VariableResolver.resolve_content(current_step.content, variables)
-
-                    result = StepExecutionResult(
-                        success=True,
-                        step_id=current_step.id,
-                        step_type=current_step.type,
-                        workflow_id=execution.workflow_id,
-                        message=message,
-                        input_required="text",
-                        workflow_completed=False,
-                        next_step_id=None
-                    )
-
-                    logger.info(f"INPUT step prepared for variable: {current_step.variable}")
-            else:
-                # Execute normally if not a first-time interactive step
-                result = await self._execute_step_internal(execution, current_step, definition, variables)
-
-            # Update execution progress
-            execution.steps_completed += 1
-            self.db.commit()
-
-            # If user provided input/choice on an INPUT/CHOICE step, manually set next_step_id for auto-execution
-            # This is needed because INPUT/CHOICE steps don't return next_step_id when displaying prompts
-            if (current_step.type == SchemaStepType.INPUT and request.user_input):
-                if not result.next_step_id and current_step.next_step:
-                    result.next_step_id = current_step.next_step
-                    logger.info(f"User input provided, setting next_step_id to {current_step.next_step}")
-
-            # If this was a choice/input step and we have a next_step, execute it automatically
-            if (current_step.type in [SchemaStepType.CHOICE, SchemaStepType.INPUT] and
-                result.next_step_id and not result.workflow_completed and
-                (request.user_choice or request.user_input)):
-
-                logger.info(
-                    f"User interaction completed on {current_step.type.value} step, "
-                    f"next_step_id={result.next_step_id}, "
-                    f"user_choice={request.user_choice}, "
-                    f"user_input={request.user_input}"
-                )
-
-                # Loop through non-interactive steps until we reach an interactive step
-                current_next_step_id = result.next_step_id
-                max_iterations = 50  # Prevent infinite loops
-                iterations = 0
-                final_result = result
-
-                while current_next_step_id and iterations < max_iterations:
-                    iterations += 1
-
-                    # Get the next step
-                    next_step = WorkflowParser.get_step_by_id(definition, current_next_step_id)
-
-                    if not next_step:
-                        logger.warning(f"Next step {current_next_step_id} not found in workflow definition")
-                        break
-
-                    logger.info(
-                        f"Auto-executing step {iterations}: id={next_step.id}, "
-                        f"type={next_step.type.value}"
-                    )
-
-                    # Get updated variables from state
-                    updated_state = await self.state_manager.get_state(request.session_id)
-                    if updated_state:
-                        variables = updated_state.get("variables", {})
-
-                    # CRITICAL FIX: Check if this is an interactive step BEFORE executing it
-                    # Interactive steps (MESSAGE, CHOICE, INPUT) require user interaction
-                    # We should prepare them for display but NOT execute them in the auto-loop
-                    if next_step.type in [SchemaStepType.MESSAGE, SchemaStepType.CHOICE, SchemaStepType.INPUT]:
-                        logger.info(f"Reached interactive step {next_step.type.value}, preparing for user display")
-
-                        # For MESSAGE steps, resolve the content with variables and prepare for display
-                        if next_step.type == SchemaStepType.MESSAGE:
-                            message = VariableResolver.resolve_content(next_step.content, variables)
-
-                            # Determine if workflow completes after this message
-                            next_step_id = next_step.next_step if next_step.next_step else None
-                            workflow_completed = False
-
-                            if not next_step_id:
-                                workflow_completed = True
-                                # Mark workflow as completed in variables
-                                variables["__workflow_completed"] = True
-                                await self.state_manager.update_variables(request.session_id, variables)
-                            else:
-                                # Check if the next_step actually exists
-                                next_step_exists = WorkflowParser.get_step_by_id(definition, next_step_id) is not None
-                                if not next_step_exists:
-                                    logger.info(f"MESSAGE step next_step '{next_step_id}' does not exist, marking workflow as completed")
-                                    workflow_completed = True
-                                    next_step_id = None
-                                    variables["__workflow_completed"] = True
-                                    await self.state_manager.update_variables(request.session_id, variables)
-
-                            # Return the MESSAGE result for display
-                            final_result = StepExecutionResult(
-                                success=True,
-                                step_id=next_step.id,
-                                step_type=next_step.type,
-                                workflow_id=execution.workflow_id,
-                                message=message,
-                                next_step_id=next_step_id,
-                                workflow_completed=workflow_completed
-                            )
-
-                            # Update execution step counter
-                            execution.steps_completed += 1
-                            self.db.commit()
-
-                        # For CHOICE steps, manually prepare choices WITHOUT executing
-                        # This prevents triggering the "already completed" logic
-                        elif next_step.type == SchemaStepType.CHOICE:
-                            message = VariableResolver.resolve_content(next_step.content, variables)
-                            choices = []
-
-                            if next_step.options:
-                                for option in next_step.options:
-                                    if hasattr(option, 'text'):
-                                        choices.append(VariableResolver.resolve_content(option.text, variables))
-
-                            final_result = StepExecutionResult(
-                                success=True,
-                                step_id=next_step.id,
-                                step_type=next_step.type,
-                                workflow_id=execution.workflow_id,
-                                message=message,
-                                choices=choices,
-                                input_required="choice",
-                                workflow_completed=False
-                            )
-
-                            # Update execution step counter
-                            execution.steps_completed += 1
-                            self.db.commit()
-
-                            logger.info(
-                                f"CHOICE step prepared for display: step_id={next_step.id}, "
-                                f"choices_count={len(choices)}"
-                            )
-
-                        # For INPUT steps, manually prepare prompt WITHOUT executing
-                        # This prevents triggering the "already provided" logic
-                        elif next_step.type == SchemaStepType.INPUT:
-                            message = VariableResolver.resolve_content(next_step.content, variables)
-
-                            final_result = StepExecutionResult(
-                                success=True,
-                                step_id=next_step.id,
-                                step_type=next_step.type,
-                                workflow_id=execution.workflow_id,
-                                message=message,
-                                input_required="text",
-                                workflow_completed=False
-                            )
-
-                            # Update execution step counter
-                            execution.steps_completed += 1
-                            self.db.commit()
-
-                            logger.info(
-                                f"INPUT step prepared for display: step_id={next_step.id}, "
-                                f"variable={next_step.variable}"
-                            )
-
-                        # Stop auto-execution at interactive steps
-                        logger.info(f"Stopping auto-execution at interactive step {next_step.type.value}")
-                        break
-
-                    # Execute non-interactive steps (CONDITION, ACTION, DELAY)
-                    logger.info(f"Executing non-interactive step: {next_step.type.value}")
-                    next_result = await self._execute_step_internal(execution, next_step, definition, variables)
-                    execution.steps_completed += 1
-                    self.db.commit()
-
-                    logger.info(
-                        f"Step executed: step_id={next_result.step_id}, "
-                        f"step_type={next_result.step_type.value}, "
-                        f"completed={next_result.workflow_completed}, "
-                        f"has_message={bool(next_result.message)}, "
-                        f"next_step_id={next_result.next_step_id}"
-                    )
-
-                    final_result = next_result
-
-                    # If workflow is completed, stop
-                    if next_result.workflow_completed:
-                        logger.info("Workflow completed, stopping auto-execution")
-                        # If the completion step has no message, provide a default completion message
-                        if not next_result.message:
-                            logger.info("Workflow completed with no message, adding default completion message")
-                            final_result = StepExecutionResult(
-                                success=next_result.success,
-                                step_id=next_result.step_id,
-                                step_type=next_result.step_type,
-                                workflow_id=next_result.workflow_id,
-                                message="Thank you! Your responses have been recorded.",
-                                workflow_completed=True
-                            )
-                        break
-
-                    # If this is a non-interactive step and has next_step, continue
-                    if next_result.next_step_id:
-                        current_next_step_id = next_result.next_step_id
-                        logger.info(f"Non-interactive step, continuing to {current_next_step_id}")
-                    else:
-                        logger.info("No more steps to execute")
-                        break
-
-                if iterations >= max_iterations:
-                    logger.error(f"Auto-execution exceeded maximum iterations ({max_iterations})")
-
-                return final_result
-
-            return result
-
-        except Exception as e:
-            self.db.rollback()
-            logger.error(f"Failed to execute step: {e}")
-            raise
+        # Direct call to refactored implementation
+        return await self._execute_step_refactored(request, tenant_id)
 
     async def cancel_execution(self, execution_id: str, tenant_id: str) -> bool:
         """
@@ -1148,3 +678,227 @@ class ExecutionService:
             started_at=execution.started_at,
             completed_at=execution.completed_at
         )
+    # ============================================================================
+    # REFACTORED METHODS - Using Strategy Pattern Executors
+    # ============================================================================
+
+    async def _start_execution_refactored(
+        self,
+        request: ExecutionStartRequest,
+        tenant_id: str,
+        user_identifier: Optional[str] = None
+    ) -> WorkflowExecutionResponse:
+        """
+        REFACTORED start_execution using WorkflowExecutor.
+
+        BEFORE: 170 lines of nested if-else
+        AFTER: 60 lines of clean delegation
+        """
+        # Get the workflow
+        workflow = self.db.query(Workflow).filter(
+            Workflow.id == request.workflow_id,
+            Workflow.tenant_id == tenant_id
+        ).first()
+
+        if not workflow:
+            logger.error(f"Workflow {request.workflow_id} not found")
+            raise WorkflowNotFoundError(f"Workflow {request.workflow_id} not found")
+
+        if not workflow.is_active:
+            logger.error("Cannot execute inactive workflow")
+            raise WorkflowExecutionError("Cannot execute inactive workflow")
+
+        # Parse workflow definition
+        definition = WorkflowParser.parse_from_dict(workflow.definition)
+
+        # Get the first step
+        first_step = WorkflowParser.get_first_step(definition)
+        if not first_step:
+            raise WorkflowExecutionError("Workflow has no steps")
+
+        # Initialize variables
+        variables = VariableResolver.merge_variables(
+            definition.variables or {},
+            request.initial_variables or {},
+            request.context or {}
+        )
+        variables = VariableResolver.add_system_variables(variables)
+
+        # Create an execution record
+        execution = WorkflowExecution(
+            id=str(uuid.uuid4()),
+            workflow_id=workflow.id,
+            tenant_id=tenant_id,
+            session_id=request.session_id,
+            user_identifier=user_identifier,
+            status=ExecutionStatus.RUNNING.value,
+            current_step_id=first_step.id,
+            variables=variables,
+            total_steps=len(definition.steps),
+            steps_completed=0
+        )
+
+        self.db.add(execution)
+        self.db.commit()
+        self.db.refresh(execution)
+
+        # Save the initial state
+        await self.state_manager.save_state(
+            session_id=request.session_id,
+            execution_id=execution.id,
+            workflow_id=workflow.id,
+            tenant_id=tenant_id,
+            current_step_id=first_step.id,
+            variables=variables
+        )
+
+        # Update workflow usage
+        workflow.usage_count += 1
+        workflow.last_used_at = datetime.utcnow()
+        self.db.commit()
+
+        logger.info(
+            "Started workflow execution with REFACTORED executor",
+            execution_id=execution.id,
+            workflow_id=workflow.id,
+            first_step_id=first_step.id
+        )
+
+        # Execute from the first step using WorkflowExecutor!
+        # This replaces all the complex if-else logic in the old code
+        result = await self.workflow_executor.auto_execute_steps(
+            execution=execution,
+            start_step_id=first_step.id,
+            definition=definition,
+            variables=variables
+        )
+
+        # Update state based on result
+        if result.workflow_completed:
+            execution.status = ExecutionStatus.COMPLETED.value
+            execution.completed_at = datetime.utcnow()
+        elif result.input_required:
+            await self.state_manager.advance_step(
+                execution.session_id,
+                result.step_id,
+                waiting_for_input=result.input_required
+            )
+
+        # Save updated variables to state
+        await self.state_manager.update_variables(request.session_id, variables)
+
+        # Commit all changes
+        self.db.commit()
+        self.db.refresh(execution)
+
+        return self._to_execution_response(execution, result)
+
+    async def _execute_step_refactored(
+        self,
+        request: ExecutionStepRequest,
+        tenant_id: str
+    ) -> StepExecutionResult:
+        """
+        REFACTORED execute_step using WorkflowExecutor.
+
+        BEFORE: 343 lines of chaos with nested if-else and 185-line while loop
+        AFTER: 100 lines of clean logic
+        """
+        # Get execution
+        execution = self.db.query(WorkflowExecution).filter(
+            WorkflowExecution.id == request.execution_id,
+            WorkflowExecution.tenant_id == tenant_id
+        ).first()
+
+        if not execution:
+            logger.error(f"Execution {request.execution_id} not found")
+            raise WorkflowExecutionError(f"Execution {request.execution_id} not found")
+
+        if execution.status != ExecutionStatus.RUNNING.value:
+            logger.error(f"Execution is not running (status: {execution.status})")
+            raise WorkflowExecutionError(f"Execution is not running (status: {execution.status})")
+
+        # Get workflow and definition
+        workflow = self.db.query(Workflow).filter(
+            Workflow.id == execution.workflow_id
+        ).first()
+
+        if not workflow:
+            logger.error(f"Workflow {execution.workflow_id} not found")
+            raise WorkflowNotFoundError(f"Workflow {execution.workflow_id} not found")
+
+        definition = WorkflowParser.parse_from_dict(workflow.definition)
+
+        # Get the current step
+        current_step = WorkflowParser.get_step_by_id(definition, execution.current_step_id)
+        if not current_step:
+            raise StepExecutionError(execution.current_step_id, "Step not found in workflow definition")
+
+        # Get current variables from the state
+        state = await self.state_manager.get_state(request.session_id)
+        if not state:
+            raise WorkflowStateError(f"No state found for session {request.session_id}")
+
+        variables = state.get("variables", {})
+
+        logger.info(
+            "Executing step with REFACTORED executor",
+            execution_id=execution.id,
+            step_id=current_step.id,
+            step_type=current_step.type.value
+        )
+
+        # Process user input (still use old helper methods - they work fine)
+        if request.user_input and current_step.type != SchemaStepType.CHOICE:
+            variables = self._process_user_input(current_step, request.user_input, variables)
+            await self.state_manager.update_variables(request.session_id, variables)
+
+        # Handle CHOICE step receiving user_input instead of user_choice
+        if current_step.type == SchemaStepType.CHOICE and request.user_input and not request.user_choice:
+            logger.info("CHOICE step received user_input, treating as user_choice")
+            request.user_choice = request.user_input
+
+        if request.user_choice:
+            variables = self._process_user_choice(current_step, request.user_choice, variables)
+            await self.state_manager.update_variables(request.session_id, variables)
+
+        # Update context if provided
+        if request.context:
+            variables = VariableResolver.merge_variables(variables, request.context)
+
+        # Execute using WorkflowExecutor!
+        # This replaces the 185-line while loop with clean delegation
+        result = await self.workflow_executor.auto_execute_steps(
+            execution=execution,
+            start_step_id=current_step.id,
+            definition=definition,
+            variables=variables
+        )
+
+        # Update state based on result
+        if result.workflow_completed:
+            execution.status = ExecutionStatus.COMPLETED.value
+            execution.completed_at = datetime.utcnow()
+        elif result.input_required:
+            await self.state_manager.advance_step(
+                execution.session_id,
+                result.step_id,
+                waiting_for_input=result.input_required
+            )
+
+        # Save updated variables
+        await self.state_manager.update_variables(request.session_id, variables)
+
+        # Commit all changes
+        self.db.commit()
+        self.db.refresh(execution)
+
+        logger.info(
+            "Step execution completed with REFACTORED executor",
+            execution_id=execution.id,
+            step_id=result.step_id,
+            workflow_completed=result.workflow_completed,
+            input_required=result.input_required
+        )
+
+        return result
