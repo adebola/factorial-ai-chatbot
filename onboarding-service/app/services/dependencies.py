@@ -34,12 +34,25 @@ class TokenClaims:
         """
         Check if user has tenant admin privileges.
 
-        Current role: ROLE_TENANT_ADMIN (tenant/organization admin)
-        Future role: ROLE_SYSTEM_ADMIN (system-wide admin, not yet implemented)
+        ROLE_TENANT_ADMIN: Organization/tenant-level admin
         """
         if not self.authorities:
             return False
         return "ROLE_TENANT_ADMIN" in self.authorities
+
+    @property
+    def is_system_admin(self) -> bool:
+        """
+        Check if user has SYSTEM_ADMIN privileges.
+
+        ROLE_SYSTEM_ADMIN: Cross-tenant system admin (Factorial Systems staff)
+        - Can view/manage all tenants
+        - Bypasses tenant_id filtering
+        - Full system-wide access
+        """
+        if not self.authorities:
+            return False
+        return "ROLE_SYSTEM_ADMIN" in self.authorities
 
 
 async def validate_token(
@@ -118,13 +131,35 @@ async def require_admin(
     claims: TokenClaims = Depends(validate_token)
 ) -> TokenClaims:
     """Ensure the user has admin privileges"""
-    
+
     if not claims.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
-    
+
+    return claims
+
+
+async def require_system_admin(
+    claims: TokenClaims = Depends(validate_token)
+) -> TokenClaims:
+    """
+    Ensure user has SYSTEM_ADMIN privileges.
+
+    Raises:
+        HTTPException 403: User lacks SYSTEM_ADMIN privileges
+    """
+    if not claims.is_system_admin:
+        logger.warning(
+            f"Unauthorized system admin access attempt - user_id: {claims.user_id}, authorities: {claims.authorities}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System administrator privileges required"
+        )
+
+    logger.info(f"System admin access granted - user_id: {claims.user_id}")
     return claims
 
 

@@ -1,31 +1,34 @@
+import io
+from typing import List, Dict, Any, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import List, Dict, Any, Optional
-import io
+from sqlalchemy.orm import Session
 
+from ..core.config import settings
 from ..core.database import get_db, get_vector_db
+from ..core.logging_config import get_logger
+from ..services.billing_client import BillingClient
+from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
 from ..services.document_processor import DocumentProcessor
 from ..services.pg_vector_ingestion import PgVectorIngestionService
-from ..services.categorized_vector_store import CategorizedVectorStore
-from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
-from ..services.billing_client import BillingClient
 from ..services.usage_publisher import usage_publisher
 
 router = APIRouter()
+logger = get_logger("documents")
 
 @router.post("/documents/upload")
 async def upload_document_with_categorization(
     file: UploadFile = File(...),
     categories: Optional[List[str]] = Form(None, description="User-specified categories"),
     tags: Optional[List[str]] = Form(None, description="User-specified tags"),
-    auto_categorize: bool = Form(True, description="Enable AI categorization"),
+    auto_categorize: Optional[bool] = Form(None, description="Enable AI categorization (None = use global config, True = force enable, False = force disable)"),
     claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db),
     vector_db: Session = Depends(get_vector_db)
 ) -> Dict[str, Any]:
-    """Upload and process a document with enhanced categorization (requires Bearer token authentication)"""
+    """Upload and process a document with optional categorization (requires Bearer token authentication)"""
 
     # Validate file type
     allowed_types = {
@@ -39,6 +42,27 @@ async def upload_document_with_categorization(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Unsupported file type: {file.content_type}"
         )
+
+    # Determine categorization setting using priority hierarchy:
+    # 1. Per-request parameter (highest priority)
+    # 2. Global configuration (default)
+    # 3. Hardcoded default (fallback)
+    if auto_categorize is not None:
+        # User explicitly set true or false in request - OVERRIDE global config
+        categorization_enabled = auto_categorize
+        categorization_source = "per-request override"
+    else:
+        # Fall back to global configuration
+        categorization_enabled = settings.ENABLE_AUTO_CATEGORIZATION
+        categorization_source = "global config"
+
+    logger.info(
+        "Document upload request received",
+        tenant_id=claims.tenant_id,
+        filename=file.filename,
+        categorization_enabled=categorization_enabled,
+        categorization_source=categorization_source
+    )
 
     # Check document upload limit via Billing Service API
     # This happens BEFORE processing to avoid wasted resources
@@ -55,7 +79,7 @@ async def upload_document_with_categorization(
         )
 
     try:
-        # Process document with categorization
+        # Process document with optional categorization
         doc_processor = DocumentProcessor(db)
         documents, document_id, classification = await doc_processor.process_document(
             tenant_id=claims.tenant_id,
@@ -64,7 +88,7 @@ async def upload_document_with_categorization(
             content_type=file.content_type,
             user_categories=categories,
             user_tags=tags,
-            auto_categorize=auto_categorize
+            auto_categorize=categorization_enabled
         )
 
         # Ingest into vector store (metadata is already in documents)
@@ -87,20 +111,24 @@ async def upload_document_with_categorization(
             print(f"Failed to publish document usage event: {e}")
 
         return {
-            "message": "Document uploaded and categorized successfully",
+            "message": f"Document uploaded ({'with' if categorization_enabled else 'without'} categorization)",
             "document_id": document_id,
             "filename": file.filename,
             "chunks_created": len(documents),
-            "classification": {
-                "categories": classification.categories if classification else [],
-                "tags": classification.tags if classification else [],
-                "content_type": classification.content_type if classification else "document",
-                "language": classification.language if classification else "en",
-                "confidence": max([c["confidence"] for c in classification.categories]) if classification and classification.categories else 0
-            },
-            "user_specified": {
-                "categories": categories or [],
-                "tags": tags or []
+            "categorization": {
+                "enabled": categorization_enabled,
+                "source": categorization_source,
+                "classification": {
+                    "categories": classification.categories if classification else [],
+                    "tags": classification.tags if classification else [],
+                    "content_type": classification.content_type if classification else "document",
+                    "language": classification.language if classification else "en",
+                    "confidence": max([c["confidence"] for c in classification.categories]) if classification and classification.categories else 0
+                },
+                "user_specified": {
+                    "categories": categories or [],
+                    "tags": tags or []
+                }
             },
             "tenant_id": claims.tenant_id,
             "tenant_name": tenant_details.get("name")

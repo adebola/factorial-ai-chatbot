@@ -1176,7 +1176,7 @@ class WidgetService:
     def _generate_css(self, context: Dict[str, Any]) -> str:
         """Generate additional CSS file (optional)"""
         css_template = """
-/* Additional CSS customizations for FactorialBot Chat Widget */
+/* Additional CSS customizations for ChatCraft Chat Widget */
 /* This file is optional and can be used for advanced customizations */
 
 .factorial-chat-widget {
@@ -1241,7 +1241,7 @@ class WidgetService:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FactorialBot Chat Widget - {{ tenant_name }}</title>
+    <title>ChatCraft Chat Widget - {{ tenant_name }}</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

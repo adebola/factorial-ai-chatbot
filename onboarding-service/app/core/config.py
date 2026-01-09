@@ -23,7 +23,10 @@ class Settings(BaseSettings):
 
     # Deprecated (kept for backward compatibility)
     USE_JAVASCRIPT_SCRAPING: bool = False
-    
+
+    # Categorization Settings (non-sensitive)
+    ENABLE_AUTO_CATEGORIZATION: bool = False  # Enable automatic AI categorization for documents/websites
+
     # Password Policy (non-sensitive)
     PASSWORD_MIN_LENGTH: int = 8
 

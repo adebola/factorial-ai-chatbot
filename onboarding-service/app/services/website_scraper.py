@@ -66,6 +66,49 @@ class WebsiteScraper:
             chunk_overlap=50,
             length_function=len,
         )
+
+    def should_skip_url(self, url: str) -> bool:
+        """
+        Check if URL should be skipped during scraping.
+
+        Filters out non-content URLs like:
+        - Cloudflare internal pages (/cdn-cgi/)
+        - Email links (mailto:)
+        - Phone links (tel:)
+        - JavaScript pseudo-links (javascript:)
+        - Anchor-only fragments
+
+        Args:
+            url: URL to check
+
+        Returns:
+            True if URL should be skipped, False otherwise
+        """
+        if not url:
+            return True
+
+        url_lower = url.lower().strip()
+
+        # Skip empty or invalid URLs
+        if not url_lower or url_lower == '#':
+            return True
+
+        # Patterns to skip
+        skip_patterns = [
+            '/cdn-cgi/',        # Cloudflare internal pages
+            'mailto:',          # Email links
+            'tel:',             # Phone links
+            'javascript:',      # JavaScript links
+            'data:',            # Data URIs
+            'void(0)',          # JavaScript void
+        ]
+
+        for pattern in skip_patterns:
+            if pattern in url_lower:
+                logger.debug(f"Skipping URL (matched '{pattern}'): {url}")
+                return True
+
+        return False
     
     def start_website_ingestion(self, tenant_id: str, base_url: str) -> WebsiteIngestion:
         """Start website ingestion process"""
@@ -126,6 +169,7 @@ class WebsiteScraper:
             visited_urls = set()
             all_documents = []
             urls_to_visit = [ingestion.base_url]
+            failed_urls = []  # Track failed URLs with error details
 
             parsed_base = urlparse(ingestion.base_url)
             base_domain = f"{parsed_base.netloc}"
@@ -209,22 +253,39 @@ class WebsiteScraper:
                         new_urls = await self._extract_links_with_strategy(current_url, base_domain)
 
                         links_added = 0
+                        links_filtered = 0
                         for url in new_urls:
+                            # Filter out non-content URLs before adding to queue
+                            if self.should_skip_url(url):
+                                links_filtered += 1
+                                continue
+
+                            # Check for duplicates
                             if url not in visited_urls and url not in urls_to_visit:
                                 urls_to_visit.append(url)
                                 links_added += 1
 
-                        if links_added > 0:
+                        if links_added > 0 or links_filtered > 0:
                             logger.debug(
-                                f"Found {links_added} new URLs to visit",
+                                f"Found {links_added} new URLs to visit ({links_filtered} filtered)",
                                 tenant_id=tenant_id,
                                 url=current_url,
                                 new_links=links_added,
+                                filtered_links=links_filtered,
                                 total_queue=len(urls_to_visit)
                             )
 
                     else:
                         pages_failed += 1
+
+                        # Track failed URL
+                        failed_urls.append({
+                            "url": current_url,
+                            "page_number": page_number,
+                            "error": "No content returned",
+                            "timestamp": datetime.now().isoformat()
+                        })
+
                         logger.warning(
                             f"❌ Page {page_number}: Scraping failed (no content returned)",
                             tenant_id=tenant_id,
@@ -236,6 +297,15 @@ class WebsiteScraper:
                 except Exception as e:
                     page_duration = time.time() - page_start_time
                     pages_failed += 1
+
+                    # Track failed URL with error details
+                    failed_urls.append({
+                        "url": current_url,
+                        "page_number": page_number,
+                        "error": str(e),
+                        "error_type": type(e).__name__,
+                        "timestamp": datetime.now().isoformat()
+                    })
 
                     logger.error(
                         f"❌ Page {page_number}: Exception during scraping",
@@ -282,6 +352,16 @@ class WebsiteScraper:
             # Log session statistics
             self._log_session_statistics(tenant_id, ingestion_id)
 
+            # Log failed URLs if any
+            if failed_urls:
+                logger.warning(
+                    f"⚠️ {len(failed_urls)} URLs failed during ingestion",
+                    tenant_id=tenant_id,
+                    ingestion_id=ingestion_id,
+                    failed_count=len(failed_urls),
+                    failed_urls=failed_urls[:10]  # Log first 10 failures
+                )
+
             logger.info(
                 "✅ Website ingestion completed successfully",
                 tenant_id=tenant_id,
@@ -290,6 +370,7 @@ class WebsiteScraper:
                 pages_discovered=len(visited_urls),
                 pages_processed=pages_processed,
                 pages_failed=pages_failed,
+                failed_urls_count=len(failed_urls),
                 total_documents=len(all_documents),
                 duration_seconds=round(total_duration, 2)
             )

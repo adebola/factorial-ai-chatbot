@@ -1,5 +1,5 @@
 """
-Structured logging configuration for FactorialBot Onboarding Service.
+Structured logging configuration for ChatCraft Onboarding Service.
 
 This module sets up structured logging using Loguru + Structlog for:
 - Multi-tenant context tracking
@@ -9,7 +9,6 @@ This module sets up structured logging using Loguru + Structlog for:
 """
 
 import os
-import sys
 import uuid
 from typing import Any, Dict, Optional
 from contextvars import ContextVar

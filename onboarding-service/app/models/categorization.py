@@ -2,7 +2,7 @@
 Document categorization and tagging models.
 """
 import uuid
-from typing import List, Optional, Dict
+from typing import List, Dict
 from dataclasses import dataclass
 
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, Float, ForeignKey, UniqueConstraint

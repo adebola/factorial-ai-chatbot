@@ -25,7 +25,7 @@ async def ingest_website(
     website_url: str = Form(...),
     categories: Optional[List[str]] = Form(None, description="User-specified categories"),
     tags: Optional[List[str]] = Form(None, description="User-specified tags"),
-    auto_categorize: bool = Form(True, description="Enable AI categorization"),
+    auto_categorize: Optional[bool] = Form(None, description="Enable AI categorization (None = use global config, True = force enable, False = force disable)"),
     claims: TokenClaims = Depends(validate_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
@@ -37,6 +37,27 @@ async def ingest_website(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid URL format"
         )
+
+    # Determine categorization setting using priority hierarchy:
+    # 1. Per-request parameter (highest priority)
+    # 2. Global configuration (default)
+    # 3. Hardcoded default (fallback)
+    if auto_categorize is not None:
+        # User explicitly set true or false in request - OVERRIDE global config
+        categorization_enabled = auto_categorize
+        categorization_source = "per-request override"
+    else:
+        # Fall back to global configuration
+        categorization_enabled = settings.ENABLE_AUTO_CATEGORIZATION
+        categorization_source = "global config"
+
+    logger.info(
+        "Website ingestion request received",
+        tenant_id=claims.tenant_id,
+        website_url=website_url,
+        categorization_enabled=categorization_enabled,
+        categorization_source=categorization_source
+    )
 
     # Check website ingestion limit via Billing Service API
     # This happens BEFORE starting the expensive scraping process
@@ -57,7 +78,7 @@ async def ingest_website(
         # Don't pass use_javascript parameter - let it use the default AUTO strategy
         scraper = WebsiteScraper(db)
         ingestion = scraper.start_website_ingestion(claims.tenant_id, website_url)
-        
+
         # Process in the background (in a real app, use Celery)
         # Pass environment variables and categorization parameters to background task
         import os
@@ -70,7 +91,7 @@ async def ingest_website(
                 openai_api_key=openai_key,
                 user_categories=categories,
                 user_tags=tags,
-                auto_categorize=auto_categorize,
+                auto_categorize=categorization_enabled,
                 scraping_strategy=scraper.strategy
             )
         )
@@ -79,12 +100,13 @@ async def ingest_website(
         tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)
 
         return {
-            "message": "Website ingestion started with categorization",
+            "message": f"Website ingestion started ({'with' if categorization_enabled else 'without'} categorization)",
             "ingestion_id": ingestion.id,
             "website_url": website_url,
             "status": "in_progress",
             "categorization": {
-                "auto_categorize": auto_categorize,
+                "enabled": categorization_enabled,
+                "source": categorization_source,
                 "user_categories": categories or [],
                 "user_tags": tags or []
             },
@@ -483,10 +505,10 @@ async def background_website_ingestion(
     openai_api_key: str = None,
     user_categories: Optional[List[str]] = None,
     user_tags: Optional[List[str]] = None,
-    auto_categorize: bool = True,
+    auto_categorize: bool = False,
     scraping_strategy: ScrapingStrategy = None
 ):
-    """Background task for website ingestion with categorization - creates its own database session"""
+    """Background task for website ingestion with optional categorization - creates its own database session"""
     logger.info(
         "Background ingestion task started",
         tenant_id=tenant_id,
@@ -569,14 +591,13 @@ async def background_website_ingestion(
         # Define pages_scraped for usage tracking and logging
         pages_scraped = len(documents) if documents else 0
 
-        # Categorize documents before vector ingestion
-        if documents:
+        # CONDITIONAL: Only categorize documents if enabled
+        if documents and auto_categorize:
             logger.info(
-                "Starting categorization for scraped pages",
+                "Categorization enabled - processing documents",
                 tenant_id=tenant_id,
                 ingestion_id=ingestion_id,
-                document_count=len(documents),
-                auto_categorize=auto_categorize
+                document_count=len(documents)
             )
 
             # Initialize categorization service
@@ -666,6 +687,15 @@ async def background_website_ingestion(
                 categories_discovered=len(categories_discovered),
                 tags_discovered=len(tags_discovered),
                 content_types=content_types_found
+            )
+
+        elif documents:
+            # Categorization disabled - skip AI classification
+            logger.info(
+                "Categorization disabled - skipping AI classification",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                document_count=len(documents)
             )
 
         # Ingest into vector store
