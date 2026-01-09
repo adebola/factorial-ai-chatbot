@@ -1,4 +1,4 @@
-# FactorialBot - Multi-Tenant AI Chat Platform
+# ChatCraft- Multi-Tenant AI Chat Platform
 
 A scalable, multi-tenant AI chat application built with FastAPI and LangChain that allows organizations to upload documents, scrape their websites, and provide AI-powered chat responses based on their knowledge base.
 

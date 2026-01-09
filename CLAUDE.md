@@ -325,7 +325,7 @@ The platform automatically generates embeddable chat widgets for tenants:
 - `integration-guide.html`: Comprehensive integration documentation
 
 ### Widget Features
-- 🎨 **Custom Branding**: Organization name and FactorialBot logo
+- 🎨 **Custom Branding**: Organization name and ChatCraft logo
 - 💬 **Real-time Chat**: WebSocket connection for instant responses
 - 📱 **Mobile Responsive**: Optimized for all screen sizes
 - 🌙 **Dark Mode**: Automatic dark mode support

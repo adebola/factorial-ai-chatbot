@@ -1,0 +1,1 @@
+scp -i ../../../devops/LightsailDefaultKey-eu-west-2.pem bitnami@3.11.231.243:/home/bitnami/devops/docker-compose.yml ./docker-compose-production-optimized.yml
