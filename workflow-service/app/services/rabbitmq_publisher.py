@@ -55,20 +55,24 @@ class RabbitMQPublisher:
     def _connect(self) -> bool:
         """Establish connection to RabbitMQ"""
         try:
-            # Force close any stale connections to prevent EOF errors
+            # Check if we already have a valid connection
             if self.connection:
                 try:
                     if not self.connection.is_closed:
-                        # Connection exists and is open
+                        # Connection exists and is open - reuse it
                         return True
-                    # Connection exists but is closed, clean it up
-                    self.connection.close()
                 except Exception as e:
-                    logger.warning(f"Error checking/closing stale connection: {e}")
-                finally:
-                    # Always reset connection objects when reconnecting
-                    self.connection = None
-                    self.channel = None
+                    logger.warning(f"Error checking connection status: {e}")
+
+                # Connection exists but is closed/broken - clean it up
+                try:
+                    self.connection.close()
+                except Exception:
+                    pass  # Ignore errors closing stale connection
+
+                # Reset connection objects before reconnecting
+                self.connection = None
+                self.channel = None
 
             credentials = pika.PlainCredentials(self.username, self.password)
             parameters = pika.ConnectionParameters(
