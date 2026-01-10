@@ -57,42 +57,48 @@ def upgrade():
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
 
-    # Create indexes for efficient queries
+    # Create indexes for efficient queries (idempotent - safe for re-runs)
     op.create_index(
         'ix_admin_actions_admin_user',
         'admin_actions',
-        ['admin_user_id']
+        ['admin_user_id'],
+        if_not_exists=True
     )
 
     op.create_index(
         'ix_admin_actions_action_type',
         'admin_actions',
-        ['action_type']
+        ['action_type'],
+        if_not_exists=True
     )
 
     op.create_index(
         'ix_admin_actions_target',
         'admin_actions',
-        ['target_type', 'target_id']
+        ['target_type', 'target_id'],
+        if_not_exists=True
     )
 
     op.create_index(
         'ix_admin_actions_tenant',
         'admin_actions',
-        ['target_tenant_id']
+        ['target_tenant_id'],
+        if_not_exists=True
     )
 
     op.create_index(
         'ix_admin_actions_created',
         'admin_actions',
-        ['created_at']
+        ['created_at'],
+        if_not_exists=True
     )
 
     # Composite index for common query patterns
     op.create_index(
         'ix_admin_actions_tenant_action_type',
         'admin_actions',
-        ['target_tenant_id', 'action_type', 'created_at']
+        ['target_tenant_id', 'action_type', 'created_at'],
+        if_not_exists=True
     )
 
 
