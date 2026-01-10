@@ -1,17 +1,22 @@
 """
 RabbitMQ Event Publisher for Chat Messages
 
+MIGRATED TO AIO-PIKA: Now uses async-native RabbitMQ operations with automatic reconnection.
+Eliminated manual retry logic, connection state management, and thread-safety concerns.
+
 Publishes chat message events with quality metrics to the quality events exchange.
 """
 
 import json
-import time
 import uuid
+import os
 from datetime import datetime
 from typing import Dict, Any, Optional
-import pika
-import os
-from pika.exceptions import AMQPConnectionError, StreamLostError, ConnectionClosedByBroker
+
+from aio_pika import connect_robust, Message, ExchangeType, DeliveryMode
+from aio_pika.abc import AbstractRobustConnection
+from aio_pika.exceptions import AMQPException
+
 from ..core.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -19,15 +24,15 @@ logger = get_logger(__name__)
 
 class ChatEventPublisher:
     """
-    Publisher for chat message events.
+    Async-native publisher for chat message events using aio-pika with automatic reconnection.
 
-    Publishes to RabbitMQ exchange for consumption by answer-quality-service.
+    Publishes to two exchanges:
+    - chat.events: For consumption by answer-quality-service (quality analysis)
+    - usage.events: For consumption by billing-service (usage tracking)
     """
 
     def __init__(self):
-        self.connection = None
-        self.channel = None
-        self._is_connected = False
+        self.connection: Optional[AbstractRobustConnection] = None
 
         # Get RabbitMQ config from environment
         self.rabbitmq_host = os.environ.get("RABBITMQ_HOST", "localhost")
@@ -40,155 +45,39 @@ class ChatEventPublisher:
         self.chat_exchange = os.environ.get("RABBITMQ_CHAT_EXCHANGE", "chat.events")  # For quality analysis
         self.usage_exchange = os.environ.get("RABBITMQ_USAGE_EXCHANGE", "usage.events")  # For usage tracking
 
-    def connect(self, max_retries: int = 3, retry_delay: int = 5):
-        """
-        Establish RabbitMQ connection with retry logic
+        logger.info("Chat event publisher initialized (aio-pika)")
 
-        Args:
-            max_retries: Maximum number of connection attempts (default: 3)
-            retry_delay: Delay in seconds between retries (default: 5)
-        """
-        # Close existing connection if it exists but is not open
-        if self.connection and not self.connection.is_open:
-            try:
-                self.connection.close()
-            except:
-                pass
-            self.connection = None
-            self.channel = None
-            self._is_connected = False
-
-        # Return if already connected
-        if self._is_connected and self.connection and self.connection.is_open:
+    async def connect(self):
+        """Establish robust connection with automatic reconnection."""
+        if self.connection and not self.connection.is_closed:
             return
 
-        retry_count = 0
-        while retry_count < max_retries:
-            try:
-                credentials = pika.PlainCredentials(
-                    self.rabbitmq_user,
-                    self.rabbitmq_password
-                )
-                parameters = pika.ConnectionParameters(
-                    host=self.rabbitmq_host,
-                    port=self.rabbitmq_port,
-                    virtual_host=self.rabbitmq_vhost,
-                    credentials=credentials,
-                    heartbeat=600,
-                    blocked_connection_timeout=300
-                )
+        self.connection = await connect_robust(
+            host=self.rabbitmq_host,
+            port=self.rabbitmq_port,
+            login=self.rabbitmq_user,
+            password=self.rabbitmq_password,
+            virtualhost=self.rabbitmq_vhost,
+            reconnect_interval=1.0,
+            fail_fast=False
+        )
 
-                self.connection = pika.BlockingConnection(parameters)
-                self.channel = self.connection.channel()
+        logger.info(
+            "✓ Successfully connected to RabbitMQ event publisher",
+            host=self.rabbitmq_host,
+            port=self.rabbitmq_port,
+            vhost=self.rabbitmq_vhost,
+            chat_exchange=self.chat_exchange,
+            usage_exchange=self.usage_exchange
+        )
 
-                # Declare both exchanges (idempotent)
-                self.channel.exchange_declare(
-                    exchange=self.chat_exchange,
-                    exchange_type="topic",
-                    durable=True
-                )
-                self.channel.exchange_declare(
-                    exchange=self.usage_exchange,
-                    exchange_type="topic",
-                    durable=True
-                )
+    async def close(self):
+        """Close RabbitMQ connection gracefully."""
+        if self.connection and not self.connection.is_closed:
+            await self.connection.close()
+            logger.info("Closed RabbitMQ chat event publisher connection")
 
-                self._is_connected = True
-
-                # Log successful connection with full details
-                connection_success = {
-                    "host": self.rabbitmq_host,
-                    "port": self.rabbitmq_port,
-                    "vhost": self.rabbitmq_vhost,
-                    "user": self.rabbitmq_user,
-                    "chat_exchange": self.chat_exchange,
-                    "usage_exchange": self.usage_exchange,
-                    "retry_attempt": retry_count + 1 if retry_count > 0 else 1
-                }
-
-                logger.info(
-                    "✓ Successfully connected to RabbitMQ event publisher",
-                    extra=connection_success
-                )
-
-                # Success - exit retry loop
-                return
-
-            except AMQPConnectionError as e:
-                retry_count += 1
-                self._is_connected = False
-                self.connection = None
-                self.channel = None
-
-                error_msg = str(e) if str(e) else repr(e)
-
-                # Log connection details for debugging
-                connection_details = {
-                    "host": self.rabbitmq_host,
-                    "port": self.rabbitmq_port,
-                    "vhost": self.rabbitmq_vhost,
-                    "user": self.rabbitmq_user,
-                    "error": error_msg,
-                    "error_type": type(e).__name__
-                }
-
-                if retry_count >= max_retries:
-                    logger.error(
-                        f"Failed to connect event publisher to RabbitMQ after {max_retries} attempts",
-                        extra=connection_details,
-                        exc_info=True
-                    )
-                    raise
-
-                logger.warning(
-                    f"Failed to connect event publisher to RabbitMQ (attempt {retry_count}/{max_retries}): {error_msg}. "
-                    f"Retrying in {retry_delay} seconds...",
-                    extra=connection_details
-                )
-                time.sleep(retry_delay)
-
-            except Exception as e:
-                retry_count += 1
-                self._is_connected = False
-                self.connection = None
-                self.channel = None
-
-                error_msg = str(e) if str(e) else repr(e)
-
-                # Log connection details for debugging
-                connection_details = {
-                    "host": self.rabbitmq_host,
-                    "port": self.rabbitmq_port,
-                    "vhost": self.rabbitmq_vhost,
-                    "user": self.rabbitmq_user,
-                    "error": error_msg,
-                    "error_type": type(e).__name__
-                }
-
-                if retry_count >= max_retries:
-                    logger.error(
-                        f"Unexpected error connecting event publisher to RabbitMQ after {max_retries} attempts",
-                        extra=connection_details,
-                        exc_info=True
-                    )
-                    raise
-
-                logger.warning(
-                    f"Unexpected error connecting event publisher (attempt {retry_count}/{max_retries}): {error_msg}. "
-                    f"Retrying in {retry_delay} seconds...",
-                    extra=connection_details,
-                    exc_info=True
-                )
-                time.sleep(retry_delay)
-
-    def close(self):
-        """Close RabbitMQ connection"""
-        if self.connection and self.connection.is_open:
-            self.connection.close()
-            self._is_connected = False
-            logger.info("Closed RabbitMQ connection")
-
-    def publish_message_created(
+    async def publish_message_created(
         self,
         tenant_id: str,
         session_id: str,
@@ -212,9 +101,7 @@ class ChatEventPublisher:
             True if published successfully, False otherwise
         """
         try:
-            # Ensure connection
-            if not self._is_connected:
-                self.connect()
+            await self.connect()
 
             # Build event payload
             event = {
@@ -231,19 +118,23 @@ class ChatEventPublisher:
             if message_type == "assistant" and quality_metrics:
                 event["quality_metrics"] = quality_metrics
 
-            # Publish message.created event to chat exchange for quality analysis
-            self.channel.basic_publish(
-                exchange=self.chat_exchange,
-                routing_key="message.created",
-                body=json.dumps(event, default=str),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent
+            async with self.connection.channel() as channel:
+                exchange = await channel.declare_exchange(
+                    self.chat_exchange,
+                    ExchangeType.TOPIC,
+                    durable=True
+                )
+
+                message = Message(
+                    body=json.dumps(event, default=str).encode(),
+                    delivery_mode=DeliveryMode.PERSISTENT,
                     content_type="application/json"
                 )
-            )
+
+                await exchange.publish(message, routing_key="message.created")
 
             logger.debug(
-                f"Published message.created event to chat exchange",
+                "Published message.created event to chat exchange",
                 tenant_id=tenant_id,
                 message_id=message_id,
                 message_type=message_type,
@@ -252,49 +143,6 @@ class ChatEventPublisher:
 
             return True
 
-        except (StreamLostError, ConnectionClosedByBroker) as e:
-            # Connection lost during publish - attempt immediate reconnection and retry
-            logger.warning(
-                f"RabbitMQ connection lost during publish: {e}. Attempting reconnection...",
-                tenant_id=tenant_id,
-                message_id=message_id,
-                error_type=type(e).__name__
-            )
-            self._is_connected = False
-            self.connection = None
-            self.channel = None
-
-            try:
-                # Attempt reconnection
-                self.connect()
-
-                # Retry publish once after reconnection
-                self.channel.basic_publish(
-                    exchange=self.chat_exchange,
-                    routing_key="message.created",
-                    body=json.dumps(event, default=str),
-                    properties=pika.BasicProperties(
-                        delivery_mode=2,  # Persistent
-                        content_type="application/json"
-                    )
-                )
-
-                logger.info(
-                    "Successfully republished message.created event after reconnection",
-                    tenant_id=tenant_id,
-                    message_id=message_id
-                )
-                return True
-
-            except Exception as retry_error:
-                logger.error(
-                    f"Failed to republish message.created event after reconnection: {retry_error}",
-                    tenant_id=tenant_id,
-                    message_id=message_id,
-                    exc_info=True
-                )
-                return False
-
         except Exception as e:
             logger.error(
                 f"Failed to publish message.created event: {e}",
@@ -302,11 +150,9 @@ class ChatEventPublisher:
                 message_id=message_id,
                 exc_info=True
             )
-            # Attempt reconnection for next publish
-            self._is_connected = False
             return False
 
-    def publish_chat_usage_event(
+    async def publish_chat_usage_event(
         self,
         tenant_id: str,
         session_id: str,
@@ -324,9 +170,7 @@ class ChatEventPublisher:
             True if published successfully, False otherwise
         """
         try:
-            # Ensure connection
-            if not self._is_connected:
-                self.connect()
+            await self.connect()
 
             # Build event payload
             event = {
@@ -338,68 +182,29 @@ class ChatEventPublisher:
                 "timestamp": datetime.now().isoformat()
             }
 
-            # Publish usage event to usage exchange for billing tracking
-            self.channel.basic_publish(
-                exchange=self.usage_exchange,
-                routing_key="usage.chat.message",
-                body=json.dumps(event, default=str),
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # Persistent
+            async with self.connection.channel() as channel:
+                exchange = await channel.declare_exchange(
+                    self.usage_exchange,
+                    ExchangeType.TOPIC,
+                    durable=True
+                )
+
+                message = Message(
+                    body=json.dumps(event, default=str).encode(),
+                    delivery_mode=DeliveryMode.PERSISTENT,
                     content_type="application/json"
                 )
-            )
+
+                await exchange.publish(message, routing_key="usage.chat.message")
 
             logger.info(
-                f"Published usage.chat.message event to usage exchange",
+                "Published usage.chat.message event to usage exchange",
                 tenant_id=tenant_id,
                 session_id=session_id,
                 message_count=message_count
             )
 
             return True
-
-        except (StreamLostError, ConnectionClosedByBroker) as e:
-            # Connection lost during publish - attempt immediate reconnection and retry
-            logger.warning(
-                f"RabbitMQ connection lost during usage event publish: {e}. Attempting reconnection...",
-                tenant_id=tenant_id,
-                session_id=session_id,
-                error_type=type(e).__name__
-            )
-            self._is_connected = False
-            self.connection = None
-            self.channel = None
-
-            try:
-                # Attempt reconnection
-                self.connect()
-
-                # Retry publish once after reconnection
-                self.channel.basic_publish(
-                    exchange=self.usage_exchange,
-                    routing_key="usage.chat.message",
-                    body=json.dumps(event, default=str),
-                    properties=pika.BasicProperties(
-                        delivery_mode=2,  # Persistent
-                        content_type="application/json"
-                    )
-                )
-
-                logger.info(
-                    "Successfully republished usage.chat.message event after reconnection",
-                    tenant_id=tenant_id,
-                    session_id=session_id
-                )
-                return True
-
-            except Exception as retry_error:
-                logger.error(
-                    f"Failed to republish usage.chat.message event after reconnection: {retry_error}",
-                    tenant_id=tenant_id,
-                    session_id=session_id,
-                    exc_info=True
-                )
-                return False
 
         except Exception as e:
             logger.error(
@@ -408,8 +213,6 @@ class ChatEventPublisher:
                 session_id=session_id,
                 exc_info=True
             )
-            # Attempt reconnection for next publish
-            self._is_connected = False
             return False
 
 

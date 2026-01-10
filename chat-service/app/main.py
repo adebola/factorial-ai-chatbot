@@ -1,5 +1,6 @@
 import time
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 
 # Load environment variables at startup
@@ -29,14 +30,11 @@ setup_logging(
 )
 logger = get_logger("main")
 
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
-)
 
-@app.on_event("startup")
-async def startup_event():
-    """Validate environment configuration on startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events - startup and shutdown"""
+    # Startup
     logger.info("Starting Chat Service...")
 
     # Check critical environment variables
@@ -60,10 +58,11 @@ async def startup_event():
         logger.info("Running RabbitMQ connection diagnostics...")
         log_diagnostics()
 
-    # Connect event publisher
+    # Connect event publisher (aio-pika with automatic reconnection)
     publisher_connected = False
     try:
-        event_publisher.connect()
+        logger.info("Connecting event publisher...")
+        await event_publisher.connect()
         publisher_connected = True
         logger.info("✓ Event publisher connected successfully")
     except Exception as e:
@@ -87,10 +86,9 @@ async def startup_event():
 
     logger.info("Chat Service startup completed")
 
+    yield
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Clean up resources on shutdown"""
+    # Shutdown
     logger.info("Shutting down Chat Service...")
 
     # Stop limit warning consumer
@@ -102,12 +100,19 @@ async def shutdown_event():
 
     # Close event publisher
     try:
-        event_publisher.close()
+        await event_publisher.close()
         logger.info("Event publisher closed successfully")
     except Exception as e:
         logger.error(f"Error closing event publisher: {e}", exc_info=True)
 
     logger.info("Chat Service shutdown completed")
+
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan
+)
 
 
 @app.middleware("http")
