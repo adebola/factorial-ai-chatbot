@@ -163,6 +163,13 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+              - id: billing-admin
+                uri: http://localhost:8004
+                predicates:
+                    - Path=/api/v1/billing/admin/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
                 # Chat Service Routes
               - id: chat-api
                 uri: http://localhost:8000
@@ -247,7 +254,7 @@ spring:
               - id: quality-admin
                 uri: http://localhost:8005
                 predicates:
-                    - Path=/api/v1/admin/**
+                    - Path=/api/v1/quality/admin/**
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 

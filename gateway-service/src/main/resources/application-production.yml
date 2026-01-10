@@ -160,6 +160,13 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            - id: billing-admin
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/api/v1/billing/admin/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             - id: onboarding-widgets
               uri: http://onboarding-service:8000
               predicates:
@@ -251,7 +258,7 @@ spring:
             - id: quality-admin
               uri: http://answer-quality-service:8000
               predicates:
-                - Path=/api/v1/admin/**
+                - Path=/api/v1/quality/admin/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 

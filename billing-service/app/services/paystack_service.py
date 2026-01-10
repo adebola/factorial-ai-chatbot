@@ -45,7 +45,7 @@ class PaystackService:
 
         # Generate reference if not provided
         if not reference:
-            reference = f"factorialbot_{uuid.uuid4().hex[:16]}"
+            reference = f"chatcraft_{uuid.uuid4().hex[:16]}"
 
         # Convert amount to kobo (Paystack requires the smallest currency unit)
         amount_in_kobo = int(amount * 100)
@@ -156,7 +156,7 @@ class PaystackService:
         """Charge a previously authorized payment method"""
 
         if not reference:
-            reference = f"factorialbot_{uuid.uuid4().hex[:16]}"
+            reference = f"chatcraft_{uuid.uuid4().hex[:16]}"
 
         # Convert amount to kobo
         amount_in_kobo = int(amount * 100)
