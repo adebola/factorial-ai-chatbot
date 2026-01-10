@@ -1,6 +1,7 @@
 import time
 import uuid
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -25,6 +26,7 @@ from .core.logging_config import (
 )
 from .services.jwt_validator import jwt_validator
 from .services.usage_publisher import usage_publisher
+from .services.rabbitmq_service import rabbitmq_service
 
 # Setup structured logging with configuration
 setup_logging(
@@ -33,15 +35,11 @@ setup_logging(
 )
 logger = get_logger("main")
 
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
-)
 
-
-@app.on_event("startup")
-async def startup_event():
-    """Validate environment configuration on startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan events - startup and shutdown"""
+    # Startup
     logger.info("Starting Onboarding Service...")
 
     # Check critical environment variables
@@ -52,18 +50,11 @@ async def startup_event():
     else:
         logger.info("OPENAI_API_KEY found - vector ingestion enabled")
 
-    # Connect usage event publisher
+    # Initialize RabbitMQ publishers (aio-pika with automatic reconnection)
     try:
-        usage_publisher.connect()
-
-        # Verify connection succeeded
-        if usage_publisher._is_connected():
-            logger.info("✓ Usage event publisher connected successfully")
-        else:
-            logger.error(
-                "Usage event publisher connection FAILED: Channel not available. "
-                "Service will continue but usage events will not be published until RabbitMQ is available."
-            )
+        logger.info("Connecting usage event publisher...")
+        await usage_publisher.connect()
+        logger.info("✓ Usage event publisher connected successfully")
     except Exception as e:
         logger.error(
             f"Failed to connect usage publisher: {e}. "
@@ -71,7 +62,45 @@ async def startup_event():
             exc_info=True
         )
 
+    try:
+        logger.info("Connecting RabbitMQ service...")
+        await rabbitmq_service.connect()
+        logger.info("✓ RabbitMQ service connected successfully")
+    except Exception as e:
+        logger.error(
+            f"Failed to connect RabbitMQ service: {e}. "
+            f"Service will continue but plan/logo events may fail to publish.",
+            exc_info=True
+        )
+
     logger.info("Onboarding Service startup completed")
+
+    yield
+
+    # Shutdown
+    logger.info("Shutting down Onboarding Service...")
+
+    # Close RabbitMQ publishers (aio-pika)
+    try:
+        await usage_publisher.close()
+        logger.info("Usage event publisher closed")
+    except Exception as e:
+        logger.error(f"Error closing usage publisher: {e}")
+
+    try:
+        await rabbitmq_service.close()
+        logger.info("RabbitMQ service closed")
+    except Exception as e:
+        logger.error(f"Error closing RabbitMQ service: {e}")
+
+    logger.info("Onboarding Service shutdown completed")
+
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan
+)
 
 
 @app.middleware("http")
