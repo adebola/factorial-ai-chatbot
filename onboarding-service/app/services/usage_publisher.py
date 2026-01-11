@@ -58,8 +58,7 @@ class UsageEventPublisher:
             login=self.rabbitmq_user,
             password=self.rabbitmq_password,
             virtualhost=self.rabbitmq_vhost,
-            reconnect_interval=1.0,
-            fail_fast=False
+            reconnect_interval=1.0
         )
 
         logger.info(

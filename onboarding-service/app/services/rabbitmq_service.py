@@ -42,8 +42,7 @@ class RabbitMQService:
             port=self.port,
             login=self.username,
             password=self.password,
-            reconnect_interval=1.0,
-            fail_fast=False
+            reconnect_interval=1.0
         )
 
         logger.info(f"Connected to RabbitMQ at {self.host}:{self.port}")
