@@ -464,7 +464,7 @@ async def create_subscription(
         
         # Send message to auth server to update tenant's plan_id and subscription_id
         try:
-            rabbitmq_service.publish_plan_update(
+            await rabbitmq_service.publish_plan_update(
                 tenant_id=claims.tenant_id,
                 subscription_id=subscription.id,
                 plan_id=subscription_data.plan_id,
@@ -607,7 +607,7 @@ async def switch_subscription_plan(
         
         # Send message to auth server to update tenant's plan_id
         try:
-            rabbitmq_service.publish_plan_switch(
+            await rabbitmq_service.publish_plan_switch(
                 tenant_id=claims.tenant_id,
                 old_plan_id=subscription.plan_id,
                 new_plan_id=switch_data.new_plan_id

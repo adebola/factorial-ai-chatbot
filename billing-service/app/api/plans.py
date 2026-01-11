@@ -895,7 +895,7 @@ async def switch_tenant_plan(
             )
 
             # Publish to RabbitMQ for auth server to update tenant
-            rabbitmq_success = rabbitmq_service.publish_plan_update(
+            rabbitmq_success = await rabbitmq_service.publish_plan_update(
                 tenant_id=tenant_id,
                 subscription_id=subscription.id,
                 plan_id=basic_plan.id,
@@ -1186,7 +1186,7 @@ async def switch_tenant_plan(
             # Only publish to RabbitMQ if change is effective immediately (not scheduled downgrades)
             rabbitmq_success = False
             if switch_result.get("effective_immediately", True):
-                rabbitmq_success = rabbitmq_service.publish_plan_switch(
+                rabbitmq_success = await rabbitmq_service.publish_plan_switch(
                     tenant_id=tenant_id,
                     subscription_id=existing_subscription.id,
                     old_plan_id=current_plan.id if current_plan else None,
