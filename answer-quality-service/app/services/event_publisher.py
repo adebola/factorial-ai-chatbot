@@ -44,8 +44,7 @@ class EventPublisher:
             login=settings.RABBITMQ_USER,
             password=settings.RABBITMQ_PASSWORD,
             virtualhost=settings.RABBITMQ_VHOST,
-            reconnect_interval=1.0,
-            fail_fast=False
+            reconnect_interval=1.0
         )
 
         logger.info(
