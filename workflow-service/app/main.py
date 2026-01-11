@@ -58,6 +58,14 @@ async def lifespan(app: FastAPI):
     logger = get_logger("main")
     logger.info("Starting Workflow Service", version="1.0.0")
 
+    # Initialize RabbitMQ publisher
+    from .services.rabbitmq_publisher import rabbitmq_publisher
+    try:
+        await rabbitmq_publisher.connect()
+        logger.info("RabbitMQ publisher connected")
+    except Exception as e:
+        logger.error(f"Failed to connect RabbitMQ publisher: {e}", exc_info=True)
+
     # Run initial cleanup on startup to remove stale data from previous runs
     from .core.database import SessionLocal
     from .services.state_manager import StateManager
@@ -91,6 +99,13 @@ async def lifespan(app: FastAPI):
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # Close RabbitMQ publisher
+    try:
+        await rabbitmq_publisher.close()
+        logger.info("RabbitMQ publisher closed")
+    except Exception as e:
+        logger.error(f"Error closing RabbitMQ publisher: {e}", exc_info=True)
 
     logger.info("Shutting down Workflow Service")
 
