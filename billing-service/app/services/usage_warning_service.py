@@ -11,6 +11,7 @@ Features:
 - Intelligent deduplication (don't spam users)
 - Upgrade prompts with clear call-to-action
 """
+import asyncio
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -179,7 +180,7 @@ class UsageWarningService:
 
         # Send email
         try:
-            success = email_publisher.publish_usage_warning_email(
+            success = asyncio.run(email_publisher.publish_usage_warning_email(
                 tenant_id=subscription.tenant_id,
                 to_email=subscription.user_email,
                 to_name=subscription.user_full_name or "Valued Customer",
@@ -190,7 +191,7 @@ class UsageWarningService:
                 percentage=int(percentage * 100),
                 threshold_level=threshold_level,
                 severity=severity
-            )
+            ))
 
             if success:
                 # Log notification

@@ -265,7 +265,7 @@ async def send_invoice_email(
             )
 
         # Send invoice email
-        success = email_publisher.publish_invoice_email(
+        success = await email_publisher.publish_invoice_email(
             tenant_id=invoice.tenant_id,
             to_email=subscription.user_email,
             to_name=subscription.user_full_name or "Valued Customer",

@@ -6,6 +6,7 @@ These jobs run periodically to:
 - Notify users when trials/subscriptions have expired
 - Update subscription statuses
 """
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import and_
@@ -68,12 +69,12 @@ def check_trial_expirations_3day():
 
                 # Send email notification
                 try:
-                    success = email_publisher.publish_trial_expiring_email(
+                    success = asyncio.run(email_publisher.publish_trial_expiring_email(
                         tenant_id=subscription.tenant_id,
                         to_email=subscription.user_email,
                         to_name=subscription.user_full_name or "User",
                         days_remaining=3
-                    )
+                    ))
 
                     if success:
                         # Log notification
@@ -167,11 +168,11 @@ def check_trial_expired():
                         continue
 
                     # Send email notification
-                    success = email_publisher.publish_trial_expired_email(
+                    success = asyncio.run(email_publisher.publish_trial_expired_email(
                         tenant_id=subscription.tenant_id,
                         to_email=subscription.user_email,
                         to_name=subscription.user_full_name or "User"
-                    )
+                    ))
 
                     if success:
                         # Log notification
@@ -261,13 +262,13 @@ def check_subscription_expirations_7day():
 
                 # Send email notification
                 try:
-                    success = email_publisher.publish_subscription_expiring_email(
+                    success = asyncio.run(email_publisher.publish_subscription_expiring_email(
                         tenant_id=subscription.tenant_id,
                         to_email=subscription.user_email,
                         to_name=subscription.user_full_name or "User",
                         plan_name=plan_name,
                         days_remaining=7
-                    )
+                    ))
 
                     if success:
                         # Log notification
@@ -359,12 +360,12 @@ def check_subscription_expired():
                     plan_name = "subscription"  # Default fallback
 
                     # Send email notification
-                    success = email_publisher.publish_subscription_expired_email(
+                    success = asyncio.run(email_publisher.publish_subscription_expired_email(
                         tenant_id=subscription.tenant_id,
                         to_email=subscription.user_email,
                         to_name=subscription.user_full_name or "User",
                         plan_name=plan_name
-                    )
+                    ))
 
                     if success:
                         # Log notification

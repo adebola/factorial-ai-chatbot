@@ -1144,7 +1144,7 @@ async def switch_tenant_plan(
                                 pdf_attachment = pdf_gen.generate_attachment_dict(pdf_bytes, invoice.invoice_number)
                                 logger.info(f"Generated PDF attachment for invoice {invoice.invoice_number}")
 
-                            email_publisher.publish_invoice_email(
+                            await email_publisher.publish_invoice_email(
                                 tenant_id=existing_subscription.tenant_id,
                                 to_email=claims.email,
                                 to_name=claims.full_name or "Valued Customer",
@@ -1211,20 +1211,20 @@ async def switch_tenant_plan(
 
                     if is_upgrade_plan:
                         # Send upgrade notification
-                        email_publisher.publish_plan_upgraded_email(
+                        await email_publisher.publish_plan_upgraded_email(
                             tenant_id=tenant_id,
                             to_email=claims.email,
                             to_name=claims.full_name or "Valued Customer",
                             old_plan_name=current_plan.name if current_plan else "Free",
                             new_plan_name=new_plan.name,
-                            proration_amount=float(switch_result.get("prorated_amount", 0)),
+                            proration_amount=float(switch_result.get("prorated_amount") or 0),
                             currency=existing_subscription.currency or "NGN"
                         )
                         logger.info(f"Sent plan upgrade notification to {claims.email} for upgrade to {new_plan.name}")
 
                     elif is_renewal:
                         # Send renewal notification (user renewed same plan after expiration)
-                        email_publisher.publish_subscription_renewed_email(
+                        await email_publisher.publish_subscription_renewed_email(
                             tenant_id=tenant_id,
                             to_email=claims.email,
                             to_name=claims.full_name or "Valued Customer",
