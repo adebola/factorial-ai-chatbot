@@ -7,6 +7,7 @@ Handles subscription plan changes including:
 - Plan change previews
 - Proration calculations
 """
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -205,7 +206,7 @@ class PlanManagementService:
 
         # Send upgrade notification email
         try:
-            email_publisher.publish_plan_upgraded_email(
+            await email_publisher.publish_plan_upgraded_email(
                 tenant_id=subscription.tenant_id,
                 to_email=user_email,
                 to_name=user_full_name or "User",
@@ -342,7 +343,7 @@ class PlanManagementService:
 
         # Send downgrade notification email
         try:
-            email_publisher.publish_plan_downgraded_email(
+            await email_publisher.publish_plan_downgraded_email(
                 tenant_id=subscription.tenant_id,
                 to_email=user_email,
                 to_name=user_full_name or "User",
@@ -526,7 +527,7 @@ class PlanManagementService:
         # Send cancellation notification
         if user_email:
             try:
-                email_publisher.publish_subscription_cancelled_email(
+                await email_publisher.publish_subscription_cancelled_email(
                     tenant_id=subscription.tenant_id,
                     to_email=user_email,
                     to_name=user_full_name or "User",
@@ -617,14 +618,14 @@ class PlanManagementService:
                         # Get old plan for email
                         old_plan = self.db.query(Plan).filter(Plan.id == old_plan_id).first()
 
-                        email_publisher.publish_plan_downgraded_email(
+                        asyncio.run(email_publisher.publish_plan_downgraded_email(
                             tenant_id=subscription.tenant_id,
                             to_email=subscription.user_email,
                             to_name=subscription.user_full_name or "Valued Customer",
                             old_plan_name=old_plan.name if old_plan else "Previous Plan",
                             new_plan_name=new_plan.name,
                             effective_date=now
-                        )
+                        ))
                         logger.info(
                             f"Sent downgrade notification to {subscription.user_email} "
                             f"for subscription {subscription.id}"

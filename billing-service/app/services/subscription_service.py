@@ -326,7 +326,7 @@ class SubscriptionService:
                     plan_name = plan.name if plan else "Subscription"
 
                     from ..services.email_publisher import email_publisher
-                    email_publisher.publish_subscription_renewed_email(
+                    await email_publisher.publish_subscription_renewed_email(
                         tenant_id=subscription.tenant_id,
                         to_email=subscription.user_email,
                         to_name=subscription.user_full_name or "Valued Customer",
@@ -369,7 +369,7 @@ class SubscriptionService:
                         )
 
                         from ..services.email_publisher import email_publisher
-                        email_publisher.publish_invoice_email(
+                        await email_publisher.publish_invoice_email(
                             tenant_id=subscription.tenant_id,
                             to_email=subscription.user_email,
                             to_name=subscription.user_full_name or "Valued Customer",
@@ -417,7 +417,7 @@ class SubscriptionService:
 
                 # Send payment receipt email
                 from ..services.email_publisher import email_publisher
-                email_publisher.publish_payment_receipt_email(
+                await email_publisher.publish_payment_receipt_email(
                     tenant_id=subscription.tenant_id,
                     to_email=subscription.user_email,
                     to_name=subscription.user_full_name or "Valued Customer",
@@ -445,7 +445,7 @@ class SubscriptionService:
                         pdf_attachment = pdf_gen.generate_attachment_dict(pdf_bytes, invoice.invoice_number)
                         logger.info(f"Generated PDF attachment for invoice {invoice.invoice_number}")
 
-                    email_publisher.publish_invoice_email(
+                    await email_publisher.publish_invoice_email(
                         tenant_id=subscription.tenant_id,
                         to_email=subscription.user_email,
                         to_name=subscription.user_full_name or "Valued Customer",
