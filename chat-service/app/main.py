@@ -48,9 +48,9 @@ async def lifespan(app: FastAPI):
     # Start RabbitMQ limit warning consumer
     consumer_started = False
     try:
-        limit_warning_consumer.start()
+        await limit_warning_consumer.start()
         consumer_started = True
-        logger.info("✓ Limit warning consumer initialization started (running in background thread)")
+        logger.info("✓ Limit warning consumer started successfully (aio-pika with automatic reconnection)")
     except Exception as e:
         logger.error(f"Failed to start limit warning consumer: {e}", exc_info=True)
         logger.warning("Chat service will continue without limit warning consumer")
@@ -93,7 +93,7 @@ async def lifespan(app: FastAPI):
 
     # Stop limit warning consumer
     try:
-        limit_warning_consumer.stop()
+        await limit_warning_consumer.stop()
         logger.info("Limit warning consumer stopped successfully")
     except Exception as e:
         logger.error(f"Error stopping limit warning consumer: {e}", exc_info=True)
