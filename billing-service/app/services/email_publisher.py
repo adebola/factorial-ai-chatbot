@@ -1,11 +1,7 @@
 """
 Email publisher for communications-service integration.
 
-This module publishes email messages to RabbitMQ, which are consumed by the
-communications-service for actual email delivery via SendGrid. This approach provides:
-- Separation of concerns (billing handles logic, comms handles delivery)
-- Centralized email tracking and rate limiting
-- Better reliability through message queue
+MIGRATED TO AIO-PIKA: Now uses async-native RabbitMQ operations with automatic reconnection.
 """
 import logging
 import json
@@ -13,33 +9,18 @@ import os
 import uuid
 from typing import Optional
 from datetime import datetime, timezone
-import pika
-from pika.exceptions import AMQPConnectionError
+
+from aio_pika import connect_robust, Message, ExchangeType, DeliveryMode
+from aio_pika.abc import AbstractRobustConnection
+from aio_pika.exceptions import AMQPException
+
 from ..utils.logo_utils import get_logo_data_url
 
 logger = logging.getLogger(__name__)
 
 
 class EmailPublisher:
-    """
-    Publishes email messages to RabbitMQ for communications-service to process.
-
-    Message format (compatible with communications-service consumer):
-    {
-        "tenant_id": "...",
-        "to_email": "user@example.com",
-        "to_name": "John Doe",
-        "subject": "Email subject",
-        "html_content": "<html>...</html>",
-        "text_content": "Plain text...",
-        "message_id": "uuid",
-        "queued_at": "2025-11-17T20:00:00Z"
-    }
-
-    Routing:
-        Exchange: communications-exchange (topic)
-        Routing Key: email.send
-    """
+    """Async-native email publisher using aio-pika with automatic reconnection."""
 
     def __init__(self):
         """Initialize the email publisher with RabbitMQ connection settings."""
@@ -49,97 +30,30 @@ class EmailPublisher:
         self.rabbitmq_password = os.environ.get("RABBITMQ_PASSWORD", "guest")
         self.rabbitmq_vhost = os.environ.get("RABBITMQ_VHOST", "/")
 
-        # Use the same exchange as communications-service
         self.email_exchange = os.environ.get("RABBITMQ_EXCHANGE", "communications-exchange")
         self.email_routing_key = "email.send"
 
-        self.connection = None
-        self.channel = None
+        self.connection: Optional[AbstractRobustConnection] = None
 
-        logger.info("Email publisher initialized")
+        logger.info("Email publisher initialized (aio-pika)")
 
-    def _is_connection_valid(self) -> bool:
-        """
-        Verify that both connection and channel are valid and open.
+    async def connect(self):
+        """Establish robust connection with automatic reconnection."""
+        if self.connection and not self.connection.is_closed:
+            return
 
-        Returns:
-            bool: True if both connection and channel are healthy, False otherwise
-        """
-        try:
-            return (
-                self.connection is not None
-                and self.channel is not None
-                and self.connection.is_open
-                and self.channel.is_open
-            )
-        except Exception:
-            return False
+        self.connection = await connect_robust(
+            host=self.rabbitmq_host,
+            port=self.rabbitmq_port,
+            login=self.rabbitmq_user,
+            password=self.rabbitmq_password,
+            virtualhost=self.rabbitmq_vhost,
+            reconnect_interval=1.0,
+        )
 
-    def _connect(self) -> bool:
-        """
-        Establish connection to RabbitMQ with robust state management.
+        logger.info(f"Connected to RabbitMQ at {self.rabbitmq_host}:{self.rabbitmq_port}")
 
-        Returns:
-            bool: True if connection successful, False otherwise
-        """
-        try:
-            # Check if BOTH connection and channel are valid
-            if self._is_connection_valid():
-                return True
-
-            # Force cleanup of any stale connection state
-            if self.connection:
-                try:
-                    if not self.connection.is_closed:
-                        self.connection.close()
-                except Exception as e:
-                    logger.debug(f"Error closing stale connection: {e}")
-                finally:
-                    self.connection = None
-                    self.channel = None
-
-            # Create new connection
-            credentials = pika.PlainCredentials(
-                self.rabbitmq_user,
-                self.rabbitmq_password
-            )
-            parameters = pika.ConnectionParameters(
-                host=self.rabbitmq_host,
-                port=self.rabbitmq_port,
-                virtual_host=self.rabbitmq_vhost,
-                credentials=credentials,
-                heartbeat=600,
-                blocked_connection_timeout=300
-            )
-
-            self.connection = pika.BlockingConnection(parameters)
-            self.channel = self.connection.channel()
-
-            # Declare email exchange (idempotent)
-            self.channel.exchange_declare(
-                exchange=self.email_exchange,
-                exchange_type="topic",
-                durable=True
-            )
-
-            logger.info(
-                f"✅ Connected to RabbitMQ email publisher: {self.rabbitmq_host}:{self.rabbitmq_port}"
-            )
-            return True
-
-        except AMQPConnectionError as e:
-            logger.error(f"Failed to connect to RabbitMQ: {e}")
-            self.connection = None
-            self.channel = None
-            return False
-
-        except Exception as e:
-            logger.error(f"Unexpected error connecting to RabbitMQ: {e}", exc_info=True)
-            self.connection = None
-            self.channel = None
-            return False
-
-    def publish_email(
+    async def publish_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -149,105 +63,56 @@ class EmailPublisher:
         text_content: Optional[str] = None,
         attachments: Optional[list] = None
     ) -> bool:
-        """
-        Publish email message to RabbitMQ for communications-service with automatic retry.
+        """Publish email message (pure async, no blocking)."""
+        try:
+            await self.connect()
 
-        Args:
-            tenant_id: Tenant ID
-            to_email: Recipient email address
-            subject: Email subject
-            html_content: HTML email content
-            to_name: Recipient name (optional)
-            text_content: Plain text content (optional)
-            attachments: List of attachment dicts with filename, content (base64), content_type (optional)
+            message_data = {
+                "tenant_id": tenant_id,
+                "to_email": to_email,
+                "subject": subject,
+                "html_content": html_content,
+                "message_id": str(uuid.uuid4()),
+                "queued_at": datetime.now(timezone.utc).isoformat()
+            }
 
-        Returns:
-            bool: True if published successfully, False otherwise
-        """
-        max_retries = 2
+            if to_name:
+                message_data["to_name"] = to_name
+            if text_content:
+                message_data["text_content"] = text_content
+            if attachments:
+                message_data["attachments"] = attachments
 
-        for attempt in range(max_retries):
-            try:
-                # Ensure connection is valid
-                if not self._connect():
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Connection failed (attempt {attempt + 1}/{max_retries}), retrying...")
-                        continue
-                    logger.error("Cannot publish email: RabbitMQ connection failed after retries")
-                    return False
-
-                # Build email message in communications-service format
-                message = {
-                    "tenant_id": tenant_id,
-                    "to_email": to_email,
-                    "subject": subject,
-                    "html_content": html_content,
-                    "message_id": str(uuid.uuid4()),
-                    "queued_at": datetime.now(timezone.utc).isoformat()
-                }
-
-                # Add optional fields
-                if to_name:
-                    message["to_name"] = to_name
-                if text_content:
-                    message["text_content"] = text_content
-                if attachments:
-                    message["attachments"] = attachments
-
-                # Publish to communications exchange
-                self.channel.basic_publish(
-                    exchange=self.email_exchange,
-                    routing_key=self.email_routing_key,
-                    body=json.dumps(message),
-                    properties=pika.BasicProperties(
-                        delivery_mode=2,  # Persistent message
-                        content_type="application/json"
-                    )
+            async with self.connection.channel() as channel:
+                exchange = await channel.declare_exchange(
+                    self.email_exchange,
+                    ExchangeType.TOPIC,
+                    durable=True
                 )
 
-                logger.info(
-                    f"📧 Published email to communications-service: {subject}",
-                    extra={
-                        "tenant_id": tenant_id,
-                        "recipient": to_email,
-                        "subject": subject
-                    }
+                message = Message(
+                    body=json.dumps(message_data).encode(),
+                    delivery_mode=DeliveryMode.PERSISTENT,
+                    content_type="application/json",
+                    message_id=message_data["message_id"]
                 )
-                return True
 
-            except (AMQPConnectionError, AttributeError) as e:
-                # Reset connection state on connection-related errors
-                self.connection = None
-                self.channel = None
+                await exchange.publish(message, routing_key=self.email_routing_key)
 
-                if attempt < max_retries - 1:
-                    logger.warning(
-                        f"Publish failed (attempt {attempt + 1}/{max_retries}): {e}, retrying...",
-                        extra={"tenant_id": tenant_id, "recipient": to_email}
-                    )
-                    continue
-                else:
-                    logger.error(
-                        f"Failed to publish email after {max_retries} attempts: {e}",
-                        extra={"tenant_id": tenant_id, "recipient": to_email},
-                        exc_info=True
-                    )
-                    return False
+            logger.info(f"📧 Email published: {subject}", extra={"tenant_id": tenant_id})
+            return True
 
-            except Exception as e:
-                logger.error(
-                    f"Failed to publish email: {e}",
-                    extra={
-                        "tenant_id": tenant_id,
-                        "recipient": to_email
-                    },
-                    exc_info=True
-                )
-                return False
+        except Exception as e:
+            logger.error(f"Failed to publish email: {e}", exc_info=True)
+            return False
 
-        return False
+    async def close(self):
+        """Close connection gracefully."""
+        if self.connection and not self.connection.is_closed:
+            await self.connection.close()
+            logger.info("Email publisher closed")
 
-    def publish_trial_expiring_email(
+    async def publish_trial_expiring_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -331,7 +196,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nYour ChatCraft trial period will expire in {days_remaining} days.\n\nTo continue using ChatCraft without interruption, please upgrade your subscription.\n\nIf you have any questions, please don't hesitate to contact our support team.\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -340,7 +205,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_trial_expired_email(
+    async def publish_trial_expired_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -422,7 +287,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nYour ChatCraft trial period has expired.\n\nTo continue using ChatCraft, please upgrade to a paid subscription.\n\nIf you have any questions or need assistance, please contact our support team.\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -431,7 +296,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_subscription_expiring_email(
+    async def publish_subscription_expiring_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -541,7 +406,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nYour ChatCraft {plan_name} subscription will expire in {days_remaining} days.\n\nTo continue enjoying uninterrupted service, please renew your subscription.\n\nIf you have any questions, please don't hesitate to contact our support team.\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -550,7 +415,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_subscription_expired_email(
+    async def publish_subscription_expired_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -663,7 +528,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nYour ChatCraft {plan_name} subscription has expired.\n\nTo restore access to your account, please renew your subscription.\n\nIf you have any questions or need assistance, please contact our support team.\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -672,7 +537,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_payment_successful_email(
+    async def publish_payment_successful_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -797,7 +662,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nThank you for your payment!\n\nWe have successfully received your payment of {formatted_amount} for your {plan_name} subscription.\n\nYour subscription is now active and you can continue using ChatCraft without interruption.\n\nIf you have any questions, please don't hesitate to contact our support team.\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -806,7 +671,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_subscription_renewed_email(
+    async def publish_subscription_renewed_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -950,7 +815,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nGreat news! Your ChatCraft {plan_name} subscription has been successfully renewed.\n\n{amount_text}{period_text}\nYou can continue enjoying all the features and benefits of your subscription without interruption.{reference_text}\n\nThank you for being a valued ChatCraft customer!\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -959,7 +824,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_plan_upgraded_email(
+    async def publish_plan_upgraded_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -1086,7 +951,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nGreat news! Your ChatCraft subscription has been upgraded from {old_plan_name} to {new_plan_name}.\n\nYou now have access to all the enhanced features and limits of the {new_plan_name} plan.\n\nA prorated charge of {formatted_amount} has been applied for the remaining days in your current billing period.\n\nThank you for choosing ChatCraft!\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -1095,7 +960,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_plan_downgraded_email(
+    async def publish_plan_downgraded_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -1221,7 +1086,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nYour ChatCraft subscription plan is changing from {old_plan_name} to {new_plan_name}.\n\n{timing_text.replace('<strong>', '').replace('</strong>', '')}\n\n{'' if immediate else f'You will continue to have access to all {old_plan_name} features until {formatted_date}.'}If you have any questions or would like to keep your current plan, please contact our support team.\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -1230,7 +1095,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_subscription_cancelled_email(
+    async def publish_subscription_cancelled_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -1355,7 +1220,7 @@ class EmailPublisher:
         """
         text_content = f"Hello {to_name},\n\nWe're sorry to see you go!\n\nYour ChatCraft {plan_name} subscription is being cancelled.\n\n{timing_text.replace('<strong>', '').replace('</strong>', '')}\n\n{access_text.replace('<p>', '').replace('</p>', '')}If you change your mind or cancelled by mistake, you can reactivate your subscription anytime from your account settings.\n\nWe'd love to hear your feedback on how we can improve. Please feel free to reach out to our support team.\n\nBest regards,\nThe ChatCraft Team"
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -1364,7 +1229,7 @@ class EmailPublisher:
             text_content=text_content
         )
 
-    def publish_invoice_email(
+    async def publish_invoice_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -1541,7 +1406,7 @@ The ChatCraft Team
         # Prepare attachments list
         attachments = [pdf_attachment] if pdf_attachment else None
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -1551,7 +1416,7 @@ The ChatCraft Team
             attachments=attachments
         )
 
-    def publish_usage_warning_email(
+    async def publish_usage_warning_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -1749,7 +1614,7 @@ Best regards,
 The ChatCraft Team
 """
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -1758,7 +1623,7 @@ The ChatCraft Team
             text_content=text_content
         )
 
-    def publish_payment_receipt_email(
+    async def publish_payment_receipt_email(
         self,
         tenant_id: str,
         to_email: str,
@@ -1930,7 +1795,7 @@ Best regards,
 The ChatCraft Team
 """
 
-        return self.publish_email(
+        return await self.publish_email(
             tenant_id=tenant_id,
             to_email=to_email,
             to_name=to_name,
@@ -1938,13 +1803,6 @@ The ChatCraft Team
             html_content=html_content,
             text_content=text_content
         )
-
-    def close(self):
-        """Close RabbitMQ connection."""
-        if self.connection and not self.connection.is_closed:
-            self.connection.close()
-            logger.info("Email publisher connection closed")
-
 
 # Global instance
 email_publisher = EmailPublisher()
