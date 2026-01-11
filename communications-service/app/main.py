@@ -15,8 +15,6 @@ from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
 from .api import email, sms
 from .services.rabbitmq_consumer import RabbitMQConsumer
-import threading
-import time
 
 
 @asynccontextmanager
@@ -24,37 +22,26 @@ async def lifespan(app: FastAPI):
     logger = get_logger("main")
     logger.info("Starting Communications Service", version="1.0.0")
 
-    # Start RabbitMQ consumer in a separate thread
+    # Start RabbitMQ consumer (aio-pika with automatic reconnection)
     consumer = RabbitMQConsumer()
-    consumer_thread = threading.Thread(target=start_rabbitmq_consumer, args=(consumer, logger))
-    consumer_thread.daemon = True
-    consumer_thread.start()
-    logger.info("Started RabbitMQ consumer thread")
+    try:
+        logger.info("Starting RabbitMQ consumer...")
+        await consumer.start_consuming()
+        logger.info("✓ RabbitMQ consumer started successfully (aio-pika)")
+    except Exception as e:
+        logger.error(f"Failed to start RabbitMQ consumer: {e}", exc_info=True)
+        logger.warning("Service will continue without RabbitMQ consumer")
 
     yield
 
     logger.info("Shutting down Communications Service")
-    # Consumer will be stopped automatically when the main thread exits
 
-
-def start_rabbitmq_consumer(consumer: RabbitMQConsumer, logger):
-    """Start RabbitMQ consumer with retry logic"""
-    max_retries = 5
-    retry_delay = 5
-
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Starting RabbitMQ consumer (attempt {attempt + 1}/{max_retries})")
-            consumer.start_consuming()
-            break
-        except Exception as e:
-            logger.error(f"Failed to start RabbitMQ consumer (attempt {attempt + 1}): {e}")
-            if attempt < max_retries - 1:
-                logger.info(f"Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-            else:
-                logger.error("Failed to start RabbitMQ consumer after all retries")
-                # Don't crash the whole service, just log the error
+    # Stop RabbitMQ consumer
+    try:
+        await consumer.stop_consuming()
+        logger.info("RabbitMQ consumer stopped successfully")
+    except Exception as e:
+        logger.error(f"Error stopping RabbitMQ consumer: {e}", exc_info=True)
 
 
 def create_app() -> FastAPI:
