@@ -63,8 +63,7 @@ class UserEventConsumer:
             login=self.username,
             password=self.password,
             virtualhost=self.vhost,
-            reconnect_interval=1.0,
-            fail_fast=False
+            reconnect_interval=1.0
         )
 
         logger.info(
