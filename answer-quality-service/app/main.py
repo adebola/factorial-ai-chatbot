@@ -32,11 +32,10 @@ async def lifespan(app: FastAPI):
     logger.info(f"Database: {settings.DATABASE_URL.split('@')[-1] if '@' in settings.DATABASE_URL else 'configured'}")
     logger.info(f"Auth Server: {settings.AUTH_SERVER_URL}")
 
-    # Start RabbitMQ consumer for processing chat messages
+    # Start RabbitMQ consumer for processing chat messages (aio-pika)
     try:
-        rabbitmq_consumer.connect()
-        rabbitmq_consumer.start_consuming()
-        logger.info("RabbitMQ consumer started successfully")
+        await rabbitmq_consumer.start_consuming()
+        logger.info("✓ RabbitMQ consumer started successfully (aio-pika)")
     except Exception as e:
         logger.error(f"Failed to start RabbitMQ consumer: {e}", exc_info=True)
         logger.warning("Service will continue without RabbitMQ consumer")
@@ -63,7 +62,7 @@ async def lifespan(app: FastAPI):
 
     # Stop RabbitMQ consumer
     try:
-        rabbitmq_consumer.close()
+        await rabbitmq_consumer.close()
         logger.info("RabbitMQ consumer stopped successfully")
     except Exception as e:
         logger.error(f"Error stopping RabbitMQ consumer: {e}", exc_info=True)
