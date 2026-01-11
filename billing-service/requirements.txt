@@ -17,8 +17,8 @@ python-dateutil>=2.8.2
 # Redis for caching
 redis>=5.2.0
 
-# RabbitMQ for messaging
-pika>=1.3.0
+# RabbitMQ for messaging (aio-pika for async)
+aio-pika>=9.0.0
 
 # Scheduled jobs
 APScheduler>=3.10.4

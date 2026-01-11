@@ -42,11 +42,11 @@ async def lifespan(app: FastAPI):
     # Note: Database tables are managed by Alembic migrations
     # Run: alembic upgrade head (before starting service)
 
-    # Start RabbitMQ usage event consumer
+    # Start RabbitMQ usage event consumer (aio-pika with automatic reconnection)
     try:
         logger.info("Connecting to RabbitMQ for usage events...")
-        usage_consumer.connect()
-        usage_consumer.start_consuming()
+        await usage_consumer.connect()
+        await usage_consumer.start_consuming()
         logger.info("Usage event consumer started successfully")
     except Exception as e:
         logger.error(f"Failed to start usage event consumer: {e}")
@@ -55,8 +55,8 @@ async def lifespan(app: FastAPI):
     # Start RabbitMQ user creation event consumer
     try:
         logger.info("Connecting to RabbitMQ for user creation events...")
-        user_consumer.connect()
-        user_consumer.start_consuming()
+        await user_consumer.connect()
+        await user_consumer.start_consuming()
         logger.info("User creation event consumer started successfully")
     except Exception as e:
         logger.error(f"Failed to start user creation event consumer: {e}")
@@ -85,14 +85,14 @@ async def lifespan(app: FastAPI):
 
     # Stop usage event consumer
     try:
-        usage_consumer.stop_consuming()
+        await usage_consumer.stop_consuming()
         logger.info("Usage event consumer stopped")
     except Exception as e:
         logger.error(f"Error stopping usage event consumer: {e}")
 
     # Stop user creation event consumer
     try:
-        user_consumer.stop_consuming()
+        await user_consumer.stop_consuming()
         logger.info("User creation event consumer stopped")
     except Exception as e:
         logger.error(f"Error stopping user creation event consumer: {e}")
