@@ -64,8 +64,7 @@ class RabbitMQConsumer:
             port=port,
             login=login,
             password=password,
-            reconnect_interval=1.0,
-            fail_fast=False
+            reconnect_interval=1.0
         )
 
         logger.info(
