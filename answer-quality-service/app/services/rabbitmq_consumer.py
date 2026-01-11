@@ -40,17 +40,36 @@ class RabbitMQConsumer:
         if self.connection and not self.connection.is_closed:
             return
 
+        # Debug: Log raw settings values
+        logger.debug(
+            f"RabbitMQ settings - HOST: {settings.RABBITMQ_HOST} (type: {type(settings.RABBITMQ_HOST).__name__}), "
+            f"PORT: {settings.RABBITMQ_PORT} (type: {type(settings.RABBITMQ_PORT).__name__}), "
+            f"USER: {settings.RABBITMQ_USER} (type: {type(settings.RABBITMQ_USER).__name__}), "
+            f"PASSWORD: <hidden> (type: {type(settings.RABBITMQ_PASSWORD).__name__})"
+        )
+
+        # Validate and convert connection parameters - always ensure proper types
+        # This handles cases where env vars might be set to "False" or other unexpected values
+        host = str(settings.RABBITMQ_HOST or "localhost")
+        port = int(settings.RABBITMQ_PORT or 5672)
+        login = str(settings.RABBITMQ_USER or "guest")
+        password = str(settings.RABBITMQ_PASSWORD or "guest")
+
+        logger.info(
+            f"Connecting to RabbitMQ: {host}:{port} (user: {login})"
+        )
+
         self.connection = await connect_robust(
-            host=settings.RABBITMQ_HOST,
-            port=settings.RABBITMQ_PORT,
-            login=settings.RABBITMQ_USER,
-            password=settings.RABBITMQ_PASSWORD,
+            host=host,
+            port=port,
+            login=login,
+            password=password,
             reconnect_interval=1.0,
             fail_fast=False
         )
 
         logger.info(
-            f"✓ Connected to RabbitMQ: {settings.RABBITMQ_HOST}:{settings.RABBITMQ_PORT}"
+            f"✓ Connected to RabbitMQ: {host}:{port}"
         )
 
     async def start_consuming(self):
