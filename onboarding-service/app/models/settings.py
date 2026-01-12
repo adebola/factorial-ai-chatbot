@@ -42,8 +42,8 @@ def get_default_settings() -> dict:
     Get default settings values for new tenants
     """
     return {
-        "primary_color": "#5D3EC1",  # Default factorial purple
-        "secondary_color": "#C15D3E",  # Default factorial orange
+        "primary_color": "#2B55FF",  # ChatCraft Blue
+        "secondary_color": "#C15D3E",  # ChatCraft Orange (keep existing)
         "hover_text": "Chat with us!",
         "welcome_message": "Hello! How can I help you today?",
         "chat_window_title": "Chat Support",

@@ -15,9 +15,9 @@ class WidgetService:
     def __init__(self, db: Session):
         self.db = db
         self.colors = {
-            "primary": "#5D3EC1",  # Purple
-            "secondary": "#C15D3E",  # Orange
-            "accent": "#3EC15D",    # Green
+            "primary": "#2B55FF",  # ChatCraft Blue
+            "secondary": "#C15D3E",  # Keep existing orange as secondary
+            "accent": "#CDF547",    # ChatCraft Lime Green
             "white": "#FFFFFF",
             "gray": "#F5F5F5",
             "dark_gray": "#333333",
@@ -1288,7 +1288,7 @@ class WidgetService:
 </head>
 <body>
     <div class="demo-container">
-        <h1>🤖 FactorialBot Chat Widget Demo</h1>
+        <h1>ChatCraft Chat Widget Demo</h1>
         
         <div class="info-card">
             <h3>Tenant Information</h3>
@@ -1302,14 +1302,14 @@ class WidgetService:
             <p>To integrate this chat widget into your website, add the following script tag just before the closing <code>&lt;/body&gt;</code> tag:</p>
             
             <div class="integration-code">
-&lt;!-- FactorialBot Chat Widget --&gt;
+&lt;!-- ChatCraft Chat Widget --&gt;
 &lt;script src="https://your-domain.com/path/to/chat-widget.js"&gt;&lt;/script&gt;
             </div>
             
             <p>Or use the inline version:</p>
             
             <div class="integration-code">
-&lt;!-- FactorialBot Chat Widget (Inline) --&gt;
+&lt;!-- ChatCraft Chat Widget (Inline) --&gt;
 &lt;script&gt;
     // Paste the contents of chat-widget.js here
 &lt;/script&gt;
@@ -1352,7 +1352,7 @@ class WidgetService:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FactorialBot Integration Guide - {{ tenant_name }}</title>
+    <title>ChatCraft Integration Guide - {{ tenant_name }}</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -1466,7 +1466,7 @@ class WidgetService:
 </head>
 <body>
     <div class="header">
-        <h1>🤖 FactorialBot Chat Widget</h1>
+        <h1>ChatCraft Chat Widget</h1>
         <h2>Integration Guide for {{ tenant_name }}</h2>
         <p>Get your AI-powered chat assistant up and running in minutes!</p>
     </div>
@@ -1480,7 +1480,7 @@ class WidgetService:
         </div>
 
         <div class="code-block">
-&lt;!-- FactorialBot Chat Widget (Hosted & Minified) --&gt;
+&lt;!-- ChatCraft Chat Widget (Hosted & Minified) --&gt;
 &lt;script src="{{ backend_url }}/api/v1/widget/js/{{ tenant_id }}"&gt;&lt;/script&gt;
 &lt;/body&gt;
 &lt;/html&gt;
@@ -1532,7 +1532,7 @@ class WidgetService:
                 <p>Add the following script tag just before the closing <code>&lt;/body&gt;</code> tag of your HTML pages:</p>
 
                 <div class="code-block">
-&lt;!-- FactorialBot Chat Widget (Self-Hosted) --&gt;
+&lt;!-- ChatCraftChat Widget (Self-Hosted) --&gt;
 &lt;script src="/path/to/chat-widget.min.js"&gt;&lt;/script&gt;
 &lt;/body&gt;
 &lt;/html&gt;
@@ -1551,7 +1551,7 @@ class WidgetService:
         <p>For maximum control and to avoid external file dependencies, you can embed the widget code directly in your HTML:</p>
         
         <div class="code-block">
-&lt;!-- FactorialBot Chat Widget (Inline) --&gt;
+&lt;!-- ChatCraft Chat Widget (Inline) --&gt;
 &lt;script&gt;
 // Copy the entire contents of chat-widget.js and paste here
 (function() {
@@ -1638,14 +1638,14 @@ Chat Service URL: {{ chat_service_url }}
         <p>Need help with the integration? Contact our support team:</p>
         <ul>
             <li>🌐 Visit: <a href="{{ backend_url }}" target="_blank">{{ backend_url }}</a></li>
-            <li>📧 Email: support@factorialbot.com</li>
+            <li>📧 Email: support@chatcraft.cc</li>
             <li>💬 Chat: Use the demo widget to test and get familiar with the interface</li>
         </ul>
     </div>
     
     <div style="text-align: center; margin-top: 50px; padding: 20px; color: #666;">
         <p>Generated on {{ generated_at }} UTC</p>
-        <p>FactorialBot Widget v1.0 - Powered by AI</p>
+        <p>ChatCraft Widget v1.0 - Powered by AI</p>
     </div>
 </body>
 </html>

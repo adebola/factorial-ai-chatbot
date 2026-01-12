@@ -262,6 +262,13 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            - id: admin-dashboard
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/admin/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             - id: quality-alerts
               uri: http://answer-quality-service:8000
               predicates:
