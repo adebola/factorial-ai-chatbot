@@ -106,4 +106,17 @@ public interface VerificationTokenMapper {
         WHERE user_id = #{userId} AND token_type = #{tokenType} AND created_at > #{sinceTime}
         """)
     int countRecentTokensByUser(@Param("userId") String userId, @Param("tokenType") VerificationToken.TokenType tokenType, @Param("sinceTime") OffsetDateTime sinceTime);
+
+    @Select("""
+        SELECT COUNT(*)
+        FROM verification_tokens
+        WHERE email = #{email} AND token_type = #{tokenType} AND created_at > #{sinceTime}
+        """)
+    int countRecentTokensByEmail(@Param("email") String email, @Param("tokenType") VerificationToken.TokenType tokenType, @Param("sinceTime") OffsetDateTime sinceTime);
+
+    @Delete("""
+        DELETE FROM verification_tokens
+        WHERE email = #{email} AND token_type = #{tokenType}
+        """)
+    int deleteByEmailAndType(@Param("email") String email, @Param("tokenType") VerificationToken.TokenType tokenType);
 }

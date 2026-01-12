@@ -100,7 +100,7 @@ public class SecurityConfig {
 		http
 			.cors(withDefaults()) // Enable CORS for default endpoints
 			.authorizeHttpRequests((authorize) -> authorize
-				.requestMatchers("/error", "/login", "/register", "/resend-verification", "/verify-email", "/verify-email-test-success", "/verify-email-test-failure", "/verify-email-test-fallback", "/verification-status", "/js/**", "/css/**", "/image/**", "/images/**", "/webjars/**", "/favicon.ico").permitAll()
+				.requestMatchers("/error", "/login", "/register", "/resend-verification", "/verify-email", "/verify-email-test-success", "/verify-email-test-failure", "/verify-email-test-fallback", "/verification-status", "/forgot-password", "/reset-password", "/js/**", "/css/**", "/image/**", "/images/**", "/webjars/**", "/favicon.ico").permitAll()
 				.anyRequest().authenticated())
 			.authenticationManager(authenticationManager) // Use configured AuthenticationManager
 			.formLogin(formLogin -> formLogin

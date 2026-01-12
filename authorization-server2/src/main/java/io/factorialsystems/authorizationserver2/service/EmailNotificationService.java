@@ -73,6 +73,47 @@ public class EmailNotificationService {
     }
 
     /**
+     * Send password reset email
+     */
+    public void sendPasswordResetEmail(String email, String userName, String resetToken, String baseUrl) {
+        try {
+            String resetUrl = baseUrl + "/reset-password?token=" + resetToken;
+
+            Map<String, Object> templateData = new HashMap<>();
+            templateData.put("userName", userName);
+            templateData.put("email", email);
+            templateData.put("resetUrl", resetUrl);
+            templateData.put("baseUrl", baseUrl);
+
+            String subject = "Reset Your Password - ChatCraft";
+            String htmlContent = generatePasswordResetHtml(templateData);
+            String textContent = generatePasswordResetText(templateData);
+
+            EmailNotificationRequest request = EmailNotificationRequest.builder()
+                .tenantId("system") // System email, no specific tenant
+                .toEmail(email)
+                .toName(userName)
+                .subject(subject)
+                .htmlContent(htmlContent)
+                .textContent(textContent)
+                .template(EmailNotificationRequest.EmailTemplate.builder()
+                    .templateName("password_reset")
+                    .type(EmailNotificationRequest.EmailTemplate.TemplateType.PASSWORD_RESET)
+                    .build())
+                .templateData(templateData)
+                .build();
+
+            publishEmailNotification(request);
+
+            log.info("Sent password reset email to: {}", email);
+
+        } catch (Exception e) {
+            log.error("Failed to send password reset email to: {}", email, e);
+            throw new RuntimeException("Failed to send password reset email", e);
+        }
+    }
+
+    /**
      * Send a welcome email after successful verification
      */
     public void sendWelcomeEmail(User user) {
@@ -274,6 +315,83 @@ public class EmailNotificationService {
             """.formatted(
                 data.get("firstName"),
                 data.get("loginUrl")
+            );
+    }
+
+    /**
+     * Generate HTML content for password reset email
+     */
+    private String generatePasswordResetHtml(Map<String, Object> data) {
+        return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Reset Your Password</title>
+                <style>
+                    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+                    .header { text-align: center; margin-bottom: 30px; }
+                    .logo { max-width: 200px; height: auto; }
+                    .content { background: #f9f9f9; padding: 30px; border-radius: 8px; margin: 20px 0; }
+                    .button { display: inline-block; background: #dc3545; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; margin: 20px 0; }
+                    .warning { background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; }
+                    .footer { text-align: center; color: #666; font-size: 14px; margin-top: 30px; }
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>ChatCraft</h1>
+                </div>
+                <div class="content">
+                    <h2>Reset Your Password</h2>
+                    <p>Hello %s,</p>
+                    <p>We received a request to reset your password for your ChatCraft account. Click the button below to create a new password:</p>
+                    <p style="text-align: center;">
+                        <a href="%s" class="button">Reset Password</a>
+                    </p>
+                    <p>If the button doesn't work, you can copy and paste this link into your browser:</p>
+                    <p style="word-break: break-all; color: #666;">%s</p>
+                    <p><strong>This password reset link will expire in 24 hours.</strong></p>
+                    <div class="warning">
+                        <strong>Security Note:</strong> If you didn't request a password reset, please ignore this email. Your password will remain unchanged.
+                    </div>
+                </div>
+                <div class="footer">
+                    <p>&copy; %d ChatCraft. All rights reserved.</p>
+                </div>
+            </body>
+            </html>
+            """.formatted(
+                data.get("userName"),
+                data.get("resetUrl"),
+                data.get("resetUrl"),
+                java.time.Year.now().getValue()
+            );
+    }
+
+    /**
+     * Generate plain text content for password reset email
+     */
+    private String generatePasswordResetText(Map<String, Object> data) {
+        return """
+            ChatCraft - Reset Your Password
+
+            Hello %s,
+
+            We received a request to reset your password for your ChatCraft account. To reset your password, please visit this link:
+
+            %s
+
+            This password reset link will expire in 24 hours.
+
+            SECURITY NOTE: If you didn't request a password reset, please ignore this email. Your password will remain unchanged.
+
+            Best regards,
+            The ChatCraft Team
+            """.formatted(
+                data.get("userName"),
+                data.get("resetUrl")
             );
     }
 }

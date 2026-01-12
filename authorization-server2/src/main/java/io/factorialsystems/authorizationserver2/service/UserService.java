@@ -206,23 +206,49 @@ public class UserService {
         if (user == null) {
             throw new IllegalArgumentException("User not found");
         }
-        
+
         if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
             throw new IllegalArgumentException("Current password is incorrect");
         }
-        
+
         String encodedNewPassword = passwordEncoder.encode(newPassword);
         user.setPassword(encodedNewPassword);
         user.setUpdatedAt(OffsetDateTime.now());
-        
+
         int result = userMapper.update(user);
         if (result <= 0) {
             throw new RuntimeException("Failed to update password");
         }
-        
+
         log.info("Password changed successfully for user: {}", userId);
-        
+
         // Evict user cache since password changed
         cacheService.evictUser(userId);
+    }
+
+    /**
+     * Reset password without requiring current password
+     * Used for forgot password functionality after token validation
+     */
+    @Transactional
+    public void resetPassword(String email, String newPassword) {
+        User user = findByEmail(email);
+        if (user == null) {
+            throw new IllegalArgumentException("User not found with email: " + email);
+        }
+
+        String encodedNewPassword = passwordEncoder.encode(newPassword);
+        user.setPassword(encodedNewPassword);
+        user.setUpdatedAt(OffsetDateTime.now());
+
+        int result = userMapper.update(user);
+        if (result <= 0) {
+            throw new RuntimeException("Failed to reset password");
+        }
+
+        log.info("Password reset successfully for user: {} (email: {})", user.getId(), email);
+
+        // Evict user cache since password changed
+        cacheService.evictUser(user.getId());
     }
 }

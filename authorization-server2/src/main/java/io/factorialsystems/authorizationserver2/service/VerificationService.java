@@ -149,6 +149,109 @@ public class VerificationService {
     }
 
     /**
+     * Generate a new password reset token
+     */
+    @Transactional
+    public VerificationToken createPasswordResetToken(String userId, String email) {
+        // Check rate limiting - no more than 3 tokens per hour per email
+        OffsetDateTime oneHourAgo = OffsetDateTime.now().minusHours(1);
+        int recentTokens = verificationTokenMapper.countRecentTokensByEmail(
+            email, VerificationToken.TokenType.PASSWORD_RESET, oneHourAgo);
+
+        if (recentTokens >= maxTokenAttemptsPerHour) {
+            throw new IllegalStateException("Too many password reset requests. Please wait before requesting another.");
+        }
+
+        // Invalidate any existing password reset tokens for this email
+        verificationTokenMapper.deleteByEmailAndType(email, VerificationToken.TokenType.PASSWORD_RESET);
+
+        // Generate secure token
+        String token = generateSecureToken();
+        OffsetDateTime expiresAt = OffsetDateTime.now().plusHours(tokenExpiryHours);
+
+        VerificationToken verificationToken = VerificationToken.builder()
+            .id(UUID.randomUUID().toString())
+            .token(token)
+            .userId(userId)
+            .email(email.toLowerCase().trim())
+            .tokenType(VerificationToken.TokenType.PASSWORD_RESET)
+            .expiresAt(expiresAt)
+            .createdAt(OffsetDateTime.now())
+            .updatedAt(OffsetDateTime.now())
+            .build();
+
+        int result = verificationTokenMapper.insert(verificationToken);
+        if (result <= 0) {
+            throw new RuntimeException("Failed to create password reset token");
+        }
+
+        log.info("Generated password reset token for email: {}, expires: {}", email, expiresAt);
+
+        return verificationToken;
+    }
+
+    /**
+     * Validate a password reset token
+     */
+    @Transactional
+    public VerificationResult validatePasswordResetToken(String token) {
+        log.info("Attempting to validate password reset token: {}", token);
+
+        VerificationToken verificationToken = verificationTokenMapper.findByToken(token);
+
+        if (verificationToken == null) {
+            log.warn("Password reset token not found: {}", token);
+            return VerificationResult.failure("Invalid reset link", null);
+        }
+
+        if (verificationToken.getTokenType() != VerificationToken.TokenType.PASSWORD_RESET) {
+            log.warn("Token is not a password reset token: {}", token);
+            return VerificationResult.failure("Invalid reset link", null);
+        }
+
+        if (verificationToken.isUsed()) {
+            log.warn("Password reset token already used: {}", token);
+            return VerificationResult.failure("This reset link has already been used", null);
+        }
+
+        if (verificationToken.isExpired()) {
+            log.warn("Password reset token expired: {}", token);
+            return VerificationResult.failure("This reset link has expired. Please request a new password reset", null);
+        }
+
+        log.info("Successfully validated password reset token for email: {}", verificationToken.getEmail());
+
+        return VerificationResult.success("Token is valid", verificationToken.getEmail());
+    }
+
+    /**
+     * Get verification token by token string (for password reset validation)
+     */
+    public VerificationToken getTokenByString(String token) {
+        return verificationTokenMapper.findByToken(token);
+    }
+
+    /**
+     * Mark a password reset token as used
+     */
+    @Transactional
+    public void markPasswordResetTokenAsUsed(String token) {
+        VerificationToken verificationToken = verificationTokenMapper.findByToken(token);
+        if (verificationToken != null) {
+            verificationToken.markAsUsed();
+            verificationTokenMapper.markAsUsed(verificationToken);
+            log.info("Marked password reset token as used for email: {}", verificationToken.getEmail());
+        }
+    }
+
+    /**
+     * Generate password reset URL
+     */
+    public String generatePasswordResetUrl(String token) {
+        return baseUrl + "/reset-password?token=" + token;
+    }
+
+    /**
      * Generate a cryptographically secure token
      */
     private String generateSecureToken() {
