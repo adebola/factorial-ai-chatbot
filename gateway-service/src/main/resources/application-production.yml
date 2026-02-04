@@ -262,10 +262,102 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            # =================================================================
+            # Super Admin Routes - Specific paths for each service/feature
+            # IMPORTANT: Order matters - more specific routes must come first
+            # =================================================================
+
+            # Authorization Server - User Management (root path)
+            - id: admin-users-root
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/api/v1/admin/users
+              filters:
+                - RewritePath=/api/v1/admin/users,/auth/api/v1/admin/users
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+            # Authorization Server - User Management (sub-paths)
+            - id: admin-users
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/api/v1/admin/users/**
+              filters:
+                - RewritePath=/api/v1/admin/users/(?<segment>.*),/auth/api/v1/admin/users/$\{segment}
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+            # Authorization Server - Tenant Management (root path)
+            - id: admin-tenants-root
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/api/v1/admin/tenants
+              filters:
+                - RewritePath=/api/v1/admin/tenants,/auth/api/v1/admin/tenants
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+            # Authorization Server - Tenant Management (sub-paths)
+            - id: admin-tenants
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/api/v1/admin/tenants/**
+              filters:
+                - RewritePath=/api/v1/admin/tenants/(?<segment>.*),/auth/api/v1/admin/tenants/$\{segment}
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+            # Authorization Server - System Analytics (root path)
+            - id: admin-analytics-root
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/api/v1/admin/analytics
+              filters:
+                - RewritePath=/api/v1/admin/analytics,/auth/api/v1/admin/analytics
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+            # Authorization Server - System Analytics (sub-paths)
+            - id: admin-analytics
+              uri: http://authorization-service:9000
+              predicates:
+                - Path=/api/v1/admin/analytics/**
+              filters:
+                - RewritePath=/api/v1/admin/analytics/(?<segment>.*),/auth/api/v1/admin/analytics/$\{segment}
+                - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
+
+            # Quality Service - Dashboard Endpoints
             - id: admin-dashboard
               uri: http://answer-quality-service:8000
               predicates:
-                - Path=/api/v1/admin/**
+                - Path=/api/v1/admin/dashboard/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Quality Service - Cross-tenant Quality Metrics
+            - id: admin-quality
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/admin/quality/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Quality Service - Knowledge Gaps Management
+            - id: admin-gaps
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/admin/gaps/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Quality Service - Export Endpoints
+            - id: admin-export
+              uri: http://answer-quality-service:8000
+              predicates:
+                - Path=/api/v1/admin/export/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Billing Service - Admin Billing Operations
+            - id: admin-billing
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/api/v1/admin/billing/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
