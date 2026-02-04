@@ -261,6 +261,8 @@ class SubscriptionService:
         payment.processed_at = datetime.now(timezone.utc)
         payment.gateway_response = verification_result["data"]
         payment.paystack_transaction_id = str(verification_result["transaction_id"])
+        # Set payment method from Paystack channel (card, bank, ussd, etc.)
+        payment.payment_method = verification_result.get("channel", "paystack")
 
         # Store payment method if available
         auth_data = verification_result.get("authorization", {})

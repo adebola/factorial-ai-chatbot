@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..models.plan import Plan
-from ..services.dependencies import TokenClaims, validate_token, logger
+from ..services.dependencies import TokenClaims, validate_token, require_system_admin, logger
 from ..services.plan_service import PlanService
 
 router = APIRouter()
@@ -90,11 +90,10 @@ class PlanResponse(BaseModel):
 @router.post("/plans/", response_model=Dict[str, Any])
 async def create_plan(
     plan_data: PlanCreateRequest,
-    claims: TokenClaims = Depends(validate_token),
-    # admin_tenant: Tenant = Depends(get_admin_tenant),
+    claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Create a new plan (Admin only)"""
+    """Create a new plan (System Admin only - ROLE_SYSTEM_ADMIN required)"""
     
     try:
         plan_service = PlanService(db)
@@ -374,11 +373,10 @@ async def get_plan(
 async def update_plan(
     plan_id: str,
     plan_data: PlanUpdateRequest,
-    claims: TokenClaims = Depends(validate_token),
-    # admin_tenant: Tenant = Depends(get_admin_tenant),
+    claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Update an existing plan (Admin only)"""
+    """Update an existing plan (System Admin only - ROLE_SYSTEM_ADMIN required)"""
     
     try:
         plan_service = PlanService(db)
@@ -449,11 +447,10 @@ async def update_plan(
 @router.delete("/plans/{plan_id}", response_model=Dict[str, Any])
 async def delete_plan(
     plan_id: str,
-    claims: TokenClaims = Depends(validate_token),
-    # admin_tenant: Tenant = Depends(get_admin_tenant),
+    claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Soft delete a plan (Admin only)"""
+    """Soft delete a plan (System Admin only - ROLE_SYSTEM_ADMIN required)"""
     
     try:
         plan_service = PlanService(db)

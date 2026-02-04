@@ -21,8 +21,13 @@ from ..models.subscription import (
     Subscription, Payment, PaymentMethod, PaymentStatus,
     TransactionType, Invoice
 )
+from ..models.plan import Plan
 
-router = APIRouter(prefix="/billing/admin", tags=["Admin - Billing"])
+from ..core.logging_config import get_logger
+
+router = APIRouter(prefix="/admin/billing", tags=["Admin - Billing"])
+
+logger = get_logger(__name__)
 
 
 # ============================================================================
@@ -79,7 +84,7 @@ class SubscriptionOverrideRequest(BaseModel):
 
 @router.get("/subscriptions")
 async def list_all_subscriptions(
-    page: int = Query(1, ge=1, description="Page number"),
+    page: int = Query(0, ge=0, description="Page number (0-based)"),
     size: int = Query(50, ge=1, le=500, description="Page size"),
     tenant_id: Optional[str] = Query(None, description="Filter by tenant ID"),
     status: Optional[str] = Query(None, description="Filter by status"),
@@ -92,7 +97,7 @@ async def list_all_subscriptions(
     List subscriptions across all tenants (SYSTEM_ADMIN only).
 
     **Query Parameters:**
-    - `page`: Page number (default: 1)
+    - `page`: Page number (default: 0, 0-based indexing)
     - `size`: Page size (default: 50, max: 500)
     - `tenant_id`: Filter by specific tenant
     - `status`: Filter by subscription status
@@ -120,19 +125,19 @@ async def list_all_subscriptions(
         # Get total count
         total = query.count()
 
-        # Paginate
+        # Paginate (0-based)
         subscriptions = (
             query
             .order_by(Subscription.created_at.desc())
-            .offset((page - 1) * size)
+            .offset(page * size)
             .limit(size)
             .all()
         )
 
         # Calculate pagination metadata
         pages = (total + size - 1) // size
-        has_next = page < pages
-        has_prev = page > 1
+        has_next = page < (pages - 1)
+        has_prev = page > 0
 
         return {
             "items": [
@@ -167,13 +172,98 @@ async def list_all_subscriptions(
         )
 
 
+@router.get("/subscriptions/tenant/{tenant_id}")
+async def get_subscription_by_tenant(
+    tenant_id: str,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get active subscription for a specific tenant (SYSTEM_ADMIN only).
+
+    **Path Parameters:**
+    - `tenant_id`: The tenant ID to fetch subscription for
+
+    **Returns:**
+    The active subscription for the tenant, or 404 if not found.
+    """
+    try:
+        logger = get_logger("admin")
+        logger.info(f"Getting subscription for tenant {tenant_id}")
+
+        subscription_service = SubscriptionService(db)
+        subscription = subscription_service.get_subscription_by_tenant(tenant_id)
+
+        if not subscription:
+            logger.error(f"No active subscription found for tenant {tenant_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No active subscription found for tenant {tenant_id}"
+            )
+
+        # Get plan details to include plan name
+        plan = db.query(Plan).filter(Plan.id == subscription.plan_id).first()
+        plan_name = plan.name if plan else None
+
+        # Get usage tracking if available
+        from ..models.subscription import UsageTracking
+        usage = db.query(UsageTracking).filter(
+            UsageTracking.subscription_id == subscription.id
+        ).first()
+
+        response = {
+            "id": subscription.id,
+            "tenant_id": subscription.tenant_id,
+            "plan_id": subscription.plan_id,
+            "plan_name": plan_name,
+            "status": subscription.status,
+            "billing_cycle": subscription.billing_cycle,
+            "amount": float(subscription.amount),
+            "currency": subscription.currency,
+            "current_period_start": subscription.current_period_start.isoformat() if subscription.current_period_start else None,
+            "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
+            "trial_starts_at": subscription.trial_starts_at.isoformat() if subscription.trial_starts_at else None,
+            "trial_ends_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None,
+            "cancelled_at": subscription.cancelled_at.isoformat() if subscription.cancelled_at else None,
+            "cancel_at_period_end": subscription.cancel_at_period_end,
+            "cancellation_reason": subscription.cancellation_reason,
+            "auto_renew": subscription.auto_renew,
+            "user_email": subscription.user_email,
+            "user_full_name": subscription.user_full_name,
+            "created_at": subscription.created_at.isoformat(),
+            "updated_at": subscription.updated_at.isoformat() if subscription.updated_at else None,
+        }
+
+        # Add usage data if available
+        if usage:
+            response["usage"] = {
+                "documents_used": usage.documents_used,
+                "websites_used": usage.websites_used,
+                "daily_chats_used": usage.daily_chats_used,
+                "monthly_chats_used": usage.monthly_chats_used,
+                "api_calls_made": usage.api_calls_made,
+                "period_start": usage.period_start.isoformat() if usage.period_start else None,
+                "period_end": usage.period_end.isoformat() if usage.period_end else None,
+            }
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve subscription for tenant: {str(e)}"
+        )
+
+
 # ============================================================================
 # Payment Endpoints
 # ============================================================================
 
 @router.get("/payments")
 async def list_all_payments(
-    page: int = Query(1, ge=1, description="Page number"),
+    page: int = Query(0, ge=0, description="Page number (0-based)"),
     size: int = Query(50, ge=1, le=500, description="Page size"),
     tenant_id: Optional[str] = Query(None, description="Filter by tenant ID"),
     status: Optional[str] = Query(None, description="Filter by payment status"),
@@ -185,7 +275,7 @@ async def list_all_payments(
     List payments across all tenants (SYSTEM_ADMIN only).
 
     **Query Parameters:**
-    - `page`: Page number (default: 1)
+    - `page`: Page number (default: 0, 0-based indexing)
     - `size`: Page size (default: 50, max: 500)
     - `tenant_id`: Filter by specific tenant
     - `status`: Filter by payment status
@@ -210,19 +300,19 @@ async def list_all_payments(
         # Get total count
         total = query.count()
 
-        # Paginate
+        # Paginate (0-based)
         payments = (
             query
             .order_by(Payment.created_at.desc())
-            .offset((page - 1) * size)
+            .offset(page * size)
             .limit(size)
             .all()
         )
 
         # Calculate pagination metadata
         pages = (total + size - 1) // size
-        has_next = page < pages
-        has_prev = page > 1
+        has_next = page < (pages - 1)
+        has_prev = page > 0
 
         return {
             "items": [
@@ -254,6 +344,97 @@ async def list_all_payments(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve payments: {str(e)}"
+        )
+
+
+@router.get("/payments/{payment_id}")
+async def get_payment_by_id(
+    payment_id: str,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get payment details by ID (SYSTEM_ADMIN only).
+
+    **Path Parameters:**
+    - `payment_id`: The payment ID to retrieve
+
+    **Returns:**
+    Full payment details including related subscription and tenant info.
+    """
+    logger.info(f"Getting payment {payment_id}")
+
+    try:
+
+        payment = db.query(Payment).filter(Payment.id == payment_id).first()
+
+        if not payment:
+            logger.error(f"Payment not found: {payment_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Payment not found: {payment_id}"
+            )
+
+        # Get related subscription details
+        subscription = None
+        if payment.subscription_id:
+            subscription = db.query(Subscription).filter(
+                Subscription.id == payment.subscription_id
+            ).first()
+
+        # Get related invoice if exists
+        invoice = None
+        if payment.invoice_id:
+            invoice = db.query(Invoice).filter(
+                Invoice.id == payment.invoice_id
+            ).first()
+
+        response = {
+            "id": payment.id,
+            "tenant_id": payment.tenant_id,
+            "subscription_id": payment.subscription_id,
+            "amount": float(payment.amount),
+            "currency": payment.currency,
+            "status": payment.status,
+            "payment_method": payment.payment_method,
+            "transaction_type": payment.transaction_type,
+            "paystack_reference": payment.paystack_reference,
+            "description": payment.description,
+            "created_at": payment.created_at.isoformat(),
+            "processed_at": payment.processed_at.isoformat() if payment.processed_at else None,
+            "gateway_response": payment.gateway_response,
+            "refunded_amount": float(payment.refunded_amount) if payment.refunded_amount else 0.0,
+            "invoice_id": payment.invoice_id,
+        }
+
+        # Add subscription details if available
+        if subscription:
+            response["subscription"] = {
+                "id": subscription.id,
+                "plan_id": subscription.plan_id,
+                "status": subscription.status,
+                "user_email": subscription.user_email,
+                "user_full_name": subscription.user_full_name,
+            }
+
+        # Add invoice details if available
+        if invoice:
+            response["invoice"] = {
+                "id": invoice.id,
+                "invoice_number": invoice.invoice_number,
+                "total_amount": float(invoice.total_amount),
+                "status": invoice.status,
+            }
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to retrieve payment: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve payment: {str(e)}"
         )
 
 
@@ -355,6 +536,7 @@ async def create_manual_payment(
             subscription.ends_at = new_period_end
             subscription.status = "active"
             subscription.updated_at = datetime.now()
+            subscription.amount = payment_data.amount
 
             # Generate invoice
             invoice_service = InvoiceService(db)

@@ -9,7 +9,7 @@ from sqlalchemy import and_
 from ..core.database import get_db
 from ..models.subscription import (
     Subscription, SubscriptionStatus, BillingCycle, UsageTracking,
-    SubscriptionChange, Payment
+    SubscriptionChange, Payment, PaymentStatus
 )
 from ..services.dependencies import TokenClaims, validate_token
 from ..services.plan_service import PlanService
@@ -869,6 +869,62 @@ async def get_subscription_analytics(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve analytics: {str(e)}"
+        )
+
+
+@router.get("/admin/revenue/today", response_model=Dict[str, Any])
+async def get_today_revenue(
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get today's revenue (Super Admin only)
+
+    Calculates total revenue from completed payments processed today.
+    """
+    try:
+        from datetime import date, datetime, timezone
+
+        # Get today's date range (UTC)
+        today = date.today()
+        today_start = datetime.combine(today, datetime.min.time()).replace(tzinfo=timezone.utc)
+        today_end = datetime.combine(today, datetime.max.time()).replace(tzinfo=timezone.utc)
+
+        # Query completed payments processed today
+        today_payments = db.query(Payment).filter(
+            and_(
+                Payment.status == PaymentStatus.COMPLETED.value,
+                Payment.processed_at >= today_start,
+                Payment.processed_at <= today_end
+            )
+        ).all()
+
+        # Calculate total revenue
+        revenue_today = sum(float(payment.amount) for payment in today_payments)
+        payment_count = len(today_payments)
+
+        # Get breakdown by transaction type
+        revenue_by_type = {}
+        for payment in today_payments:
+            trans_type = payment.transaction_type or 'unknown'
+            revenue_by_type[trans_type] = revenue_by_type.get(trans_type, 0) + float(payment.amount)
+
+        return {
+            "revenue_today": round(revenue_today, 2),
+            "payment_count": payment_count,
+            "date": today.isoformat(),
+            "breakdown": {
+                "by_transaction_type": revenue_by_type
+            },
+            "period": {
+                "start": today_start.isoformat(),
+                "end": today_end.isoformat()
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve today's revenue: {str(e)}"
         )
 
 
