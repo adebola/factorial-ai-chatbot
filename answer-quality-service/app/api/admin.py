@@ -4,16 +4,18 @@ Admin Dashboard API
 Endpoints for admin users to view quality trends, insights, and knowledge gaps.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, desc
-from typing import List, Optional
-from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any
+from datetime import datetime, timedelta, date
 import csv
 import io
+import httpx
+import os
 
 from app.core.database import get_db
-from app.core.auth import validate_token, require_admin
+from app.core.auth import validate_token, require_admin, require_system_admin
 from app.models.quality_metrics import RAGQualityMetrics
 from app.models.feedback import AnswerFeedback
 from app.models.knowledge_gap import KnowledgeGap
@@ -24,6 +26,332 @@ from app.core.logging_config import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+# Service URLs for inter-service communication
+AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://localhost:9002")
+BILLING_SERVICE_URL = os.environ.get("BILLING_SERVICE_URL", "http://localhost:8004")
+
+
+@router.get("/dashboard/quick-stats")
+async def get_dashboard_quick_stats(
+    request: Request,
+    current_user: dict = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get today's quick stats for super admin dashboard.
+
+    Requires ROLE_SYSTEM_ADMIN authority.
+    Returns today's new tenants, users, revenue, and chats.
+    """
+    logger.info(
+        "System admin requesting quick stats (today)",
+        user_id=current_user.get("user_id")
+    )
+
+    # Extract authorization token from request headers
+    auth_header = request.headers.get("authorization", "")
+
+    # Calculate today's date range
+    today_start = datetime.combine(date.today(), datetime.min.time())
+    today_end = datetime.combine(date.today(), datetime.max.time())
+
+    # Get today's chat/message counts from local database
+    chats_today = db.query(func.count(func.distinct(RAGQualityMetrics.session_id))).filter(
+        RAGQualityMetrics.created_at >= today_start
+    ).scalar() or 0
+
+    # Call authorization server for today's tenant and user counts
+    new_tenants_today = 0
+    new_users_today = 0
+    try:
+        headers = {"Authorization": auth_header} if auth_header else {}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{AUTH_SERVICE_URL}/auth/api/v1/admin/analytics/platform-metrics",
+                headers=headers
+            )
+            logger.debug(f"Auth server response: {response.json()}")
+            if response.status_code == 200:
+                data = response.json()
+                # Extract today's counts from 30-day data (if available)
+                # For now, default to 0 - the auth server would need a "today" endpoint
+                new_tenants_today = 0  # TODO: Auth server needs /analytics/today endpoint
+                new_users_today = 0
+            else:
+                logger.warning(f"Auth server returned status {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch auth metrics: {e}")
+
+    # Call billing service for today's revenue
+    revenue_today = 0
+    try:
+        headers = {"Authorization": auth_header} if auth_header else {}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Get actual today's revenue from billing service
+            response = await client.get(
+                f"{BILLING_SERVICE_URL}/api/v1/subscriptions/admin/revenue/today",
+                headers=headers
+            )
+            if response.status_code == 200:
+                data = response.json()
+                revenue_today = data.get("revenue_today", 0)
+            else:
+                logger.warning(f"Billing service returned status {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Failed to fetch billing metrics: {e}")
+
+    logger.info(
+        "Quick stats retrieved",
+        chats_today=chats_today,
+        new_tenants_today=new_tenants_today
+    )
+
+    return {
+        "new_tenants_today": new_tenants_today,
+        "new_users_today": new_users_today,
+        "revenue_today": revenue_today,
+        "chats_today": chats_today
+    }
+
+
+@router.get("/dashboard/metrics")
+async def get_dashboard_metrics(
+    request: Request,
+    current_user: dict = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get overall platform metrics for super admin dashboard.
+
+    Requires ROLE_SYSTEM_ADMIN authority.
+    Returns total tenants, users, chats, messages, and revenue.
+    """
+    logger.info(
+        "System admin requesting dashboard metrics",
+        user_id=current_user.get("user_id")
+    )
+
+    # Extract authorization token from request headers
+    auth_header = request.headers.get("authorization", "")
+
+    # Get total messages and chats from local database
+    total_messages = db.query(func.count(RAGQualityMetrics.id)).scalar() or 0
+    total_chats = db.query(func.count(func.distinct(RAGQualityMetrics.session_id))).scalar() or 0
+
+    # Call authorization server for tenant and user counts
+    total_tenants = 0
+    active_tenants = 0
+    suspended_tenants = 0
+    total_users = 0
+    active_users = 0
+
+    try:
+        headers = {"Authorization": auth_header} if auth_header else {}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{AUTH_SERVICE_URL}/auth/api/v1/admin/analytics/platform-metrics",
+                headers=headers
+            )
+            if response.status_code == 200:
+                data = response.json()
+                tenants_data = data.get("tenants", {})
+                users_data = data.get("users", {})
+
+                total_tenants = tenants_data.get("total", 0)
+                active_tenants = tenants_data.get("active", 0)
+                suspended_tenants = tenants_data.get("inactive", 0)
+                total_users = users_data.get("total", 0)
+                active_users = users_data.get("active", 0)
+            else:
+                logger.warning(f"Auth server returned status {response.status_code}: {response.text}")
+    except Exception as e:
+        logger.error(f"Failed to fetch auth server metrics: {e}")
+
+    # Call billing service for revenue data
+    total_revenue = 0
+    monthly_revenue = 0
+
+    try:
+        headers = {"Authorization": auth_header} if auth_header else {}
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Get analytics from billing service
+            response = await client.get(
+                f"{BILLING_SERVICE_URL}/api/v1/subscriptions/admin/analytics",
+                headers=headers
+            )
+            if response.status_code == 200:
+                data = response.json()
+                analytics = data.get("analytics", {})
+                monthly_revenue = analytics.get("monthly_revenue", 0)
+                yearly_revenue = analytics.get("yearly_revenue", 0)
+                total_revenue = monthly_revenue + yearly_revenue
+            else:
+                logger.warning(f"Billing service returned status {response.status_code}: {response.text}")
+    except Exception as e:
+        logger.error(f"Failed to fetch billing service metrics: {e}")
+
+    logger.info(
+        "Dashboard metrics retrieved",
+        total_tenants=total_tenants,
+        total_users=total_users,
+        total_chats=total_chats,
+        total_messages=total_messages
+    )
+
+    return {
+        "total_tenants": total_tenants,
+        "active_tenants": active_tenants,
+        "suspended_tenants": suspended_tenants,
+        "total_users": total_users,
+        "active_users": active_users,
+        "total_chats": total_chats,
+        "total_messages": total_messages,
+        "total_revenue": total_revenue,
+        "monthly_revenue": monthly_revenue
+    }
+
+
+@router.get("/dashboard/growth")
+async def get_dashboard_growth(
+    days: int = Query(default=30, ge=7, le=90, description="Days to analyze"),
+    current_user: dict = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get growth trends for super admin dashboard.
+
+    Requires ROLE_SYSTEM_ADMIN authority.
+    Returns daily growth data.
+    """
+    logger.info(
+        "System admin requesting growth data",
+        user_id=current_user.get("user_id"),
+        days=days
+    )
+
+    cutoff_date = datetime.now() - timedelta(days=days)
+
+    # Daily message counts
+    daily_messages = db.query(
+        func.date(RAGQualityMetrics.created_at).label('date'),
+        func.count(RAGQualityMetrics.id).label('message_count'),
+        func.count(func.distinct(RAGQualityMetrics.session_id)).label('session_count'),
+        func.count(func.distinct(RAGQualityMetrics.tenant_id)).label('tenant_count')
+    ).filter(
+        RAGQualityMetrics.created_at >= cutoff_date
+    ).group_by(func.date(RAGQualityMetrics.created_at)).order_by('date').all()
+
+    # Format growth data
+    growth_data = [
+        {
+            "date": metric.date.isoformat(),
+            "messages": metric.message_count,
+            "sessions": metric.session_count,
+            "activeTenants": metric.tenant_count
+        }
+        for metric in daily_messages
+    ]
+
+    logger.info(
+        "Growth data retrieved",
+        days=days,
+        data_points=len(growth_data)
+    )
+
+    return {
+        "period": {
+            "days": days,
+            "startDate": cutoff_date.isoformat(),
+            "endDate": datetime.now().isoformat()
+        },
+        "data": growth_data
+    }
+
+
+@router.get("/dashboard/activity")
+async def get_dashboard_activity(
+    limit: int = Query(default=10, ge=1, le=50, description="Number of recent activities"),
+    current_user: dict = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get recent activity for super admin dashboard.
+
+    Requires ROLE_SYSTEM_ADMIN authority.
+    Returns recent messages and feedback.
+    """
+    logger.info(
+        "System admin requesting recent activity",
+        user_id=current_user.get("user_id"),
+        limit=limit
+    )
+
+    # Get recent quality metrics
+    recent_messages = db.query(RAGQualityMetrics).order_by(
+        desc(RAGQualityMetrics.created_at)
+    ).limit(limit).all()
+
+    # Get recent feedback
+    recent_feedback = db.query(AnswerFeedback).order_by(
+        desc(AnswerFeedback.created_at)
+    ).limit(limit).all()
+
+    # Get recent knowledge gaps detected
+    recent_gaps = db.query(KnowledgeGap).filter(
+        KnowledgeGap.status == 'detected'
+    ).order_by(
+        desc(KnowledgeGap.first_detected_at)
+    ).limit(limit).all()
+
+    logger.info(
+        "Activity retrieved",
+        message_count=len(recent_messages),
+        feedback_count=len(recent_feedback),
+        gap_count=len(recent_gaps)
+    )
+
+    return {
+        "recentMessages": [
+            {
+                "messageId": msg.message_id,
+                "sessionId": msg.session_id,
+                "tenantId": msg.tenant_id,
+                "confidence": round(msg.answer_confidence, 3) if msg.answer_confidence is not None else None,
+                "retrievalScore": round(msg.retrieval_score, 3) if msg.retrieval_score is not None else None,
+                "responseTimeMs": msg.response_time_ms,
+                "createdAt": msg.created_at.isoformat(),
+                "hasIssues": (
+                    (msg.answer_confidence is not None and msg.answer_confidence < 0.5) or
+                    (msg.retrieval_score is not None and msg.retrieval_score < 0.5) or
+                    (msg.response_time_ms is not None and msg.response_time_ms > 5000)
+                )
+            }
+            for msg in recent_messages
+        ],
+        "recentFeedback": [
+            {
+                "id": fb.id,
+                "messageId": fb.message_id,
+                "tenantId": fb.tenant_id,
+                "feedbackType": fb.feedback_type,
+                "comment": fb.feedback_comment,
+                "createdAt": fb.created_at.isoformat()
+            }
+            for fb in recent_feedback
+        ],
+        "recentKnowledgeGaps": [
+            {
+                "id": gap.id,
+                "tenantId": gap.tenant_id,
+                "questionPattern": gap.question_pattern[:100],
+                "occurrenceCount": gap.occurrence_count,
+                "status": gap.status,
+                "detectedAt": gap.first_detected_at.isoformat()
+            }
+            for gap in recent_gaps
+        ]
+    }
 
 
 @router.get("/dashboard/overview")
@@ -497,3 +825,306 @@ async def export_quality_report(
             "Content-Disposition": f"attachment; filename=quality-report-{days}days.csv"
         }
     )
+
+
+# ============================================================================
+# System Admin Cross-Tenant Quality Endpoints
+# ============================================================================
+
+@router.get("/quality/all-tenants")
+async def get_all_tenants_quality(
+    days: int = Query(default=7, ge=1, le=90, description="Days to analyze"),
+    current_user: dict = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get aggregate quality metrics across all tenants.
+
+    Requires ROLE_SYSTEM_ADMIN.
+
+    Returns:
+        - Per-tenant quality summaries
+        - Platform-wide averages
+        - Tenant rankings by quality metrics
+    """
+    cutoff_date = datetime.now() - timedelta(days=days)
+
+    logger.info(
+        "System admin requesting all-tenants quality metrics",
+        user_id=current_user.get("user_id"),
+        days=days
+    )
+
+    # Get tenant-level aggregated metrics
+    tenant_metrics = db.query(
+        RAGQualityMetrics.tenant_id,
+        func.count(RAGQualityMetrics.id).label('message_count'),
+        func.avg(RAGQualityMetrics.answer_confidence).label('avg_confidence'),
+        func.avg(RAGQualityMetrics.retrieval_score).label('avg_retrieval'),
+        func.avg(RAGQualityMetrics.response_time_ms).label('avg_response_time'),
+        func.count(func.nullif(RAGQualityMetrics.low_confidence_flag, False)).label('low_confidence_count')
+    ).filter(
+        RAGQualityMetrics.created_at >= cutoff_date
+    ).group_by(RAGQualityMetrics.tenant_id).all()
+
+    # Get feedback stats per tenant
+    feedback_by_tenant = {}
+    feedback_stats = db.query(
+        AnswerFeedback.tenant_id,
+        AnswerFeedback.feedback_type,
+        func.count(AnswerFeedback.id).label('count')
+    ).filter(
+        AnswerFeedback.created_at >= cutoff_date
+    ).group_by(AnswerFeedback.tenant_id, AnswerFeedback.feedback_type).all()
+
+    for tenant_id, feedback_type, count in feedback_stats:
+        if tenant_id not in feedback_by_tenant:
+            feedback_by_tenant[tenant_id] = {'helpful': 0, 'not_helpful': 0}
+        feedback_by_tenant[tenant_id][feedback_type] = count
+
+    # Get knowledge gaps per tenant
+    gaps_by_tenant = {}
+    gap_stats = db.query(
+        KnowledgeGap.tenant_id,
+        func.count(KnowledgeGap.id).label('gap_count')
+    ).filter(
+        KnowledgeGap.status.in_(['detected', 'acknowledged'])
+    ).group_by(KnowledgeGap.tenant_id).all()
+
+    for tenant_id, gap_count in gap_stats:
+        gaps_by_tenant[tenant_id] = gap_count
+
+    # Build tenant summaries
+    tenant_summaries = []
+    platform_totals = {
+        'total_messages': 0,
+        'total_confidence': 0,
+        'total_retrieval': 0,
+        'total_response_time': 0,
+        'tenant_count': 0
+    }
+
+    for metric in tenant_metrics:
+        tenant_id = metric.tenant_id
+        message_count = metric.message_count
+        avg_confidence = round(metric.avg_confidence, 3) if metric.avg_confidence else 0
+        avg_retrieval = round(metric.avg_retrieval, 3) if metric.avg_retrieval else 0
+        avg_response_time = round(metric.avg_response_time, 0) if metric.avg_response_time else 0
+        low_confidence_count = metric.low_confidence_count or 0
+
+        feedback = feedback_by_tenant.get(tenant_id, {'helpful': 0, 'not_helpful': 0})
+        total_feedback = feedback['helpful'] + feedback['not_helpful']
+        helpful_percentage = round((feedback['helpful'] / total_feedback * 100), 1) if total_feedback > 0 else 0
+
+        active_gaps = gaps_by_tenant.get(tenant_id, 0)
+
+        tenant_summaries.append({
+            'tenant_id': tenant_id,
+            'message_count': message_count,
+            'avg_confidence': avg_confidence,
+            'avg_retrieval_score': avg_retrieval,
+            'avg_response_time_ms': avg_response_time,
+            'low_confidence_count': low_confidence_count,
+            'low_confidence_percentage': round((low_confidence_count / message_count * 100), 1) if message_count > 0 else 0,
+            'feedback': {
+                'helpful': feedback['helpful'],
+                'not_helpful': feedback['not_helpful'],
+                'total': total_feedback,
+                'helpful_percentage': helpful_percentage
+            },
+            'active_knowledge_gaps': active_gaps
+        })
+
+        # Update platform totals
+        platform_totals['total_messages'] += message_count
+        if metric.avg_confidence:
+            platform_totals['total_confidence'] += metric.avg_confidence
+        if metric.avg_retrieval:
+            platform_totals['total_retrieval'] += metric.avg_retrieval
+        if metric.avg_response_time:
+            platform_totals['total_response_time'] += metric.avg_response_time
+        platform_totals['tenant_count'] += 1
+
+    # Calculate platform averages
+    tenant_count = platform_totals['tenant_count']
+    platform_averages = {
+        'avg_confidence': round(platform_totals['total_confidence'] / tenant_count, 3) if tenant_count > 0 else 0,
+        'avg_retrieval_score': round(platform_totals['total_retrieval'] / tenant_count, 3) if tenant_count > 0 else 0,
+        'avg_response_time_ms': round(platform_totals['total_response_time'] / tenant_count, 0) if tenant_count > 0 else 0,
+        'total_messages': platform_totals['total_messages'],
+        'total_tenants': tenant_count
+    }
+
+    # Sort tenants by confidence score (descending)
+    tenant_summaries.sort(key=lambda x: x['avg_confidence'], reverse=True)
+
+    logger.info(
+        "System admin retrieved all-tenants quality metrics",
+        tenant_count=len(tenant_summaries),
+        total_messages=platform_totals['total_messages']
+    )
+
+    return {
+        'period': {
+            'days': days,
+            'start_date': cutoff_date.isoformat(),
+            'end_date': datetime.now().isoformat()
+        },
+        'platform_summary': platform_averages,
+        'tenants': tenant_summaries
+    }
+
+
+@router.get("/quality/tenant/{tenant_id}")
+async def get_tenant_quality_details(
+    tenant_id: str,
+    days: int = Query(default=7, ge=1, le=90, description="Days to analyze"),
+    current_user: dict = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get detailed quality metrics for a specific tenant.
+
+    Requires ROLE_SYSTEM_ADMIN.
+
+    Returns:
+        - Comprehensive quality metrics
+        - Quality trends over time
+        - Knowledge gaps
+        - Recent low-quality messages
+    """
+    cutoff_date = datetime.now() - timedelta(days=days)
+
+    logger.info(
+        "System admin requesting tenant quality details",
+        user_id=current_user.get("user_id"),
+        tenant_id=tenant_id,
+        days=days
+    )
+
+    # Overall metrics
+    total_messages = db.query(func.count(RAGQualityMetrics.id)).filter(
+        and_(
+            RAGQualityMetrics.tenant_id == tenant_id,
+            RAGQualityMetrics.created_at >= cutoff_date
+        )
+    ).scalar() or 0
+
+    avg_stats = db.query(
+        func.avg(RAGQualityMetrics.answer_confidence).label('avg_confidence'),
+        func.avg(RAGQualityMetrics.retrieval_score).label('avg_retrieval'),
+        func.avg(RAGQualityMetrics.response_time_ms).label('avg_response_time')
+    ).filter(
+        and_(
+            RAGQualityMetrics.tenant_id == tenant_id,
+            RAGQualityMetrics.created_at >= cutoff_date
+        )
+    ).first()
+
+    # Feedback statistics
+    feedback_stats = db.query(
+        AnswerFeedback.feedback_type,
+        func.count(AnswerFeedback.id).label('count')
+    ).filter(
+        and_(
+            AnswerFeedback.tenant_id == tenant_id,
+            AnswerFeedback.created_at >= cutoff_date
+        )
+    ).group_by(AnswerFeedback.feedback_type).all()
+
+    feedback_summary = {'helpful': 0, 'not_helpful': 0}
+    for feedback_type, count in feedback_stats:
+        feedback_summary[feedback_type] = count
+
+    # Knowledge gaps
+    active_gaps = db.query(KnowledgeGap).filter(
+        and_(
+            KnowledgeGap.tenant_id == tenant_id,
+            KnowledgeGap.status.in_(['detected', 'acknowledged'])
+        )
+    ).order_by(desc(KnowledgeGap.occurrence_count)).limit(10).all()
+
+    # Low quality messages (recent)
+    low_quality_messages = db.query(RAGQualityMetrics).filter(
+        and_(
+            RAGQualityMetrics.tenant_id == tenant_id,
+            RAGQualityMetrics.created_at >= cutoff_date,
+            RAGQualityMetrics.answer_confidence < 0.5
+        )
+    ).order_by(desc(RAGQualityMetrics.created_at)).limit(20).all()
+
+    # Daily trends
+    daily_metrics = db.query(
+        func.date(RAGQualityMetrics.created_at).label('date'),
+        func.count(RAGQualityMetrics.id).label('message_count'),
+        func.avg(RAGQualityMetrics.answer_confidence).label('avg_confidence'),
+        func.avg(RAGQualityMetrics.retrieval_score).label('avg_retrieval')
+    ).filter(
+        and_(
+            RAGQualityMetrics.tenant_id == tenant_id,
+            RAGQualityMetrics.created_at >= cutoff_date
+        )
+    ).group_by(func.date(RAGQualityMetrics.created_at)).order_by('date').all()
+
+    trends = [
+        {
+            'date': metric.date.isoformat(),
+            'message_count': metric.message_count,
+            'avg_confidence': round(metric.avg_confidence, 3) if metric.avg_confidence else None,
+            'avg_retrieval': round(metric.avg_retrieval, 3) if metric.avg_retrieval else None
+        }
+        for metric in daily_metrics
+    ]
+
+    logger.info(
+        "System admin retrieved tenant quality details",
+        tenant_id=tenant_id,
+        total_messages=total_messages,
+        active_gaps=len(active_gaps)
+    )
+
+    return {
+        'tenant_id': tenant_id,
+        'period': {
+            'days': days,
+            'start_date': cutoff_date.isoformat(),
+            'end_date': datetime.now().isoformat()
+        },
+        'metrics': {
+            'total_messages': total_messages,
+            'avg_confidence': round(avg_stats.avg_confidence, 3) if avg_stats.avg_confidence else None,
+            'avg_retrieval_score': round(avg_stats.avg_retrieval, 3) if avg_stats.avg_retrieval else None,
+            'avg_response_time_ms': round(avg_stats.avg_response_time, 0) if avg_stats.avg_response_time else None
+        },
+        'feedback': {
+            'helpful': feedback_summary['helpful'],
+            'not_helpful': feedback_summary['not_helpful'],
+            'total': sum(feedback_summary.values()),
+            'helpful_percentage': round(
+                (feedback_summary['helpful'] / sum(feedback_summary.values()) * 100), 1
+            ) if sum(feedback_summary.values()) > 0 else 0
+        },
+        'knowledge_gaps': {
+            'active_count': len(active_gaps),
+            'top_gaps': [
+                {
+                    'id': gap.id,
+                    'question_pattern': gap.question_pattern,
+                    'occurrence_count': gap.occurrence_count,
+                    'status': gap.status
+                }
+                for gap in active_gaps
+            ]
+        },
+        'low_quality_messages': [
+            {
+                'message_id': msg.message_id,
+                'session_id': msg.session_id,
+                'confidence': round(msg.answer_confidence, 3),
+                'retrieval_score': round(msg.retrieval_score, 3) if msg.retrieval_score else None,
+                'created_at': msg.created_at.isoformat()
+            }
+            for msg in low_quality_messages
+        ],
+        'trends': trends
+    }

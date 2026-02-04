@@ -116,6 +116,49 @@ async def require_admin(claims: dict = Depends(validate_token)) -> dict:
     return claims
 
 
+async def require_system_admin(claims: dict = Depends(validate_token)) -> dict:
+    """
+    Require SYSTEM_ADMIN role for endpoint access.
+
+    ROLE_SYSTEM_ADMIN: Cross-tenant system admin (Factorial Systems staff)
+    - Can view/manage all tenants
+    - Bypasses tenant_id filtering
+    - Full system-wide access
+
+    Usage:
+        @app.get("/admin/quality/all-tenants")
+        async def all_tenants_quality(_: dict = Depends(require_system_admin)):
+            # Only system admins can access this endpoint
+            ...
+
+    Raises:
+        HTTPException: 403 if user is not a system admin
+    """
+    # Check if user has SYSTEM_ADMIN authority
+    authorities = claims.get("authorities", [])
+
+    if isinstance(authorities, str):
+        authorities = [authorities]
+
+    if "ROLE_SYSTEM_ADMIN" not in authorities:
+        logger.warning(
+            "System admin access denied",
+            user_id=claims.get("sub"),
+            authorities=authorities
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="System administrator privileges required"
+        )
+
+    logger.info(
+        "System admin access granted",
+        user_id=claims.get("sub")
+    )
+
+    return claims
+
+
 def get_tenant_id(claims: dict) -> str:
     """
     Extract tenant_id from token claims.
