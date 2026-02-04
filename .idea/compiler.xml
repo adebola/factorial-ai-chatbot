@@ -17,16 +17,29 @@
           <entry name="$MAVEN_REPOSITORY$/org/projectlombok/lombok/1.18.38/lombok-1.18.38.jar" />
         </processorPath>
         <module name="authorization-server2" />
+        <module name="authorization-server2 (5)" />
       </profile>
     </annotationProcessing>
     <bytecodeTargetLevel>
       <module name="authorization-server" target="21" />
+      <module name="authorization-server2 (1)" target="21" />
+      <module name="authorization-server2 (2)" target="1.8" />
+      <module name="authorization-server2 (3)" target="1.8" />
+      <module name="authorization-server2 (4)" target="21" />
+      <module name="authorization-server2 (6)" target="21" />
+      <module name="gateway-service (1)" target="1.5" />
     </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">
       <module name="authorization-server" options="-parameters" />
       <module name="authorization-server2" options="-parameters" />
+      <module name="authorization-server2 (1)" options="-parameters" />
+      <module name="authorization-server2 (2)" options="-parameters" />
+      <module name="authorization-server2 (3)" options="-parameters" />
+      <module name="authorization-server2 (4)" options="-parameters" />
+      <module name="authorization-server2 (5)" options="-parameters" />
+      <module name="authorization-server2 (6)" options="-parameters" />
       <module name="gateway-service" options="-parameters" />
     </option>
   </component>
