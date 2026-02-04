@@ -26,6 +26,8 @@ import org.springframework.security.oauth2.server.authorization.config.annotatio
 import org.springframework.security.oauth2.server.authorization.settings.AuthorizationServerSettings;
 import org.springframework.security.oauth2.server.authorization.token.JwtEncodingContext;
 import org.springframework.security.oauth2.server.authorization.token.OAuth2TokenCustomizer;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint;
 import org.springframework.security.web.util.matcher.MediaTypeRequestMatcher;
@@ -77,7 +79,7 @@ public class SecurityConfig {
 				.anyRequest().authenticated() // All other API endpoints require authentication
 			)
 			.oauth2ResourceServer((resourceServer) -> resourceServer
-				.jwt(withDefaults()) // Use JWT for API authentication
+				.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter())) // Use custom converter to extract authorities
 			)
 			.exceptionHandling((exceptions) -> exceptions
 				.authenticationEntryPoint((request, response, authException) -> {
@@ -180,7 +182,7 @@ public class SecurityConfig {
 						.map(GrantedAuthority::getAuthority)
 						.collect(Collectors.toSet());
 				context.getClaims().claim("authorities", authorities);
-				
+
 				// Add custom user claims if using our DatabaseUserDetailsService
 				if (principal.getPrincipal() instanceof DatabaseUserDetailsService.CustomUserPrincipal userPrincipal) {
 
@@ -189,10 +191,36 @@ public class SecurityConfig {
 					context.getClaims().claim("email", userPrincipal.getEmail());
 					context.getClaims().claim("full_name", userPrincipal.getFullName());
                     context.getClaims().claim("api_key", userPrincipal.getApiKey());
-					
+
 					log.debug("Enhanced JWT token with user claims for: {}", userPrincipal.getUsername());
 				}
 			}
 		};
+	}
+
+	/**
+	 * Configure JWT authentication converter to extract authorities from custom "authorities" claim.
+	 * This is critical for the authorization server to recognize ROLE_* authorities when validating
+	 * its own tokens for API endpoints (/api/v1/**).
+	 *
+	 * Without this, the default converter only extracts the "scope" claim, resulting in SCOPE_*
+	 * authorities instead of ROLE_* authorities, causing 401 errors on admin endpoints.
+	 */
+	@Bean
+	public JwtAuthenticationConverter jwtAuthenticationConverter() {
+		JwtGrantedAuthoritiesConverter grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+
+		// Extract authorities from custom "authorities" claim instead of default "scope" claim
+		grantedAuthoritiesConverter.setAuthoritiesClaimName("authorities");
+
+		// Don't add prefix - our authorities already have "ROLE_" prefix
+		grantedAuthoritiesConverter.setAuthorityPrefix("");
+
+		JwtAuthenticationConverter jwtAuthenticationConverter = new JwtAuthenticationConverter();
+		jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+
+		log.info("Configured JwtAuthenticationConverter to extract authorities from 'authorities' claim");
+
+		return jwtAuthenticationConverter;
 	}
 }

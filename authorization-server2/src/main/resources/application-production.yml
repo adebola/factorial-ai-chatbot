@@ -72,3 +72,7 @@ onboarding:
 billing:
   service:
     url: http://billing-service:8000
+
+chat:
+  service:
+    url: http://chat-service:8000

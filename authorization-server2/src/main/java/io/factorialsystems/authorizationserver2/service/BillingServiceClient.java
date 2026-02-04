@@ -157,4 +157,104 @@ public class BillingServiceClient {
             return false;
         }
     }
+
+    /**
+     * Get subscription details by tenant ID
+     *
+     * @param tenantId The tenant ID
+     * @param authorizationHeader The Authorization header from the incoming request (e.g., "Bearer token...")
+     * @return Subscription data as a Map
+     * @throws Exception if the API call fails
+     */
+    public java.util.Map<String, Object> getSubscriptionByTenant(String tenantId, String authorizationHeader) throws Exception {
+        String url = billingServiceUrl + "/api/v1/billing/admin/subscriptions/tenant/" + tenantId;
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .header("Authorization", authorizationHeader)
+                .GET()
+                .build();
+
+        log.debug("Fetching subscription from billing service for tenant: {}", tenantId);
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            log.error("Billing service returned status {}: {}", response.statusCode(), response.body());
+            throw new RuntimeException(
+                String.format("Failed to fetch subscription: HTTP %d - %s",
+                    response.statusCode(), response.body())
+            );
+        }
+
+        return objectMapper.readValue(response.body(), java.util.Map.class);
+    }
+
+    /**
+     * Get platform-wide metrics from billing service
+     *
+     * @param authorizationHeader The Authorization header from the incoming request (e.g., "Bearer token...")
+     * @return Platform metrics as a Map
+     * @throws Exception if the API call fails
+     */
+    public java.util.Map<String, Object> getPlatformMetrics(String authorizationHeader) throws Exception {
+        String url = billingServiceUrl + "/api/v1/analytics/dashboard";
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .header("Authorization", authorizationHeader)
+                .GET()
+                .build();
+
+        log.debug("Fetching platform metrics from billing service");
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            log.error("Billing service returned status {}: {}", response.statusCode(), response.body());
+            throw new RuntimeException(
+                String.format("Failed to fetch platform metrics: HTTP %d - %s",
+                    response.statusCode(), response.body())
+            );
+        }
+
+        return objectMapper.readValue(response.body(), java.util.Map.class);
+    }
+
+    /**
+     * Get revenue analytics from billing service
+     *
+     * @param authorizationHeader The Authorization header from the incoming request (e.g., "Bearer token...")
+     * @return Revenue analytics as a Map
+     * @throws Exception if the API call fails
+     */
+    public java.util.Map<String, Object> getRevenueAnalytics(String authorizationHeader) throws Exception {
+        String url = billingServiceUrl + "/api/v1/analytics/revenue";
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .header("Authorization", authorizationHeader)
+                .GET()
+                .build();
+
+        log.debug("Fetching revenue analytics from billing service");
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            log.error("Billing service returned status {}: {}", response.statusCode(), response.body());
+            throw new RuntimeException(
+                String.format("Failed to fetch revenue analytics: HTTP %d - %s",
+                    response.statusCode(), response.body())
+            );
+        }
+
+        return objectMapper.readValue(response.body(), java.util.Map.class);
+    }
 }

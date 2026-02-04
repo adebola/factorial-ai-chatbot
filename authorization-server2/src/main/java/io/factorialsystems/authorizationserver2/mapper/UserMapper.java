@@ -120,4 +120,27 @@ public interface UserMapper {
         @Result(property = "updatedAt", column = "updated_at")
     })
     List<User> findByTenantId(@Param("tenantId") String tenantId);
+
+    @Select("SELECT u.*, t.name as tenant_name FROM users u " +
+            "LEFT JOIN tenants t ON u.tenant_id = t.id " +
+            "ORDER BY u.created_at DESC")
+    @Results({
+        @Result(property = "id", column = "id"),
+        @Result(property = "tenantId", column = "tenant_id"),
+        @Result(property = "username", column = "username"),
+        @Result(property = "email", column = "email"),
+        @Result(property = "password", column = "password"),
+        @Result(property = "firstName", column = "first_name"),
+        @Result(property = "lastName", column = "last_name"),
+        @Result(property = "isActive", column = "is_active"),
+        @Result(property = "isEmailVerified", column = "is_email_verified"),
+        @Result(property = "lastLoginAt", column = "last_login_at"),
+        @Result(property = "createdAt", column = "created_at"),
+        @Result(property = "updatedAt", column = "updated_at"),
+        @Result(property = "roles", column = "id", javaType = List.class, many = @Many(select = "findRolesByUserId"))
+    })
+    List<User> findAllUsers();
+
+    @Delete("DELETE FROM user_roles WHERE user_id = #{userId} AND role_id = #{roleId}")
+    int deleteUserRole(@Param("userId") String userId, @Param("roleId") String roleId);
 }

@@ -30,7 +30,7 @@ public class UserApiController {
      * Get current user info from JWT token
      */
     @GetMapping("/me")
-    @PreAuthorize("hasAuthority('SCOPE_user:read')")
+    @PreAuthorize("hasAnyAuthority('ROLE_USER', 'ROLE_TENANT_ADMIN', 'ROLE_SYSTEM_ADMIN')")
     public ResponseEntity<UserResponse> getCurrentUser(Authentication authentication) {
         log.info("Getting current user info");
         
@@ -53,7 +53,7 @@ public class UserApiController {
      * Get user details by ID
      */
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('SCOPE_user:read')")
+    @PreAuthorize("hasAnyAuthority('ROLE_USER', 'ROLE_TENANT_ADMIN', 'ROLE_SYSTEM_ADMIN')")
     public ResponseEntity<UserResponse> getUser(@PathVariable String id) {
         log.info("Getting user details for ID: {}", id);
         
@@ -70,7 +70,7 @@ public class UserApiController {
      * Update user profile
      */
     @PutMapping("/{id}/profile")
-    @PreAuthorize("hasAuthority('SCOPE_user:write')")
+    @PreAuthorize("hasAnyAuthority('ROLE_USER', 'ROLE_TENANT_ADMIN', 'ROLE_SYSTEM_ADMIN')")
     public ResponseEntity<UserResponse> updateUserProfile(
             @PathVariable String id,
             @RequestBody UserProfileUpdateRequest request,
@@ -109,7 +109,7 @@ public class UserApiController {
      * Change password
      */
     @PostMapping("/change-password")
-    @PreAuthorize("hasAuthority('SCOPE_user:write')")
+    @PreAuthorize("hasAnyAuthority('ROLE_USER', 'ROLE_TENANT_ADMIN', 'ROLE_SYSTEM_ADMIN')")
     public ResponseEntity<Map<String, Object>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
             Authentication authentication) {

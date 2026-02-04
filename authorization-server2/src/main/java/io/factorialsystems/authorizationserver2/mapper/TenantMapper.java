@@ -86,4 +86,19 @@ public interface TenantMapper {
     int updateSubscriptionAndPlan(@Param("id") String tenantId,
                                    @Param("subscriptionId") String subscriptionId,
                                    @Param("planId") String planId);
+
+    @Select("SELECT * FROM tenants ORDER BY created_at DESC")
+    @Results({
+        @Result(property = "id", column = "id"),
+        @Result(property = "name", column = "name"),
+        @Result(property = "domain", column = "domain"),
+        @Result(property = "apiKey", column = "api_key"),
+        @Result(property = "config", column = "config", typeHandler = io.factorialsystems.authorizationserver2.typehandler.JsonTypeHandler.class),
+        @Result(property = "planId", column = "plan_id"),
+        @Result(property = "subscriptionId", column = "subscription_id"),
+        @Result(property = "isActive", column = "is_active"),
+        @Result(property = "createdAt", column = "created_at"),
+        @Result(property = "updatedAt", column = "updated_at")
+    })
+    java.util.List<Tenant> findAll();
 }

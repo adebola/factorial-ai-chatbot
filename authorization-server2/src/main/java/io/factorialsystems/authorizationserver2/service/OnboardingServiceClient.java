@@ -143,19 +143,59 @@ public class OnboardingServiceClient {
     public boolean isOnboardingServiceAvailable() {
         try {
             String url = onboardingServiceUrl + "/health";
-            
+
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(5))
                     .GET()
                     .build();
-            
+
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             return response.statusCode() == 200;
-            
+
         } catch (Exception e) {
             log.warn("Onboarding service health check failed: {}", e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Get onboarding statistics for a specific tenant or system-wide
+     *
+     * @param tenantId The tenant ID to filter by (null for system-wide stats)
+     * @param authorizationHeader The Authorization header from the incoming request (e.g., "Bearer token...")
+     * @return Onboarding statistics as a Map
+     * @throws Exception if the API call fails
+     */
+    public java.util.Map<String, Object> getOnboardingStats(String tenantId, String authorizationHeader) throws Exception {
+        String url = onboardingServiceUrl + "/api/v1/admin/stats";
+
+        // Add tenant_id query parameter if provided
+        if (tenantId != null && !tenantId.isEmpty()) {
+            url += "?tenant_id=" + tenantId;
+        }
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .header("Authorization", authorizationHeader)
+                .GET()
+                .build();
+
+        log.debug("Fetching onboarding stats from onboarding service: tenant_id={}", tenantId);
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() != 200) {
+            log.error("Onboarding service returned status {}: {}", response.statusCode(), response.body());
+            throw new RuntimeException(
+                String.format("Failed to fetch onboarding stats: HTTP %d - %s",
+                    response.statusCode(), response.body())
+            );
+        }
+
+        log.debug("Successfully retrieved onboarding stats from onboarding service");
+        return objectMapper.readValue(response.body(), java.util.Map.class);
     }
 }
