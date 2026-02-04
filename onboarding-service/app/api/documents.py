@@ -79,6 +79,9 @@ async def upload_document_with_categorization(
         )
 
     try:
+        # Capture file size from UploadFile (available in API layer)
+        file_size = file.size or 0
+
         # Process document with optional categorization
         doc_processor = DocumentProcessor(db)
         documents, document_id, classification = await doc_processor.process_document(
@@ -86,6 +89,7 @@ async def upload_document_with_categorization(
             file_data=file.file,
             filename=file.filename,
             content_type=file.content_type,
+            file_size=file_size,
             user_categories=categories,
             user_tags=tags,
             auto_categorize=categorization_enabled
@@ -201,13 +205,17 @@ async def replace_document(
         
         # Delete the old document (this will also clean up storage)
         doc_processor.delete_document(claims.tenant_id, document_id)
-        
+
+        # Capture file size from UploadFile (available in API layer)
+        file_size = file.size or 0
+
         # Process the new document with the same metadata where possible
         new_documents, x_id = doc_processor.process_document(
             tenant_id=claims.tenant_id,
             file_data=file.file,
             filename=file.filename,
-            content_type=file.content_type
+            content_type=file.content_type,
+            file_size=file_size
         )
         
         # Update the new document record to use the original document ID

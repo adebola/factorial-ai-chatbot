@@ -14,6 +14,7 @@ from .api.website_ingestions import router as website_ingestions_router
 from .api.widgets import router as widgets_router
 from .api.logos import router as logos_router
 from .api.categorization import router as categorization_router
+from .api.admin_stats import router as admin_stats_router
 from .core.config import settings
 from .core.logging_config import (
     setup_logging,
@@ -197,6 +198,7 @@ app.include_router(website_ingestions_router, prefix=settings.API_V1_STR, tags=[
 app.include_router(widgets_router, prefix=settings.API_V1_STR, tags=["chat-widgets"])
 app.include_router(logos_router, prefix=settings.API_V1_STR, tags=["logos"])
 app.include_router(categorization_router, prefix=settings.API_V1_STR, tags=["categorization"])
+app.include_router(admin_stats_router, prefix=settings.API_V1_STR, tags=["admin"])
 
 
 @app.get("/")

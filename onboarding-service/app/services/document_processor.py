@@ -50,6 +50,7 @@ class DocumentProcessor:
         file_data: BinaryIO,
         filename: str,
         content_type: str,
+        file_size: Optional[int] = None,
         user_categories: Optional[List[str]] = None,
         user_tags: Optional[List[str]] = None,
         auto_categorize: bool = True
@@ -62,6 +63,7 @@ class DocumentProcessor:
             file_data: File data stream
             filename: Original filename
             content_type: MIME type
+            file_size: File size in bytes
             user_categories: User-specified categories
             user_tags: User-specified tags
             auto_categorize: Enable AI categorization
@@ -84,7 +86,8 @@ class DocumentProcessor:
             original_filename=filename,
             file_path="",  # Will be updated after upload
             mime_type=content_type,
-            status=DocumentStatus.PROCESSING
+            status=DocumentStatus.PROCESSING,
+            file_size=file_size
         )
         self.db.add(doc_record)
         self.db.commit()
