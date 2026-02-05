@@ -99,7 +99,7 @@ class UsageCacheManager:
             return (True, None)
         except Exception as e:
             # Unexpected error - fail open
-            logger.error(f"Error checking chat limit for tenant {tenant_id}: {e}", exc_info=True)
+            logger.exception(f"Error checking chat limit for tenant {tenant_id}: {e}")
             return (True, None)
 
     async def _fetch_and_cache_usage(
@@ -194,7 +194,7 @@ class UsageCacheManager:
             logger.error(f"Cannot connect to billing service at {self.billing_service_url}")
             return (True, None)  # Fail open
         except Exception as e:
-            logger.error(f"Error fetching usage from billing service: {e}", exc_info=True)
+            logger.exception(f"Error fetching usage from billing service: {e}")
             return (True, None)  # Fail open
 
     def _cache_usage_data(self, tenant_id: str, cache_data: Dict[str, Any]):
@@ -245,7 +245,7 @@ class UsageCacheManager:
         except redis.RedisError as e:
             logger.warning(f"Failed to increment local cache for tenant {tenant_id}: {e}")
         except Exception as e:
-            logger.error(f"Error incrementing local cache: {e}", exc_info=True)
+            logger.exception(f"Error incrementing local cache: {e}")
 
     def invalidate_cache(self, tenant_id: str):
         """

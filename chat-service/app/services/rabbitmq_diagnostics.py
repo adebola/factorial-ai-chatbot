@@ -73,7 +73,7 @@ def check_rabbitmq_connectivity() -> Dict[str, Any]:
             "success": False,
             "error": str(e)
         }
-        logger.error(f"TCP connection check failed: {e}", exc_info=True)
+        logger.exception(f"TCP connection check failed: {e}")
 
     # Check environment variables
     env_vars = [

@@ -184,7 +184,7 @@ async def payment_callback(
             return RedirectResponse(url=failure_url, status_code=status.HTTP_303_SEE_OTHER)
 
     except Exception as e:
-        logger.error(f"Payment callback error: {reference} - {str(e)}", exc_info=True)
+        logger.error(f"Payment callback error: {reference} - {str(e)}")
 
         # Get frontend URL from environment
         frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
@@ -266,7 +266,7 @@ async def payment_callback_status(
             }
 
     except Exception as e:
-        logger.error(f"Error checking payment callback status: {str(e)}", exc_info=True)
+        logger.error(f"Error checking payment callback status: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to check payment status: {str(e)}"

@@ -1,107 +1,100 @@
 """
-Structured logging configuration using Loguru and Structlog.
+Standardized logging configuration using Loguru only.
 
 Provides:
-- Multi-tenant context (tenant_id, request_id, user_id, session_id)
-- Request tracking with unique IDs
-- Performance monitoring (timing for operations)
-- Environment-based output (pretty console for dev, JSON for production)
+- Human-readable logs (colored in dev, plain text in production)
+- Multi-tenant context via Loguru's .bind() method
+- Third-party library log level control
+- Simple, maintainable configuration
 """
 
+import os
 import sys
 import logging
-from contextvars import ContextVar
-from typing import Optional, Dict, Any
 from loguru import logger
-import structlog
-from app.core.config import settings
-
-# Context variables for request tracking
-request_context: ContextVar[Dict[str, Any]] = ContextVar("request_context", default={})
 
 
-def configure_logging():
-    """Configure Loguru and Structlog for the application"""
+def setup_logging():
+    """Configure logging for the service using Loguru only"""
 
-    # Remove default Loguru handler
+    # Remove default loguru handler
     logger.remove()
 
-    # Add appropriate handler based on environment
-    if settings.ENVIRONMENT == "production":
-        # Production: JSON format for log aggregation
+    # Get environment and log level
+    environment = os.environ.get("ENVIRONMENT", "development")
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+    # ============================================================================
+    # 1. Configure Python's standard logging module
+    # ============================================================================
+    # This is CRITICAL for third-party libraries that use logging.getLogger()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True  # Override any existing configuration
+    )
+
+    # ============================================================================
+    # 2. Configure third-party library loggers
+    # ============================================================================
+    # Web server (all services)
+    logging.getLogger("uvicorn").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Too verbose
+    logging.getLogger("uvicorn.error").setLevel(getattr(logging, log_level, logging.INFO))
+
+    # RabbitMQ
+    logging.getLogger("aio_pika").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("aiormq").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("pamqp").setLevel(getattr(logging, log_level, logging.INFO))
+
+    # Database
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+
+    # Scheduler
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
+    # ============================================================================
+    # 3. Configure Loguru (HUMAN-READABLE output)
+    # ============================================================================
+    if environment == "production":
+        # Production: Plain text logs (human-readable, NOT JSON)
         logger.add(
             sys.stdout,
-            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {name}:{function}:{line} | {extra} | {message}",
-            level=settings.LOG_LEVEL,
-            serialize=True,  # JSON output
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message} | {extra}{exception}",
+            level=log_level,
+            colorize=False,  # No colors in production
+            serialize=False,  # Plain text, NOT JSON
+            enqueue=True
         )
     else:
-        # Development: Pretty console format
+        # Development: Colored logs (human-readable)
         logger.add(
             sys.stdout,
-            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level> | {extra}",
-            level=settings.LOG_LEVEL,
+            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level> | <blue>{extra}</blue>{exception}",
+            level=log_level,
             colorize=True,
+            enqueue=True
         )
 
-    # Silence verbose third-party loggers in production
-    if settings.ENVIRONMENT == "production":
-        # SQLAlchemy loggers - reduce noise from SQL queries and connection pool
-        logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
-        logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
-        logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
-        logging.getLogger("sqlalchemy.orm").setLevel(logging.WARNING)
-
-        # Other potentially verbose loggers
-        logging.getLogger("alembic").setLevel(logging.WARNING)
-        logging.getLogger("urllib3").setLevel(logging.WARNING)
-
-    # Configure structlog
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            structlog.processors.JSONRenderer() if settings.ENVIRONMENT == "production"
-            else structlog.dev.ConsoleRenderer(),
-        ],
-        wrapper_class=structlog.stdlib.BoundLogger,
-        context_class=dict,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
+    logger.info(f"Logging configured - Environment: {environment}, Level: {log_level}")
 
 
 def get_logger(name: str):
-    """Get a logger instance for a module"""
-    return logger.bind(module=name, service=settings.SERVICE_NAME)
+    """Get a logger instance"""
+    return logger.bind(module=name)
 
 
-def set_request_context(
-    request_id: Optional[str] = None,
-    tenant_id: Optional[str] = None,
-    user_id: Optional[str] = None,
-    session_id: Optional[str] = None,
-    **kwargs
-):
+# ============================================================================
+# Context Management (Simplified with Loguru)
+# ============================================================================
+
+def set_request_context(request_id: str = None, tenant_id: str = None, user_id: str = None, session_id: str = None):
     """
-    Set request context for logging.
-
-    All subsequent log messages will include these values.
-
-    Usage:
-        set_request_context(
-            request_id="req-123",
-            tenant_id="tenant-456",
-            user_id="user-789"
-        )
+    Helper to create a logger with request context.
+    Returns a logger bound with the provided context.
     """
-    context = request_context.get().copy()
-
+    context = {}
     if request_id:
         context["request_id"] = request_id
     if tenant_id:
@@ -111,25 +104,12 @@ def set_request_context(
     if session_id:
         context["session_id"] = session_id
 
-    context.update(kwargs)
-    request_context.set(context)
-
-    # Bind to structlog
-    structlog.contextvars.bind_contextvars(**context)
+    return logger.bind(**context)
 
 
-def clear_request_context():
-    """Clear request context"""
-    request_context.set({})
-    structlog.contextvars.clear_contextvars()
-
-
-def get_request_context() -> Dict[str, Any]:
-    """Get current request context"""
-    return request_context.get()
-
-
-# Logging helper functions
+# ============================================================================
+# Helper functions for common logging patterns
+# ============================================================================
 
 def log_api_request(method: str, path: str, **kwargs):
     """Log API request"""
@@ -214,7 +194,3 @@ def log_tenant_operation(operation: str, tenant_id: str, **kwargs):
         tenant_id=tenant_id,
         **kwargs
     )
-
-
-# Initialize logging on module import
-configure_logging()

@@ -1,86 +1,115 @@
+"""
+Standardized logging configuration using Loguru only.
+
+Provides:
+- Human-readable logs (colored in dev, plain text in production)
+- Multi-tenant context via Loguru's .bind() method
+- Third-party library log level control
+- Simple, maintainable configuration
+"""
+
 import os
 import sys
-import json
-from contextvars import ContextVar
-from typing import Dict, Any, Optional
+import logging
 from loguru import logger
-import structlog
 
-# Context variables for request tracking
-request_context: ContextVar[Dict[str, Any]] = ContextVar('request_context', default={})
 
 def setup_logging():
-    """Setup structured logging with Loguru + Structlog"""
+    """Configure logging for the service using Loguru only"""
 
-    # Remove default handler
+    # Remove default loguru handler
     logger.remove()
 
-    # Determine log level
-    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+    # Get environment and log level
     environment = os.environ.get("ENVIRONMENT", "development")
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 
-    if environment == "development":
-        # Pretty console logging for development
-        logger.add(
-            sys.stderr,
-            format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-                   "<level>{level: <8}</level> | "
-                   "<cyan>workflow-service</cyan> | "
-                   "<level>{message}</level>",
-            level=log_level,
-            colorize=True
-        )
-    else:
-        # JSON logging for production
-        logger.add(
-            sys.stderr,
-            format="{message}",
-            level=log_level,
-            serialize=True
-        )
-
-    # Configure structlog with simpler configuration
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.JSONRenderer() if environment == "production" else structlog.dev.ConsoleRenderer()
-        ],
-        logger_factory=structlog.WriteLoggerFactory(),
-        cache_logger_on_first_use=True,
+    # ============================================================================
+    # 1. Configure Python's standard logging module
+    # ============================================================================
+    # This is CRITICAL for third-party libraries that use logging.getLogger()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True  # Override any existing configuration
     )
 
-    # Suppress SQLAlchemy verbose logging
-    # To enable SQL query logging for debugging, set SQLALCHEMY_LOG_LEVEL environment variable
-    # or change logging.WARNING to logging.DEBUG below
-    import logging
+    # ============================================================================
+    # 2. Configure third-party library loggers
+    # ============================================================================
+    # Web server
+    logging.getLogger("uvicorn").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Too verbose
+    logging.getLogger("uvicorn.error").setLevel(getattr(logging, log_level, logging.INFO))
+
+    # Database
     sqlalchemy_log_level = os.environ.get("SQLALCHEMY_LOG_LEVEL", "WARNING")
-    logging.getLogger('sqlalchemy.engine').setLevel(sqlalchemy_log_level)
-    logging.getLogger('sqlalchemy.pool').setLevel(sqlalchemy_log_level)
-    logging.getLogger('sqlalchemy.dialects').setLevel(sqlalchemy_log_level)
-    logging.getLogger('sqlalchemy.orm').setLevel(sqlalchemy_log_level)
+    logging.getLogger("sqlalchemy.engine").setLevel(sqlalchemy_log_level)
+    logging.getLogger("sqlalchemy.pool").setLevel(sqlalchemy_log_level)
+    logging.getLogger("sqlalchemy.dialects").setLevel(sqlalchemy_log_level)
+    logging.getLogger("sqlalchemy.orm").setLevel(sqlalchemy_log_level)
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+
+    # RabbitMQ publisher
+    logging.getLogger("aio_pika").setLevel(getattr(logging, log_level, logging.INFO))
+
+    # ============================================================================
+    # 3. Configure Loguru (HUMAN-READABLE output)
+    # ============================================================================
+    if environment == "production":
+        # Production: Plain text logs (human-readable, NOT JSON)
+        logger.add(
+            sys.stdout,
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message} | {extra}{exception}",
+            level=log_level,
+            colorize=False,  # No colors in production
+            serialize=False,  # Plain text, NOT JSON
+            enqueue=True
+        )
+    else:
+        # Development: Colored logs (human-readable)
+        logger.add(
+            sys.stdout,
+            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level> | <blue>{extra}</blue>{exception}",
+            level=log_level,
+            colorize=True,
+            enqueue=True
+        )
+
+    logger.info(f"Logging configured - Environment: {environment}, Level: {log_level}")
+
 
 def get_logger(name: str):
-    """Get a logger with the given name"""
-    return structlog.get_logger(name)
+    """Get a logger instance"""
+    return logger.bind(module=name)
+
+
+# ============================================================================
+# Context Management (Simplified with Loguru)
+# ============================================================================
 
 def set_request_context(**context):
-    """Set context variables for the current request"""
-    current = request_context.get({})
-    current.update(context)
-    request_context.set(current)
+    """
+    Helper to create a logger with request context.
+    Returns a logger bound with the provided context.
+    """
+    return logger.bind(**context)
 
-def get_request_context() -> Dict[str, Any]:
-    """Get current request context"""
-    return request_context.get({})
 
+def get_request_context():
+    """Get current request context (no-op for Loguru, kept for compatibility)"""
+    return {}
+
+
+# ============================================================================
 # Workflow-specific logging helpers
+# ============================================================================
+
 def log_workflow_execution(
     workflow_id: str,
     session_id: str,
     tenant_id: str,
-    step_id: Optional[str] = None,
+    step_id: str = None,
     **kwargs
 ):
     """Log workflow execution events"""
@@ -92,6 +121,7 @@ def log_workflow_execution(
         step_id=step_id,
         **kwargs
     )
+
 
 def log_workflow_trigger(
     tenant_id: str,
@@ -110,10 +140,11 @@ def log_workflow_trigger(
         **kwargs
     )
 
+
 def log_workflow_state_change(
     workflow_id: str,
     session_id: str,
-    from_step: Optional[str],
+    from_step: str,
     to_step: str,
     **kwargs
 ):
@@ -127,11 +158,12 @@ def log_workflow_state_change(
         **kwargs
     )
 
+
 def log_api_request(
     method: str,
     path: str,
-    tenant_id: Optional[str] = None,
-    user_id: Optional[str] = None,
+    tenant_id: str = None,
+    user_id: str = None,
     **kwargs
 ):
     """Log API request"""
@@ -143,6 +175,7 @@ def log_api_request(
         user_id=user_id,
         **kwargs
     )
+
 
 def log_api_response(
     method: str,
@@ -161,10 +194,11 @@ def log_api_response(
         **kwargs
     )
 
+
 def log_tenant_operation(
     operation: str,
     tenant_id: str,
-    tenant_name: Optional[str] = None,
+    tenant_name: str = None,
     **kwargs
 ):
     """Log tenant-specific operations"""

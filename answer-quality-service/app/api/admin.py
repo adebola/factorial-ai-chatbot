@@ -635,9 +635,7 @@ async def trigger_gap_detection(
         logger.error(
             f"Gap detection failed: {e}",
             tenant_id=tenant_id,
-            error=str(e),
-            exc_info=True
-        )
+            error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Gap detection failed: {str(e)}"

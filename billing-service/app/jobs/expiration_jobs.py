@@ -99,14 +99,13 @@ def check_trial_expirations_3day():
                 except Exception as e:
                     logger.error(
                         f"Error sending trial expiring notification: {e}",
-                        exc_info=True,
                         extra={"subscription_id": subscription.id}
                     )
 
             logger.info(f"Trial expiration check complete: {sent_count}/{len(expiring_trials)} emails sent")
 
         except Exception as e:
-            logger.error(f"Error in trial expiration check (3-day): {e}", exc_info=True)
+            logger.error(f"Error in trial expiration check (3-day): {e}")
 
         finally:
             db.close()
@@ -196,7 +195,6 @@ def check_trial_expired():
                 except Exception as e:
                     logger.error(
                         f"Error processing expired trial: {e}",
-                        exc_info=True,
                         extra={"subscription_id": subscription.id}
                     )
                     db.rollback()
@@ -204,7 +202,7 @@ def check_trial_expired():
             logger.info(f"Trial expired check complete: {processed_count}/{len(expired_trials)} processed")
 
         except Exception as e:
-            logger.error(f"Error in trial expired check: {e}", exc_info=True)
+            logger.exception(f"Error in trial expired check: {e}")
 
         finally:
             db.close()
@@ -293,14 +291,13 @@ def check_subscription_expirations_7day():
                 except Exception as e:
                     logger.error(
                         f"Error sending subscription expiring notification: {e}",
-                        exc_info=True,
                         extra={"subscription_id": subscription.id}
                     )
 
             logger.info(f"Subscription expiration check complete: {sent_count}/{len(expiring_subscriptions)} emails sent")
 
         except Exception as e:
-            logger.error(f"Error in subscription expiration check (7-day): {e}", exc_info=True)
+            logger.error(f"Error in subscription expiration check (7-day): {e}")
 
         finally:
             db.close()
@@ -389,7 +386,6 @@ def check_subscription_expired():
                 except Exception as e:
                     logger.error(
                         f"Error processing expired subscription: {e}",
-                        exc_info=True,
                         extra={"subscription_id": subscription.id}
                     )
                     db.rollback()
@@ -397,7 +393,7 @@ def check_subscription_expired():
             logger.info(f"Subscription expired check complete: {processed_count}/{len(expired_subscriptions)} processed")
 
         except Exception as e:
-            logger.error(f"Error in subscription expired check: {e}", exc_info=True)
+            logger.exception(f"Error in subscription expired check: {e}")
 
         finally:
             db.close()
@@ -435,7 +431,7 @@ def reset_monthly_usage():
             logger.info(f"Monthly usage reset complete: {len(usage_records)} records reset")
 
         except Exception as e:
-            logger.error(f"Error in monthly usage reset: {e}", exc_info=True)
+            logger.exception(f"Error in monthly usage reset: {e}")
             db.rollback()
 
         finally:
@@ -467,7 +463,7 @@ def process_pending_plan_changes():
             )
 
         except Exception as e:
-            logger.error(f"Error processing pending plan changes: {e}", exc_info=True)
+            logger.exception(f"Error processing pending plan changes: {e}")
 
         finally:
             db.close()
@@ -500,7 +496,7 @@ def check_usage_warnings():
             )
 
         except Exception as e:
-            logger.error(f"Error in usage warning check: {e}", exc_info=True)
+            logger.exception(f"Error in usage warning check: {e}")
 
         finally:
             db.close()

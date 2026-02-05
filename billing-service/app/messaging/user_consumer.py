@@ -5,7 +5,7 @@ MIGRATED TO AIO-PIKA: Now uses async-native RabbitMQ operations with automatic r
 Eliminated threading and manual connection management (311→210 lines, 32% reduction).
 
 This consumer listens for user creation events and automatically creates
-a Basic plan subscription with a 14-day trial starting from the user's
+a Basic plan subscription with a 30-day trial starting from the user's
 registration date.
 """
 import json
@@ -147,7 +147,7 @@ class UserEventConsumer:
                 logger.error(f"Failed to parse message body: {e}")
                 # Reject without requeue (malformed message) - auto-handled by context manager
             except Exception as e:
-                logger.error(f"Error processing message: {e}", exc_info=True)
+                logger.exception(f"Error processing message: {e}")
                 # Re-raise to trigger nack without requeue (prevents infinite loops)
                 raise
 
@@ -194,8 +194,8 @@ class UserEventConsumer:
                 logger.error("Basic plan not found or inactive - cannot create subscription")
                 return False
 
-            # Calculate 14-day trial end date from registration
-            trial_end = registration_date + timedelta(days=14)
+            # Calculate 30-day trial end date from registration
+            trial_end = registration_date + timedelta(days=30)
 
             logger.info(
                 f"Creating subscription for tenant {tenant_id}: "
@@ -242,17 +242,15 @@ class UserEventConsumer:
                     )
 
             except Exception as e:
-                logger.error(
-                    f"❌ Error publishing subscription_created event to authorization server: {e}",
-                    exc_info=True
-                )
+                logger.exception(
+                    f"❌ Error publishing subscription_created event to authorization server: {e}")
                 # Don't fail the entire operation if RabbitMQ publish fails
                 # The subscription was created successfully
 
             return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to create subscription for tenant {tenant_id}: {e}", exc_info=True)
+            logger.exception(f"❌ Failed to create subscription for tenant {tenant_id}: {e}")
             db.rollback()
             return False
 

@@ -78,9 +78,7 @@ class NotificationClient:
                     f"Failed to send notification via {channel}",
                     tenant_id=tenant_id,
                     channel=channel,
-                    error=str(e),
-                    exc_info=True
-                )
+                    error=str(e))
                 results[channel] = {"success": False, "error": str(e)}
 
         return results
@@ -146,11 +144,9 @@ class NotificationClient:
             }
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Email notification failed: {e}",
-                tenant_id=tenant_id,
-                exc_info=True
-            )
+                tenant_id=tenant_id)
             return {"success": False, "error": str(e)}
 
     async def _send_webhook(
@@ -235,11 +231,9 @@ class NotificationClient:
             }
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Webhook notification failed: {e}",
-                tenant_id=tenant_id,
-                exc_info=True
-            )
+                tenant_id=tenant_id)
             return {"success": False, "error": str(e)}
 
     def _log_to_console(

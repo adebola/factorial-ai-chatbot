@@ -237,7 +237,6 @@ class UsageWarningService:
         except Exception as e:
             logger.error(
                 f"Error sending usage warning: {e}",
-                exc_info=True,
                 extra={
                     "subscription_id": subscription.id,
                     "usage_type": usage_type
@@ -317,7 +316,6 @@ class UsageWarningService:
         except Exception as e:
             logger.error(
                 f"Error checking subscription usage: {e}",
-                exc_info=True,
                 extra={"subscription_id": subscription.id}
             )
 
@@ -386,10 +384,8 @@ class UsageWarningService:
             }
 
         except Exception as e:
-            logger.error(
-                f"Error in usage warning check: {e}",
-                exc_info=True
-            )
+            logger.exception(
+                f"Error in usage warning check: {e}")
             return {
                 "subscriptions_checked": 0,
                 "subscriptions_warned": 0,

@@ -68,18 +68,14 @@ class BillingServiceClient:
         except httpx.HTTPError as e:
             logger.error(
                 f"HTTP error calling billing service: {e}",
-                extra={"tenant_id": tenant_id, "error": str(e)},
-                exc_info=True
-            )
+                extra={"tenant_id": tenant_id, "error": str(e)})
             # Fail open on HTTP error
             return True, None
 
         except Exception as e:
             logger.error(
                 f"Unexpected error calling billing service: {e}",
-                extra={"tenant_id": tenant_id, "error": str(e)},
-                exc_info=True
-            )
+                extra={"tenant_id": tenant_id, "error": str(e)})
             # Fail open on unexpected error
             return True, None
 
@@ -126,9 +122,7 @@ class BillingServiceClient:
         except Exception as e:
             logger.error(
                 f"Error getting usage summary: {e}",
-                extra={"tenant_id": tenant_id, "error": str(e)},
-                exc_info=True
-            )
+                extra={"tenant_id": tenant_id, "error": str(e)})
             return None
 
     @retry(
@@ -179,9 +173,7 @@ class BillingServiceClient:
         except Exception as e:
             logger.error(
                 f"Error checking subscription status: {e}",
-                extra={"tenant_id": tenant_id, "error": str(e)},
-                exc_info=True
-            )
+                extra={"tenant_id": tenant_id, "error": str(e)})
             return True, None
 
 

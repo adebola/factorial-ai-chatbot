@@ -104,7 +104,7 @@ async def upload_document_with_categorization(
 
         # Publish usage event to billing service
         try:
-            usage_publisher.publish_document_added(
+            await usage_publisher.publish_document_added(
                 tenant_id=claims.tenant_id,
                 document_id=document_id,
                 filename=file.filename,
@@ -289,7 +289,7 @@ async def delete_document(
 
         # Publish usage event to billing service
         try:
-            usage_publisher.publish_document_removed(
+            await usage_publisher.publish_document_removed(
                 tenant_id=claims.tenant_id,
                 document_id=document_id,
                 filename=existing_doc.original_filename

@@ -216,7 +216,7 @@ class PlanManagementService:
                 currency=subscription.currency
             )
         except Exception as e:
-            logger.error(f"Failed to send upgrade notification: {e}", exc_info=True)
+            logger.exception(f"Failed to send upgrade notification: {e}")
 
         return {
             "success": True,
@@ -353,7 +353,7 @@ class PlanManagementService:
                 immediate=immediate
             )
         except Exception as e:
-            logger.error(f"Failed to send downgrade notification: {e}", exc_info=True)
+            logger.exception(f"Failed to send downgrade notification: {e}")
 
         return {
             "success": True,
@@ -536,7 +536,7 @@ class PlanManagementService:
                     immediate=cancel_immediately
                 )
             except Exception as e:
-                logger.error(f"Failed to send cancellation notification: {e}", exc_info=True)
+                logger.exception(f"Failed to send cancellation notification: {e}")
 
         return {
             "success": True,
@@ -632,16 +632,12 @@ class PlanManagementService:
                         )
                     except Exception as email_error:
                         # Don't fail the plan change if email fails
-                        logger.error(
-                            f"Failed to send downgrade notification for subscription {subscription.id}: {email_error}",
-                            exc_info=True
-                        )
+                        logger.exception(
+                            f"Failed to send downgrade notification for subscription {subscription.id}: {email_error}")
 
             except Exception as e:
-                logger.error(
-                    f"Failed to process pending plan change for subscription {subscription.id}: {e}",
-                    exc_info=True
-                )
+                logger.exception(
+                    f"Failed to process pending plan change for subscription {subscription.id}: {e}")
                 failed += 1
                 self.db.rollback()
 

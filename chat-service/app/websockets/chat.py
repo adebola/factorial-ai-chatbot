@@ -1,6 +1,7 @@
 from fastapi import WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import Dict, List
+import asyncio
 import json
 import uuid
 from datetime import datetime
@@ -167,9 +168,7 @@ class ChatWebSocket:
                     # Log but continue on check error (fail open to prevent service disruption)
                     logger.error(
                         f"Failed to check subscription limits: {str(e)}",
-                        extra={"tenant_id": tenant_id},
-                        exc_info=True
-                    )
+                        extra={"tenant_id": tenant_id})
 
                 # Store user message
                 user_msg_record = ChatMessage(
@@ -184,24 +183,24 @@ class ChatWebSocket:
 
                 # Publish user message event
                 try:
-                    event_publisher.publish_message_created(
+                    asyncio.create_task(event_publisher.publish_message_created(
                         tenant_id=tenant_id,
                         session_id=session_id,
                         message_id=user_msg_record.id,
                         message_type="user",
                         content=user_message
-                    )
+                    ))
                 except Exception as e:
                     # Log but don't fail on event publishing errors
                     print(f"Failed to publish user message event: {str(e)}")
 
                 # Publish usage event and increment local cache (fire-and-forget)
                 try:
-                    event_publisher.publish_chat_usage_event(
+                    asyncio.create_task(event_publisher.publish_chat_usage_event(
                         tenant_id=tenant_id,
                         session_id=session_id,
                         message_count=1
-                    )
+                    ))
                     # Optimistically increment local cache
                     usage_cache.increment_local_cache(tenant_id, message_count=1)
                 except Exception as e:
@@ -213,9 +212,7 @@ class ChatWebSocket:
                             "session_id": session_id,
                             "error": str(e),
                             "error_type": type(e).__name__
-                        },
-                        exc_info=True
-                    )
+                        })
 
                 # Check if there's an active workflow for this session
                 try:
@@ -385,14 +382,14 @@ class ChatWebSocket:
 
                         # Publish assistant message event with quality metrics
                         try:
-                            event_publisher.publish_message_created(
+                            asyncio.create_task(event_publisher.publish_message_created(
                                 tenant_id=tenant_id,
                                 session_id=session_id,
                                 message_id=ai_msg_record.id,
                                 message_type="assistant",
                                 content=ai_response["content"],
                                 quality_metrics=ai_response.get("quality_metrics")
-                            )
+                            ))
                         except Exception as e:
                             # Log but don't fail on event publishing errors
                             print(f"Failed to publish assistant message event: {str(e)}")

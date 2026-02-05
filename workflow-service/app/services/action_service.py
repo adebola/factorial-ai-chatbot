@@ -133,7 +133,7 @@ class ActionService:
         except ActionExecutionError:
             raise
         except Exception as e:
-            logger.error(f"Unexpected error in send_email action: {e}", exc_info=True)
+            logger.exception(f"Unexpected error in send_email action: {e}")
             raise ActionExecutionError("send_email", f"An unexpected error occurred while sending email. Please contact support if this persists.")
 
     async def _send_sms(
@@ -177,7 +177,7 @@ class ActionService:
         except ActionExecutionError:
             raise
         except Exception as e:
-            logger.error(f"Unexpected error in send_sms action: {e}", exc_info=True)
+            logger.exception(f"Unexpected error in send_sms action: {e}")
             raise ActionExecutionError("send_sms", f"An unexpected error occurred while sending SMS. Please contact support if this persists.")
 
     async def _call_webhook(

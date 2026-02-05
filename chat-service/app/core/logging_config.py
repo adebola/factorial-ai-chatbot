@@ -1,169 +1,144 @@
 """
-Structured logging configuration for FactorialBot Chat Service.
+Standardized logging configuration using Loguru only.
 
-This module sets up structured logging using Loguru + Structlog for:
-- Multi-tenant context tracking
-- Request ID correlation 
-- Structured JSON output for production
-- Beautiful console output for development
+Provides:
+- Human-readable logs (colored in dev, plain text in production)
+- Multi-tenant context via Loguru's .bind() method
+- Third-party library log level control
+- Simple, maintainable configuration
 """
 
 import os
 import sys
+import logging
 import uuid
-from typing import Any, Dict, Optional
-from contextvars import ContextVar
-
-import structlog
 from loguru import logger
-
-# Context variables for request tracking
-request_id_var: ContextVar[Optional[str]] = ContextVar('request_id', default=None)
-tenant_id_var: ContextVar[Optional[str]] = ContextVar('tenant_id', default=None)
-user_id_var: ContextVar[Optional[str]] = ContextVar('user_id', default=None)
-session_id_var: ContextVar[Optional[str]] = ContextVar('session_id', default=None)
-
-
-# Removed StructlogInterceptHandler to avoid recursion issues
-
-
-def add_context_processor(logger, method_name, event_dict):
-    """Add context variables to log events."""
-    if request_id := request_id_var.get():
-        event_dict["request_id"] = request_id
-    if tenant_id := tenant_id_var.get():
-        event_dict["tenant_id"] = tenant_id
-    if user_id := user_id_var.get():
-        event_dict["user_id"] = user_id
-    if session_id := session_id_var.get():
-        event_dict["session_id"] = session_id
-    
-    # Add service identifier
-    event_dict["service"] = "chat-service"
-    
-    return event_dict
 
 
 def setup_logging(
     log_level: str = None,
     json_logs: bool = None,
-    log_file: Optional[str] = None
+    log_file: str = None
 ) -> None:
     """
-    Configure structured logging for the application.
-    
+    Configure logging for the service using Loguru only
+
     Args:
         log_level: Log level (DEBUG, INFO, WARNING, ERROR)
-        json_logs: Whether to output JSON logs (auto-detected if None)
+        json_logs: Ignored - always uses human-readable format
         log_file: Optional log file path
     """
+
+    # Remove default loguru handler
+    logger.remove()
+
     # Auto-detect environment if not specified
     if log_level is None:
-        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
-    
-    if json_logs is None:
-        # Use JSON logs in production (when not in development)
-        json_logs = os.getenv("ENVIRONMENT", "development").lower() != "development"
-    
-    # Set up stdlib logging first (required for structlog)
-    import logging
+        log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+
+    environment = os.environ.get("ENVIRONMENT", "development")
+
+    # ============================================================================
+    # 1. Configure Python's standard logging module
+    # ============================================================================
+    # This is CRITICAL for third-party libraries that use logging.getLogger()
     logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
-        format="%(message)s",  # structlog will handle formatting
-        stream=sys.stdout
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        stream=sys.stdout,
+        force=True  # Override any existing configuration
     )
 
-    # Configure structlog
-    if json_logs:
-        # Production: JSON logs with timestamp
-        processors = [
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.TimeStamper(fmt="iso", utc=True),  # Add ISO 8601 timestamp
-            structlog.processors.CallsiteParameterAdder(  # Add function/line info
-                parameters=[
-                    structlog.processors.CallsiteParameter.FUNC_NAME,
-                    structlog.processors.CallsiteParameter.LINENO,
-                ]
-            ),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            add_context_processor,
-            structlog.processors.JSONRenderer()
-        ]
+    # ============================================================================
+    # 2. Configure third-party library loggers
+    # ============================================================================
+    # Web server
+    logging.getLogger("uvicorn").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Too verbose
+    logging.getLogger("uvicorn.error").setLevel(getattr(logging, log_level, logging.INFO))
+
+    # Database
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+    logging.getLogger("alembic").setLevel(logging.WARNING)
+
+    # AI/ML libraries
+    logging.getLogger("chromadb").setLevel(logging.WARNING)
+    logging.getLogger("langchain").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+
+    # WebSocket connections
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+
+    # ============================================================================
+    # 3. Configure Loguru (HUMAN-READABLE output)
+    # ============================================================================
+    if environment == "production":
+        # Production: Plain text logs (human-readable, NOT JSON)
+        logger.add(
+            sys.stdout,
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message} | {extra}{exception}",
+            level=log_level,
+            colorize=False,  # No colors in production
+            serialize=False,  # Plain text, NOT JSON
+            enqueue=True
+        )
     else:
-        # Development: Pretty console logs with timestamp and location
-        processors = [
-            structlog.stdlib.add_logger_name,
-            structlog.stdlib.add_log_level,
-            structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.TimeStamper(fmt="iso", utc=True),  # Add ISO 8601 timestamp
-            structlog.processors.CallsiteParameterAdder(  # Add function/line info
-                parameters=[
-                    structlog.processors.CallsiteParameter.FUNC_NAME,
-                    structlog.processors.CallsiteParameter.LINENO,
-                ]
-            ),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.UnicodeDecoder(),
-            add_context_processor,
-            structlog.dev.ConsoleRenderer(colors=True)
-        ]
-    
-    # Configure structlog
-    structlog.configure(
-        processors=processors,
-        wrapper_class=structlog.stdlib.BoundLogger,
-        logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
-    )
-    
-    # Set the root logger level to ensure all levels pass through
-    import logging
-    logging.getLogger().setLevel(getattr(logging, log_level.upper()))
-    
-    # Don't intercept standard library logging to avoid recursion
-    # Let uvicorn and fastapi use their default logging
-    pass
+        # Development: Colored logs (human-readable)
+        logger.add(
+            sys.stdout,
+            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level> | <blue>{extra}</blue>{exception}",
+            level=log_level,
+            colorize=True,
+            enqueue=True
+        )
+
+    logger.info(f"Logging configured - Environment: {environment}, Level: {log_level}")
 
 
 def get_logger(name: str = None):
-    """Get a structured logger instance."""
-    return structlog.get_logger(name)
+    """Get a logger instance"""
+    return logger.bind(module=name or "chat-service")
 
+
+# ============================================================================
+# Context Management (Simplified with Loguru)
+# ============================================================================
 
 def set_request_context(request_id: str = None, tenant_id: str = None, user_id: str = None, session_id: str = None):
-    """Set context variables for the current request."""
+    """
+    Helper to create a logger with request context.
+    Returns a logger bound with the provided context.
+    """
+    context = {}
     if request_id:
-        request_id_var.set(request_id)
+        context["request_id"] = request_id
     if tenant_id:
-        tenant_id_var.set(tenant_id)
+        context["tenant_id"] = tenant_id
     if user_id:
-        user_id_var.set(user_id)
+        context["user_id"] = user_id
     if session_id:
-        session_id_var.set(session_id)
+        context["session_id"] = session_id
+
+    return logger.bind(**context)
 
 
 def clear_request_context():
-    """Clear all request context variables."""
-    request_id_var.set(None)
-    tenant_id_var.set(None)
-    user_id_var.set(None)
-    session_id_var.set(None)
+    """Clear all request context variables (no-op for Loguru, kept for compatibility)"""
+    pass
 
 
 def generate_request_id() -> str:
-    """Generate a unique request ID."""
+    """Generate a unique request ID"""
     return str(uuid.uuid4())
 
 
+# ============================================================================
 # Helper functions for common logging patterns
+# ============================================================================
+
 def log_websocket_connection(action: str, tenant_id: str = None, session_id: str = None, **kwargs):
-    """Log WebSocket connection events."""
-    get_logger("websocket").info(
+    """Log WebSocket connection events"""
+    logger.info(
         "WebSocket connection",
         action=action,
         tenant_id=tenant_id,
@@ -173,8 +148,8 @@ def log_websocket_connection(action: str, tenant_id: str = None, session_id: str
 
 
 def log_chat_message(direction: str, tenant_id: str, session_id: str, message_length: int = None, **kwargs):
-    """Log chat message events."""
-    get_logger("chat").info(
+    """Log chat message events"""
+    logger.info(
         "Chat message",
         direction=direction,  # "incoming" or "outgoing"
         tenant_id=tenant_id,
@@ -185,8 +160,8 @@ def log_chat_message(direction: str, tenant_id: str, session_id: str, message_le
 
 
 def log_ai_generation(tenant_id: str, session_id: str, duration_ms: float, token_count: int = None, **kwargs):
-    """Log AI response generation."""
-    get_logger("ai").info(
+    """Log AI response generation"""
+    logger.info(
         "AI generation",
         tenant_id=tenant_id,
         session_id=session_id,
@@ -197,8 +172,8 @@ def log_ai_generation(tenant_id: str, session_id: str, duration_ms: float, token
 
 
 def log_vector_search(tenant_id: str, query_length: int, results_count: int, duration_ms: float, **kwargs):
-    """Log vector search operations."""
-    get_logger("vectors").info(
+    """Log vector search operations"""
+    logger.info(
         "Vector search",
         tenant_id=tenant_id,
         query_length=query_length,
@@ -209,8 +184,8 @@ def log_vector_search(tenant_id: str, query_length: int, results_count: int, dur
 
 
 def log_tenant_operation(operation: str, tenant_id: str, **kwargs):
-    """Log a tenant-specific operation."""
-    get_logger("tenant").info(
+    """Log a tenant-specific operation"""
+    logger.info(
         "Tenant operation",
         operation=operation,
         tenant_id=tenant_id,
@@ -219,12 +194,11 @@ def log_tenant_operation(operation: str, tenant_id: str, **kwargs):
 
 
 def log_api_request(method: str, path: str, tenant_id: str = None, user_agent: str = None, client_ip: str = None, **kwargs):
-    """Log API request events."""
-
+    """Log API request events"""
     if path == "/health":
         return
 
-    get_logger("api").info(
+    logger.info(
         "API request",
         method=method,
         path=path,
@@ -236,8 +210,7 @@ def log_api_request(method: str, path: str, tenant_id: str = None, user_agent: s
 
 
 def log_api_response(method: str, path: str, status_code: int, duration_ms: float, **kwargs):
-    """Log API response events."""
-    logger = get_logger("api")
+    """Log API response events"""
     logger.info(
         "API response",
         method=method,

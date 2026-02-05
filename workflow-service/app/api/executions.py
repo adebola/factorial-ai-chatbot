@@ -179,7 +179,7 @@ async def get_session_state(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get session state for session_id={session_id}: {e}", exc_info=True)
+        logger.exception(f"Failed to get session state for session_id={session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

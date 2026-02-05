@@ -4,6 +4,7 @@ Feedback Service
 Handles feedback submission, storage, and event publishing.
 """
 
+import asyncio
 import uuid
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -101,15 +102,15 @@ class FeedbackService:
 
         # Publish feedback event to RabbitMQ
         try:
-            event_publisher.publish_feedback_submitted(
+            asyncio.create_task(event_publisher.publish_feedback_submitted(
                 tenant_id=tenant_id,
                 session_id=session_id,
                 message_id=message_id,
                 feedback_type=feedback_type,
                 has_comment=comment is not None
-            )
+            ))
         except Exception as e:
-            logger.error(f"Failed to publish feedback event: {e}", exc_info=True)
+            logger.exception(f"Failed to publish feedback event: {e}")
             # Don't fail the request if event publishing fails
 
         # TODO: If negative feedback, trigger knowledge gap analysis
@@ -266,12 +267,12 @@ class FeedbackService:
 
         # Publish session quality updated event
         try:
-            event_publisher.publish_session_quality_updated(
+            asyncio.create_task(event_publisher.publish_session_quality_updated(
                 tenant_id=tenant_id,
                 session_id=session_id,
                 session_success=session_quality.session_success,
                 helpful_count=stats["helpful_count"],
                 not_helpful_count=stats["not_helpful_count"]
-            )
+            ))
         except Exception as e:
-            logger.error(f"Failed to publish session quality event: {e}", exc_info=True)
+            logger.exception(f"Failed to publish session quality event: {e}")

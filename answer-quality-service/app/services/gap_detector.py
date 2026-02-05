@@ -255,9 +255,7 @@ class GapDetector:
         except Exception as e:
             logger.error(
                 f"Error clustering questions: {e}",
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             # Return each question as its own cluster
             return [
                 {
@@ -341,9 +339,7 @@ class GapDetector:
         except Exception as e:
             logger.error(
                 f"Error creating/updating gap: {e}",
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             self.db.rollback()
             return None
 

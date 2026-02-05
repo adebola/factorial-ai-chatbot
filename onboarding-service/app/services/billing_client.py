@@ -194,9 +194,7 @@ class BillingClient:
                 f"Unexpected error calling billing service - allowing operation (fail-open)",
                 usage_type=usage_type,
                 error=str(e),
-                error_type=type(e).__name__,
-                exc_info=True
-            )
+                error_type=type(e).__name__)
             # Fail-open on unexpected errors
             return {
                 "allowed": True,
@@ -258,9 +256,7 @@ class BillingClient:
             logger.error(
                 f"Error checking document upload permission - allowing (fail-open)",
                 tenant_id=tenant_id,
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             return {"allowed": True, "reason": "billing_service_error"}
 
     async def check_can_ingest_website(self, tenant_id: str) -> Dict[str, Any]:
@@ -318,7 +314,5 @@ class BillingClient:
             logger.error(
                 f"Error checking website ingestion permission - allowing (fail-open)",
                 tenant_id=tenant_id,
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             return {"allowed": True, "reason": "billing_service_error"}

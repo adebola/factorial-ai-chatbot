@@ -148,7 +148,6 @@ class InvoiceService:
             self.db.rollback()
             logger.error(
                 f"Failed to create invoice: {e}",
-                exc_info=True,
                 extra={"subscription_id": subscription_id}
             )
             raise
@@ -248,7 +247,6 @@ class InvoiceService:
             self.db.rollback()
             logger.error(
                 f"Failed to create invoice from payment: {e}",
-                exc_info=True,
                 extra={"payment_id": payment.id}
             )
             return None
@@ -324,7 +322,6 @@ class InvoiceService:
         except Exception as e:
             logger.error(
                 f"Failed to get invoices for tenant: {e}",
-                exc_info=True,
                 extra={"tenant_id": tenant_id}
             )
             raise
@@ -382,7 +379,6 @@ class InvoiceService:
             self.db.rollback()
             logger.error(
                 f"Failed to mark invoice as paid: {e}",
-                exc_info=True,
                 extra={"invoice_id": invoice_id}
             )
             raise
@@ -421,7 +417,6 @@ class InvoiceService:
             self.db.rollback()
             logger.error(
                 f"Failed to cancel invoice: {e}",
-                exc_info=True,
                 extra={"invoice_id": invoice_id}
             )
             raise
@@ -624,7 +619,7 @@ class InvoiceService:
             return pdf_bytes, error
 
         except Exception as e:
-            logger.error(f"Failed to generate PDF for invoice {invoice_id}: {str(e)}", exc_info=True)
+            logger.error(f"Failed to generate PDF for invoice {invoice_id}: {str(e)}")
             return None, f"PDF generation failed: {str(e)}"
 
     def create_invoice_with_pdf(
@@ -677,7 +672,5 @@ class InvoiceService:
 
         except Exception as e:
             logger.error(
-                f"Failed to create invoice with PDF for payment {payment.id}: {str(e)}",
-                exc_info=True
-            )
+                f"Failed to create invoice with PDF for payment {payment.id}: {str(e)}")
             return None, None

@@ -131,12 +131,10 @@ class UsageEventPublisher:
             return True
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to publish document_added event: {e}",
                 tenant_id=tenant_id,
-                document_id=document_id,
-                exc_info=True
-            )
+                document_id=document_id)
             return False
 
     async def publish_document_removed(
@@ -193,12 +191,10 @@ class UsageEventPublisher:
             return True
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to publish document_removed event: {e}",
                 tenant_id=tenant_id,
-                document_id=document_id,
-                exc_info=True
-            )
+                document_id=document_id)
             return False
 
     async def publish_website_added(
@@ -259,12 +255,10 @@ class UsageEventPublisher:
             return True
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to publish website_added event: {e}",
                 tenant_id=tenant_id,
-                website_id=website_id,
-                exc_info=True
-            )
+                website_id=website_id)
             return False
 
     async def publish_website_removed(
@@ -321,12 +315,10 @@ class UsageEventPublisher:
             return True
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to publish website_removed event: {e}",
                 tenant_id=tenant_id,
-                website_id=website_id,
-                exc_info=True
-            )
+                website_id=website_id)
             return False
 
 

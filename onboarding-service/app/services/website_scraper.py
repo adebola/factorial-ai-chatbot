@@ -64,8 +64,7 @@ class WebsiteScraper:
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=500,
             chunk_overlap=50,
-            length_function=len,
-        )
+            length_function=len)
 
     def should_skip_url(self, url: str) -> bool:
         """
@@ -314,9 +313,7 @@ class WebsiteScraper:
                         url=current_url,
                         error=str(e),
                         error_type=type(e).__name__,
-                        duration_seconds=round(page_duration, 2),
-                        exc_info=True
-                    )
+                        duration_seconds=round(page_duration, 2))
 
                 # Log progress every 5 pages for more frequent UI updates
                 if page_number % 5 == 0:
@@ -391,9 +388,7 @@ class WebsiteScraper:
                 base_url=base_url,
                 error=str(e),
                 error_type=type(e).__name__,
-                duration_seconds=round(total_duration, 2),
-                exc_info=True
-            )
+                duration_seconds=round(total_duration, 2))
             raise
 
     def _log_session_statistics(self, tenant_id: str, ingestion_id: str):
@@ -858,8 +853,27 @@ class WebsiteScraper:
                         page_record.status = DocumentStatus.FAILED
                         page_record.error_message = f"HTTP {response.status if response else 'no response'}"
                         self.db.commit()
+
+                        logger.error(
+                            "❌ Playwright: HTTP error or no response",
+                            tenant_id=tenant_id,
+                            ingestion_id=ingestion_id,
+                            url=url,
+                            http_status=response.status if response else None,
+                            error="No response received" if not response else f"HTTP {response.status}"
+                        )
+
                         await browser.close()
                         return None
+
+                    # Log successful page load
+                    logger.info(
+                        "✅ Playwright: Page loaded successfully",
+                        tenant_id=tenant_id,
+                        url=url,
+                        http_status=response.status,
+                        content_type=response.headers.get('content-type', 'unknown')
+                    )
 
                     # Wait for page to load and close any popups
                     await asyncio.sleep(2)  # Give time for dynamic content
@@ -918,14 +932,16 @@ class WebsiteScraper:
                     content = ' '.join(meaningful_lines)
 
                     # Log content extraction details
-                    logger.debug(
+                    logger.info(
                         "Playwright content extraction details",
                         tenant_id=tenant_id,
                         url=url,
                         raw_html_length=len(content_html),
                         after_cleaning_length=len(content),
                         meaningful_lines_count=len(meaningful_lines),
-                        has_main_content=main_content is not None
+                        has_main_content=main_content is not None,
+                        http_status=response.status if response else None,
+                        title=title_text
                     )
 
                     if not content or len(content.strip()) < 50:
@@ -934,12 +950,15 @@ class WebsiteScraper:
                         self.db.commit()
 
                         logger.warning(
-                            "Playwright: No meaningful content extracted",
+                            "❌ Playwright: No meaningful content extracted",
                             tenant_id=tenant_id,
                             url=url,
                             content_length=len(content),
                             title=title_text,
-                            html_size=len(content_html)
+                            html_size=len(content_html),
+                            http_status=response.status if response else None,
+                            meaningful_lines=len(meaningful_lines),
+                            content_preview=content[:200] if content else "(empty)"
                         )
 
                         await browser.close()
@@ -987,6 +1006,16 @@ class WebsiteScraper:
                     page_record.status = DocumentStatus.FAILED
                     page_record.error_message = f"Timeout loading page: {str(e)}"
                     self.db.commit()
+
+                    logger.exception(
+                        "❌ Playwright: Timeout loading page",
+                        tenant_id=tenant_id,
+                        ingestion_id=ingestion_id,
+                        url=url,
+                        error=str(e),
+                        timeout_ms=getattr(settings, 'PLAYWRIGHT_TIMEOUT', 30000)
+                    )
+
                     await browser.close()
                     return None
 
@@ -994,6 +1023,23 @@ class WebsiteScraper:
             page_record.status = DocumentStatus.FAILED
             page_record.error_message = str(e)
             self.db.commit()
+
+            logger.exception(
+                "❌ Playwright: Scraping failed with exception",
+                tenant_id=tenant_id,
+                ingestion_id=ingestion_id,
+                url=url,
+                error=str(e),
+                error_type=type(e).__name__
+            )
+
+            # Close browser if it was opened
+            try:
+                if 'browser' in locals():
+                    await browser.close()
+            except:
+                pass
+
             return None
 
     def _extract_links(self, base_url: str, allowed_domain: str) -> List[str]:
@@ -1206,9 +1252,7 @@ class WebsiteScraper:
                 tenant_id=tenant_id,
                 ingestion_id=ingestion_id,
                 error=str(e),
-                error_type=type(e).__name__,
-                exc_info=True
-            )
+                error_type=type(e).__name__)
             return False
     
     def reset_ingestion_for_retry(self, ingestion_id: str) -> bool:
@@ -1247,9 +1291,7 @@ class WebsiteScraper:
                 "Error resetting ingestion",
                 ingestion_id=ingestion_id,
                 error=str(e),
-                error_type=type(e).__name__,
-                exc_info=True
-            )
+                error_type=type(e).__name__)
             return False
     
     def get_ingestion_content_stats(self, tenant_id: str, ingestion_id: str) -> dict:
@@ -1297,9 +1339,7 @@ class WebsiteScraper:
                 tenant_id=tenant_id,
                 ingestion_id=ingestion_id,
                 error=str(e),
-                error_type=type(e).__name__,
-                exc_info=True
-            )
+                error_type=type(e).__name__)
             return {"error": str(e)}
     
     # def _notify_chat_service_ingestion_deleted(self, tenant_id: str, ingestion_id: str) -> bool:

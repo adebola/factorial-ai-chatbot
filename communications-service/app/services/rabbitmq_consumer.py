@@ -223,7 +223,7 @@ class RabbitMQConsumer:
                 # Auto-reject without requeue (invalid message)
 
             except Exception as e:
-                logger.error(f"Error processing email message: {e}", exc_info=True)
+                logger.exception(f"Error processing email message: {e}")
                 # Check retry count before requeuing
                 retry_count = message.headers.get('x-retry-count', 0) if message.headers else 0
 
@@ -261,7 +261,7 @@ class RabbitMQConsumer:
             logger.info(f"Message republished with retry count: {retry_count}")
 
         except Exception as e:
-            logger.error(f"Failed to republish message: {e}", exc_info=True)
+            logger.exception(f"Failed to republish message: {e}")
 
     async def _process_sms_message(self, message: AbstractIncomingMessage):
         """Process SMS message from queue"""
@@ -315,7 +315,7 @@ class RabbitMQConsumer:
                 # Auto-reject without requeue (invalid message)
 
             except Exception as e:
-                logger.error(f"Error processing SMS message: {e}", exc_info=True)
+                logger.exception(f"Error processing SMS message: {e}")
                 # Re-raise to trigger nack+requeue
                 raise
 

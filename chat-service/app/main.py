@@ -52,7 +52,7 @@ async def lifespan(app: FastAPI):
         consumer_started = True
         logger.info("✓ Limit warning consumer started successfully (aio-pika with automatic reconnection)")
     except Exception as e:
-        logger.error(f"Failed to start limit warning consumer: {e}", exc_info=True)
+        logger.exception(f"Failed to start limit warning consumer: {e}")
         logger.warning("Chat service will continue without limit warning consumer")
         # Run diagnostics to help identify the issue
         logger.info("Running RabbitMQ connection diagnostics...")
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
         publisher_connected = True
         logger.info("✓ Event publisher connected successfully")
     except Exception as e:
-        logger.error(f"Failed to connect event publisher: {e}", exc_info=True)
+        logger.exception(f"Failed to connect event publisher: {e}")
         logger.warning("Chat service will continue without event publisher")
         # Run diagnostics to help identify the issue (only if not already run)
         logger.info("Running RabbitMQ connection diagnostics...")
@@ -96,14 +96,14 @@ async def lifespan(app: FastAPI):
         await limit_warning_consumer.stop()
         logger.info("Limit warning consumer stopped successfully")
     except Exception as e:
-        logger.error(f"Error stopping limit warning consumer: {e}", exc_info=True)
+        logger.exception(f"Error stopping limit warning consumer: {e}")
 
     # Close event publisher
     try:
         await event_publisher.close()
         logger.info("Event publisher closed successfully")
     except Exception as e:
-        logger.error(f"Error closing event publisher: {e}", exc_info=True)
+        logger.exception(f"Error closing event publisher: {e}")
 
     logger.info("Chat Service shutdown completed")
 
@@ -179,9 +179,7 @@ async def logging_middleware(request: Request, call_next):
             method=request.method,
             path=str(request.url.path),
             duration_ms=duration_ms,
-            error=str(e),
-            exc_info=True
-        )
+            error=str(e))
         
         raise
     finally:

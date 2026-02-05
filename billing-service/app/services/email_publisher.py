@@ -48,8 +48,7 @@ class EmailPublisher:
             login=self.rabbitmq_user,
             password=self.rabbitmq_password,
             virtualhost=self.rabbitmq_vhost,
-            reconnect_interval=1.0,
-        )
+            reconnect_interval=1.0)
 
         logger.info(f"Connected to RabbitMQ at {self.rabbitmq_host}:{self.rabbitmq_port}")
 
@@ -103,7 +102,7 @@ class EmailPublisher:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to publish email: {e}", exc_info=True)
+            logger.exception(f"Failed to publish email: {e}")
             return False
 
     async def close(self):

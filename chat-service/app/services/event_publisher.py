@@ -143,12 +143,10 @@ class ChatEventPublisher:
             return True
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to publish message.created event: {e}",
                 tenant_id=tenant_id,
-                message_id=message_id,
-                exc_info=True
-            )
+                message_id=message_id)
             return False
 
     async def publish_chat_usage_event(
@@ -206,12 +204,10 @@ class ChatEventPublisher:
             return True
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to publish usage.chat.message event: {e}",
                 tenant_id=tenant_id,
-                session_id=session_id,
-                exc_info=True
-            )
+                session_id=session_id)
             return False
 
 

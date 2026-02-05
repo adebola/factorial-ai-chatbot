@@ -66,7 +66,7 @@ class SubscriptionService:
         now = datetime.now(timezone.utc)
 
         if custom_trial_end:
-            # Use custom trial end date (e.g., 14 days from registration)
+            # Use custom trial end date (e.g., 30 days from registration)
             trial_starts_at = now
             trial_ends_at = custom_trial_end
             starts_at = trial_ends_at
@@ -87,7 +87,7 @@ class SubscriptionService:
 
         # Calculate subscription end date
         if custom_trial_end or (start_trial and settings.TRIAL_PERIOD_DAYS > 0):
-            # TRIALING: Period ends when trial ends (14 days from now)
+            # TRIALING: Period ends when trial ends (30 days from now)
             # The paid billing period starts AFTER trial ends
             current_period_end = trial_ends_at
             ends_at = trial_ends_at
@@ -340,7 +340,7 @@ class SubscriptionService:
                         extra={"subscription_id": subscription.id, "email": subscription.user_email}
                     )
             except Exception as e:
-                logger.error(f"Failed to send renewal notification: {e}", exc_info=True)
+                logger.exception(f"Failed to send renewal notification: {e}")
 
             # Create renewal invoice with PDF
             try:
@@ -388,7 +388,7 @@ class SubscriptionService:
                             extra={"invoice_id": invoice.id, "subscription_id": subscription.id}
                         )
             except Exception as e:
-                logger.error(f"Failed to create/send renewal invoice: {e}", exc_info=True)
+                logger.exception(f"Failed to create/send renewal invoice: {e}")
 
             return {
                 "success": True,
@@ -472,7 +472,6 @@ class SubscriptionService:
             # Don't fail payment verification if emails fail
             logger.error(
                 f"Failed to send payment notification emails: {e}",
-                exc_info=True,
                 extra={"payment_id": payment.id}
             )
 
@@ -1103,7 +1102,6 @@ class SubscriptionService:
         except Exception as e:
             logger.error(
                 f"Error checking subscription status: {e}",
-                exc_info=True,
                 extra={
                     "subscription_id": subscription.id if subscription else None,
                     "tenant_id": subscription.tenant_id if subscription else None

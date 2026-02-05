@@ -794,7 +794,7 @@ async def preview_plan_switch(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to preview plan switch for tenant {tenant_id}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to preview plan switch for tenant {tenant_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to preview plan switch: {str(e)}"
@@ -811,7 +811,7 @@ async def switch_tenant_plan(
     Switch tenant's plan (authenticated user can switch their own plan)
 
     Logic:
-    - If user has no subscription: Create Basic plan with 14-day trial from registration
+    - If user has no subscription: Create Basic plan with 30-day trial from registration
     - If user has subscription: Switch to new plan with proration
     - Update auth server with subscription_id and plan_id via RabbitMQ
     """
@@ -857,7 +857,7 @@ async def switch_tenant_plan(
         billing_cycle = BillingCycle.YEARLY if plan_switch.billing_cycle.lower() == "yearly" else BillingCycle.MONTHLY
 
         if not existing_subscription:
-            # SCENARIO 1: No subscription exists - create Basic plan with 14-day trial
+            # SCENARIO 1: No subscription exists - create Basic plan with 30-day trial
             logger.info(f"Tenant {tenant_id} has no subscription. Creating Basic plan with trial.")
 
             # Get Basic plan by name
@@ -868,8 +868,8 @@ async def switch_tenant_plan(
                     detail="Basic plan not found or inactive"
                 )
 
-            # Calculate trial end date: 14 days from registration
-            trial_end_date = registration_date + timedelta(days=14)
+            # Calculate trial end date: 30 days from registration
+            trial_end_date = registration_date + timedelta(days=30)
 
             # Check if trial would be in the past - if so, don't use trial
             now = datetime.now(timezone.utc)
@@ -1158,9 +1158,7 @@ async def switch_tenant_plan(
 
                     except Exception as e:
                         logger.error(
-                            f"Failed to generate invoice for upgrade payment {upgrade_payment.id}: {str(e)}",
-                            exc_info=True
-                        )
+                            f"Failed to generate invoice for upgrade payment {upgrade_payment.id}: {str(e)}")
 
             # Switch subscription plan
             switch_result = subscription_service.switch_subscription_plan(
@@ -1234,7 +1232,7 @@ async def switch_tenant_plan(
 
                 except Exception as e:
                     # Don't fail the plan switch if email fails
-                    logger.error(f"Failed to send plan switch notification email: {e}", exc_info=True)
+                    logger.exception(f"Failed to send plan switch notification email: {e}")
 
             # Build response based on whether it's a scheduled downgrade or immediate change
             response = {
@@ -1281,7 +1279,7 @@ async def switch_tenant_plan(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to switch plan for tenant {tenant_id}: {str(e)}", exc_info=True)
+        logger.error(f"Failed to switch plan for tenant {tenant_id}: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to switch plan: {str(e)}"

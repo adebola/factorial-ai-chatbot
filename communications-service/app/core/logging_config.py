@@ -1,15 +1,21 @@
+"""
+Standardized logging configuration using Loguru only.
+
+Provides:
+- Human-readable logs (colored in dev, plain text in production)
+- Multi-tenant context via Loguru's .bind() method
+- Third-party library log level control
+- Simple, maintainable configuration
+"""
+
 import os
 import sys
-import json
-from datetime import datetime
-from typing import Any, Dict, Optional
-
-import structlog
+import logging
 from loguru import logger
 
 
 def setup_logging():
-    """Configure structured logging for the communications service"""
+    """Configure logging for the service using Loguru only"""
 
     # Remove default loguru handler
     logger.remove()
@@ -18,73 +24,81 @@ def setup_logging():
     environment = os.environ.get("ENVIRONMENT", "development")
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
 
+    # ============================================================================
+    # 1. Configure Python's standard logging module
+    # ============================================================================
+    # This is CRITICAL for third-party libraries that use logging.getLogger()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        force=True  # Override any existing configuration
+    )
+
+    # ============================================================================
+    # 2. Configure third-party library loggers
+    # ============================================================================
+    # RabbitMQ consumer
+    logging.getLogger("aio_pika").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("aiormq").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("pamqp").setLevel(getattr(logging, log_level, logging.INFO))
+
+    # Web server
+    logging.getLogger("uvicorn").setLevel(getattr(logging, log_level, logging.INFO))
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # Too verbose
+    logging.getLogger("uvicorn.error").setLevel(getattr(logging, log_level, logging.INFO))
+
+    # ============================================================================
+    # 3. Configure Loguru (HUMAN-READABLE output)
+    # ============================================================================
     if environment == "production":
-        # Production: JSON structured logs
+        # Production: Plain text logs (human-readable, NOT JSON)
         logger.add(
             sys.stdout,
-            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | {name}:{function}:{line} | {message}",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | {message} | {extra}{exception}",
             level=log_level,
-            serialize=True,  # Output as JSON
+            colorize=False,  # No colors in production
+            serialize=False,  # Plain text, NOT JSON
             enqueue=True
         )
     else:
-        # Development: Pretty colored logs
+        # Development: Colored logs (human-readable)
         logger.add(
             sys.stdout,
-            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level>",
+            format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | <level>{message}</level> | <blue>{extra}</blue>{exception}",
             level=log_level,
             colorize=True,
             enqueue=True
         )
 
-    # Map log levels to integers for structlog
-    log_level_map = {
-        "DEBUG": 10,
-        "INFO": 20,
-        "WARNING": 30,
-        "ERROR": 40,
-        "CRITICAL": 50
-    }
-
-    # Configure structlog
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.StackInfoRenderer(),
-            structlog.dev.set_exc_info,
-            structlog.processors.JSONRenderer() if environment == "production" else structlog.dev.ConsoleRenderer(colors=True)
-        ],
-        wrapper_class=structlog.make_filtering_bound_logger(log_level_map.get(log_level, 20)),
-        context_class=dict,
-        logger_factory=structlog.PrintLoggerFactory(),
-        cache_logger_on_first_use=False,
-    )
+    logger.info(f"Logging configured - Environment: {environment}, Level: {log_level}")
 
 
-# Request context storage
-_request_context: Dict[str, Any] = {}
+def get_logger(name: str):
+    """Get a logger instance"""
+    return logger.bind(module=name)
 
+
+# ============================================================================
+# Context Management (Simplified with Loguru)
+# ============================================================================
 
 def set_request_context(**kwargs):
-    """Set context that will be included in all logs for this request"""
-    global _request_context
-    _request_context.update(kwargs)
+    """
+    Helper to create a logger with request context.
+    Returns a logger bound with the provided context.
+    """
+    return logger.bind(**kwargs)
 
 
 def clear_request_context():
-    """Clear the request context"""
-    global _request_context
-    _request_context.clear()
+    """Clear the request context (no-op for Loguru, kept for compatibility)"""
+    pass
 
 
-def get_logger(name: str) -> structlog.BoundLogger:
-    """Get a logger with request context"""
-    base_logger = structlog.get_logger(name)
-    return base_logger.bind(**_request_context)
-
-
+# ============================================================================
 # Helper functions for common logging patterns
+# ============================================================================
+
 def log_message_sent(
     message_type: str,
     message_id: str,
@@ -94,8 +108,7 @@ def log_message_sent(
     **kwargs
 ):
     """Log when a message is sent"""
-    logger_instance = get_logger("message_delivery")
-    logger_instance.info(
+    logger.info(
         "Message sent",
         message_type=message_type,
         message_id=message_id,
@@ -115,8 +128,7 @@ def log_message_failed(
     **kwargs
 ):
     """Log when a message fails"""
-    logger_instance = get_logger("message_delivery")
-    logger_instance.error(
+    logger.error(
         "Message failed",
         message_type=message_type,
         message_id=message_id,
@@ -135,8 +147,7 @@ def log_template_usage(
     **kwargs
 ):
     """Log template usage"""
-    logger_instance = get_logger("template_usage")
-    logger_instance.info(
+    logger.info(
         "Template used",
         template_id=template_id,
         template_name=template_name,
@@ -154,8 +165,7 @@ def log_rate_limit_hit(
     **kwargs
 ):
     """Log when rate limit is hit"""
-    logger_instance = get_logger("rate_limiting")
-    logger_instance.warning(
+    logger.warning(
         "Rate limit exceeded",
         tenant_id=tenant_id,
         limit_type=limit_type,
@@ -169,12 +179,11 @@ def log_webhook_received(
     provider: str,
     event_type: str,
     message_id: str,
-    payload: Dict,
+    payload: dict,
     **kwargs
 ):
     """Log incoming webhooks"""
-    logger_instance = get_logger("webhooks")
-    logger_instance.info(
+    logger.info(
         "Webhook received",
         provider=provider,
         event_type=event_type,
@@ -182,6 +191,3 @@ def log_webhook_received(
         payload_keys=list(payload.keys()),
         **kwargs
     )
-
-
-# Don't initialize logging on import - let main.py handle it

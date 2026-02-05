@@ -97,7 +97,7 @@ class SentimentAnalyzer:
             }
 
         except Exception as e:
-            logger.error(f"Error analyzing sentiment: {e}", exc_info=True)
+            logger.exception(f"Error analyzing sentiment: {e}")
             return {
                 "label": "neutral",
                 "score": 0.0,

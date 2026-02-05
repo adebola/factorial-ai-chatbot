@@ -67,10 +67,8 @@ class BackgroundScheduler:
             )
 
         except Exception as e:
-            logger.error(
-                f"Failed to start background scheduler: {e}",
-                exc_info=True
-            )
+            logger.exception(
+                f"Failed to start background scheduler: {e}")
             raise
 
     def stop(self):
@@ -82,10 +80,8 @@ class BackgroundScheduler:
                 self.is_running = False
                 logger.info("Background scheduler stopped successfully")
             except Exception as e:
-                logger.error(
-                    f"Error stopping background scheduler: {e}",
-                    exc_info=True
-                )
+                logger.exception(
+                    f"Error stopping background scheduler: {e}")
 
     def _add_gap_detection_job(self):
         """Add gap detection job to scheduler."""
@@ -108,11 +104,9 @@ class BackgroundScheduler:
             )
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to schedule gap detection job: {e}",
-                schedule=settings.GAP_DETECTION_SCHEDULE,
-                exc_info=True
-            )
+                schedule=settings.GAP_DETECTION_SCHEDULE)
 
     def _add_quality_check_job(self):
         """Add quality alert checking job to scheduler."""
@@ -135,11 +129,9 @@ class BackgroundScheduler:
             )
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to schedule quality check job: {e}",
-                schedule=settings.QUALITY_CHECK_SCHEDULE,
-                exc_info=True
-            )
+                schedule=settings.QUALITY_CHECK_SCHEDULE)
 
     async def _run_gap_detection(self):
         """
@@ -182,11 +174,9 @@ class BackgroundScheduler:
                     )
 
                 except Exception as e:
-                    logger.error(
+                    logger.exception(
                         f"Gap detection failed for tenant: {e}",
-                        tenant_id=tenant_id,
-                        exc_info=True
-                    )
+                        tenant_id=tenant_id)
 
             # Log job execution
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -238,11 +228,9 @@ class BackgroundScheduler:
             db.add(job_log)
             db.commit()
 
-            logger.error(
+            logger.exception(
                 f"Gap detection job failed: {e}",
-                job_id=job_id,
-                exc_info=True
-            )
+                job_id=job_id)
 
         finally:
             db.close()
@@ -320,11 +308,9 @@ class BackgroundScheduler:
             db.add(job_log)
             db.commit()
 
-            logger.error(
+            logger.exception(
                 f"Quality check job failed: {e}",
-                job_id=job_id,
-                exc_info=True
-            )
+                job_id=job_id)
 
         finally:
             db.close()

@@ -139,11 +139,11 @@ class RabbitMQConsumer:
                     # Auto-ack via context manager
 
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse message JSON: {e}", exc_info=True)
+                logger.exception(f"Failed to parse message JSON: {e}")
                 # Auto-reject without requeue (malformed message)
 
             except Exception as e:
-                logger.error(f"Error processing message: {e}", exc_info=True)
+                logger.exception(f"Error processing message: {e}")
                 # Re-raise to trigger nack+requeue
                 raise
 
@@ -182,12 +182,10 @@ class RabbitMQConsumer:
             )
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to process message quality: {e}",
                 tenant_id=event.tenant_id,
-                message_id=event.message_id,
-                exc_info=True
-            )
+                message_id=event.message_id)
             raise  # Re-raise to trigger requeue
 
         finally:

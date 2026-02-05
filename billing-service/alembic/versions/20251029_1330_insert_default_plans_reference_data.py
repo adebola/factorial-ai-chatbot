@@ -26,7 +26,7 @@ def upgrade():
     # Plan 1: Basic
     # Perfect for getting started with FactorialBot
     # 1 document, 1 website, 500 monthly chats
-    # NGN 50,000/month with 14-day trial
+    # NGN 50,000/month with 30-day trial
     op.execute("""
         INSERT INTO plans (
             id,
@@ -67,7 +67,7 @@ def upgrade():
             2,
             5,
             true,
-            14,
+            30,
             false,
             false,
             false,

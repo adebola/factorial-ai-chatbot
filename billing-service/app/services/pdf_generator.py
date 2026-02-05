@@ -78,10 +78,8 @@ class PDFGenerator:
 
         except Exception as e:
             error_msg = f"PDF generation failed: {str(e)}"
-            logger.error(
-                f"Failed to generate PDF for invoice {invoice_number}: {error_msg}",
-                exc_info=True
-            )
+            logger.exception(
+                f"Failed to generate PDF for invoice {invoice_number}: {error_msg}")
             return None, error_msg
 
     def pdf_to_base64(self, pdf_bytes: bytes) -> str:

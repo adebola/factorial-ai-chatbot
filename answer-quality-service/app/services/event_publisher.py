@@ -94,7 +94,7 @@ class EventPublisher:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to publish event {routing_key}: {e}", exc_info=True)
+            logger.exception(f"Failed to publish event {routing_key}: {e}")
             return False
 
     async def publish_feedback_submitted(

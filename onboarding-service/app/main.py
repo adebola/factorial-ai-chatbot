@@ -57,22 +57,18 @@ async def lifespan(app: FastAPI):
         await usage_publisher.connect()
         logger.info("✓ Usage event publisher connected successfully")
     except Exception as e:
-        logger.error(
+        logger.exception(
             f"Failed to connect usage publisher: {e}. "
-            f"Service will continue but usage events will not be published until RabbitMQ is available.",
-            exc_info=True
-        )
+            f"Service will continue but usage events will not be published until RabbitMQ is available.")
 
     try:
         logger.info("Connecting RabbitMQ service...")
         await rabbitmq_service.connect()
         logger.info("✓ RabbitMQ service connected successfully")
     except Exception as e:
-        logger.error(
+        logger.exception(
             f"Failed to connect RabbitMQ service: {e}. "
-            f"Service will continue but plan/logo events may fail to publish.",
-            exc_info=True
-        )
+            f"Service will continue but plan/logo events may fail to publish.")
 
     logger.info("Onboarding Service startup completed")
 
@@ -174,9 +170,7 @@ async def logging_middleware(request: Request, call_next):
             method=request.method,
             path=str(request.url.path),
             duration_ms=duration_ms,
-            error=str(e),
-            exc_info=True
-        )
+            error=str(e))
         
         raise
     finally:

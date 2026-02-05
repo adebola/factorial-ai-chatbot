@@ -166,7 +166,6 @@ class AuditService:
         except Exception as e:
             logger.error(
                 f"Failed to log admin action: {e}",
-                exc_info=True,
                 extra={
                     "admin_user_id": admin_claims.user_id,
                     "action_type": action_type,

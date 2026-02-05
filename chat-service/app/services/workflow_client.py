@@ -82,9 +82,7 @@ class WorkflowClient:
                 "Failed to check workflow triggers",
                 tenant_id=tenant_id,
                 session_id=session_id,
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             return {"triggered": False}
 
     async def start_workflow_execution(
@@ -145,9 +143,7 @@ class WorkflowClient:
                 tenant_id=tenant_id,
                 workflow_id=workflow_id,
                 session_id=session_id,
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             return {"error": str(e)}
 
     async def execute_workflow_step(
@@ -207,9 +203,7 @@ class WorkflowClient:
                 "Error executing workflow step",
                 tenant_id=tenant_id,
                 session_id=session_id,
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             return {"error": str(e)}
 
     async def get_session_workflow_state(
@@ -260,7 +254,5 @@ class WorkflowClient:
                 "Error getting workflow state",
                 tenant_id=tenant_id,
                 session_id=session_id,
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             return None

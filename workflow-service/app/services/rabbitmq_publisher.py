@@ -143,7 +143,7 @@ class RabbitMQPublisher:
             }
 
         except Exception as e:
-            logger.error(f"Error publishing email: {e}", exc_info=True)
+            logger.exception(f"Error publishing email: {e}")
             return {
                 "success": False,
                 "error": str(e)
@@ -220,7 +220,7 @@ class RabbitMQPublisher:
             }
 
         except Exception as e:
-            logger.error(f"Error publishing SMS: {e}", exc_info=True)
+            logger.exception(f"Error publishing SMS: {e}")
             return {
                 "success": False,
                 "error": str(e)

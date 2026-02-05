@@ -178,7 +178,7 @@ class LimitWarningConsumer:
                 # Auto-handled by context manager (reject without requeue for malformed message)
 
             except Exception as e:
-                logger.error(f"Error handling limit warning: {e}", exc_info=True)
+                logger.exception(f"Error handling limit warning: {e}")
                 # Let message be acked to prevent redelivery loop
                 # (cache invalidation is not critical - can retry on next warning)
 

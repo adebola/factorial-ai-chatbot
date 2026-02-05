@@ -83,13 +83,11 @@ class AlertManager:
                     })
 
             except Exception as e:
-                logger.error(
+                logger.exception(
                     f"Error evaluating alert rule: {e}",
                     rule_id=rule.id,
                     rule_name=rule.name,
-                    tenant_id=rule.tenant_id,
-                    exc_info=True
-                )
+                    tenant_id=rule.tenant_id)
                 results.append({
                     "rule_id": rule.id,
                     "rule_name": rule.name,
@@ -350,12 +348,10 @@ class AlertManager:
             )
 
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Failed to send alert notifications: {e}",
                 rule_id=rule.id,
-                tenant_id=rule.tenant_id,
-                exc_info=True
-            )
+                tenant_id=rule.tenant_id)
 
             alert_history.notification_sent = False
             alert_history.notification_error = str(e)

@@ -303,9 +303,7 @@ class ChatService:
                 "Failed to generate AI response",
                 tenant_id=tenant_id,
                 session_id=session_id,
-                error=str(e),
-                exc_info=True
-            )
+                error=str(e))
             raise Exception(f"Failed to generate response: {str(e)}")
     
     def _get_conversation_history(self, session_id: str) -> List[Dict]:

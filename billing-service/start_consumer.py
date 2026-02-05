@@ -31,7 +31,7 @@ if __name__ == "__main__":
     print("=" * 80)
     print()
     print("This consumer listens for user creation events and automatically")
-    print("creates Basic plan subscriptions with 14-day trials.")
+    print("creates Basic plan subscriptions with 30-day trials.")
     print()
     print("Press CTRL+C to stop the consumer.")
     print("=" * 80)

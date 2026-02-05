@@ -97,7 +97,7 @@ def distributed_lock(
         yield True
 
     except Exception as e:
-        logger.error(f"❌ Unexpected error with lock '{lock_name}': {e}", exc_info=True)
+        logger.exception(f"❌ Unexpected error with lock '{lock_name}': {e}")
         # Fail open
         yield True
 

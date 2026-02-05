@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
         await consumer.start_consuming()
         logger.info("✓ RabbitMQ consumer started successfully (aio-pika)")
     except Exception as e:
-        logger.error(f"Failed to start RabbitMQ consumer: {e}", exc_info=True)
+        logger.exception(f"Failed to start RabbitMQ consumer: {e}")
         logger.warning("Service will continue without RabbitMQ consumer")
 
     yield
@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI):
         await consumer.stop_consuming()
         logger.info("RabbitMQ consumer stopped successfully")
     except Exception as e:
-        logger.error(f"Error stopping RabbitMQ consumer: {e}", exc_info=True)
+        logger.exception(f"Error stopping RabbitMQ consumer: {e}")
 
 
 def create_app() -> FastAPI:

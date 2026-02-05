@@ -42,8 +42,7 @@ class RabbitMQService:
             port=self.port,
             login=self.username,
             password=self.password,
-            reconnect_interval=1.0,
-        )
+            reconnect_interval=1.0)
 
         logger.info(f"Connected to RabbitMQ at {self.host}:{self.port}")
 
@@ -100,7 +99,7 @@ class RabbitMQService:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to publish plan update message: {e}", exc_info=True)
+            logger.exception(f"Failed to publish plan update message: {e}")
             return False
 
     async def publish_plan_switch(
@@ -157,7 +156,7 @@ class RabbitMQService:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to publish plan switch message: {e}", exc_info=True)
+            logger.exception(f"Failed to publish plan switch message: {e}")
             return False
 
     async def publish_logo_event(
@@ -213,7 +212,7 @@ class RabbitMQService:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to publish logo event message: {e}", exc_info=True)
+            logger.exception(f"Failed to publish logo event message: {e}")
             return False
 
     async def publish_logo_uploaded(

@@ -42,11 +42,11 @@ class TestTrialUpgradeExpiration:
             billing_cycle=BillingCycle.MONTHLY,
             amount=Decimal("0.00"),
             currency="NGN",
-            starts_at=upgrade_date - timedelta(days=14),
+            starts_at=upgrade_date - timedelta(days=30),
             ends_at=trial_end_date,
-            current_period_start=upgrade_date - timedelta(days=14),
+            current_period_start=upgrade_date - timedelta(days=30),
             current_period_end=trial_end_date,
-            trial_starts_at=upgrade_date - timedelta(days=14),
+            trial_starts_at=upgrade_date - timedelta(days=30),
             trial_ends_at=trial_end_date
         )
 
@@ -112,11 +112,11 @@ class TestTrialUpgradeExpiration:
             billing_cycle=BillingCycle.YEARLY,
             amount=Decimal("0.00"),
             currency="NGN",
-            starts_at=upgrade_date - timedelta(days=14),
+            starts_at=upgrade_date - timedelta(days=30),
             ends_at=trial_end_date,
-            current_period_start=upgrade_date - timedelta(days=14),
+            current_period_start=upgrade_date - timedelta(days=30),
             current_period_end=trial_end_date,
-            trial_starts_at=upgrade_date - timedelta(days=14),
+            trial_starts_at=upgrade_date - timedelta(days=30),
             trial_ends_at=trial_end_date
         )
 
@@ -170,11 +170,11 @@ class TestTrialUpgradeExpiration:
             billing_cycle=BillingCycle.MONTHLY,
             amount=Decimal("0.00"),
             currency="NGN",
-            starts_at=upgrade_date - timedelta(days=14),
+            starts_at=upgrade_date - timedelta(days=30),
             ends_at=upgrade_date + timedelta(days=1),
-            current_period_start=upgrade_date - timedelta(days=14),
+            current_period_start=upgrade_date - timedelta(days=30),
             current_period_end=upgrade_date + timedelta(days=1),
-            trial_starts_at=upgrade_date - timedelta(days=14),
+            trial_starts_at=upgrade_date - timedelta(days=30),
             trial_ends_at=None  # Missing trial end date
         )
 
@@ -287,11 +287,11 @@ class TestTrialUpgradeExpiration:
             billing_cycle=BillingCycle.MONTHLY,
             amount=Decimal("29.99"),
             currency="NGN",
-            starts_at=upgrade_date - timedelta(days=14),
+            starts_at=upgrade_date - timedelta(days=30),
             ends_at=trial_end_date,
-            current_period_start=upgrade_date - timedelta(days=14),
+            current_period_start=upgrade_date - timedelta(days=30),
             current_period_end=trial_end_date,
-            trial_starts_at=upgrade_date - timedelta(days=14),
+            trial_starts_at=upgrade_date - timedelta(days=30),
             trial_ends_at=trial_end_date
         )
 

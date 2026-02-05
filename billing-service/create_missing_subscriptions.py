@@ -3,7 +3,7 @@ Create default trial subscriptions for tenants that don't have any subscription.
 
 This script:
 1. Finds all tenants (from authorization_db2) without subscriptions (in billing_db)
-2. Creates a 14-day trial subscription for each tenant
+2. Creates a 30-day trial subscription for each tenant
 3. Sets subscription status based on trial expiration (TRIALING or EXPIRED)
 """
 import os
@@ -95,7 +95,7 @@ def create_trial_subscription(billing_session, tenant_id, tenant_created_at, pla
 
     # Trial starts when tenant was created
     trial_starts_at = tenant_created_at
-    trial_ends_at = tenant_created_at + timedelta(days=14)
+    trial_ends_at = tenant_created_at + timedelta(days=30)
 
     # Subscription period same as trial period
     starts_at = trial_starts_at

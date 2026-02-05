@@ -50,7 +50,7 @@ async def periodic_cleanup():
             logger.info("Cleanup task cancelled, shutting down")
             break
         except Exception as e:
-            logger.error(f"Cleanup task failed: {e}", exc_info=True)
+            logger.exception(f"Cleanup task failed: {e}")
 
 
 @asynccontextmanager
@@ -64,7 +64,7 @@ async def lifespan(app: FastAPI):
         await rabbitmq_publisher.connect()
         logger.info("RabbitMQ publisher connected")
     except Exception as e:
-        logger.error(f"Failed to connect RabbitMQ publisher: {e}", exc_info=True)
+        logger.exception(f"Failed to connect RabbitMQ publisher: {e}")
 
     # Run initial cleanup on startup to remove stale data from previous runs
     from .core.database import SessionLocal
@@ -85,7 +85,7 @@ async def lifespan(app: FastAPI):
         finally:
             db.close()
     except Exception as e:
-        logger.error(f"Startup cleanup failed: {e}", exc_info=True)
+        logger.exception(f"Startup cleanup failed: {e}")
 
     # Start background cleanup task
     cleanup_task = asyncio.create_task(periodic_cleanup())
@@ -105,7 +105,7 @@ async def lifespan(app: FastAPI):
         await rabbitmq_publisher.close()
         logger.info("RabbitMQ publisher closed")
     except Exception as e:
-        logger.error(f"Error closing RabbitMQ publisher: {e}", exc_info=True)
+        logger.exception(f"Error closing RabbitMQ publisher: {e}")
 
     logger.info("Shutting down Workflow Service")
 

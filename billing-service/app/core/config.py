@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # Billing Defaults
     DEFAULT_CURRENCY: str = "NGN"
     SUBSCRIPTION_GRACE_PERIOD_DAYS: int = 3
-    TRIAL_PERIOD_DAYS: int = 14
+    TRIAL_PERIOD_DAYS: int = 30
 
     # Database Pool Settings
     POOL_SIZE: int = 10

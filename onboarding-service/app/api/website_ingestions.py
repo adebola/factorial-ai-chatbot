@@ -390,7 +390,7 @@ async def delete_ingestion(
 
         # Publish usage event to billing service
         try:
-            usage_publisher.publish_website_removed(
+            await usage_publisher.publish_website_removed(
                 tenant_id=claims.tenant_id,
                 website_id=ingestion_id,
                 url=ingestion.base_url
@@ -716,7 +716,7 @@ async def background_website_ingestion(
 
             # Publish usage event to billing service
             try:
-                usage_publisher.publish_website_added(
+                await usage_publisher.publish_website_added(
                     tenant_id=tenant_id,
                     website_id=ingestion_id,
                     url=website_url,
@@ -767,9 +767,7 @@ async def background_website_ingestion(
             ingestion_id=ingestion_id,
             website_url=website_url,
             error=str(e),
-            error_type=type(e).__name__,
-            exc_info=True
-        )
+            error_type=type(e).__name__)
 
         # Update ingestion status to failed
         try:
@@ -793,9 +791,7 @@ async def background_website_ingestion(
                 tenant_id=tenant_id,
                 ingestion_id=ingestion_id,
                 error=str(update_error),
-                error_type=type(update_error).__name__,
-                exc_info=True
-            )
+                error_type=type(update_error).__name__)
     finally:
         # Always close the database session to prevent connection leaks
         db.close()

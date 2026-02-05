@@ -158,18 +158,14 @@ class PaystackClient:
                     )
 
         except httpx.HTTPError as e:
-            logger.error(
+            logger.exception(
                 f"HTTP error initializing transaction: {e}",
-                extra={"reference": reference},
-                exc_info=True
-            )
+                extra={"reference": reference})
             raise PaystackError(f"Failed to connect to Paystack: {str(e)}")
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Unexpected error initializing transaction: {e}",
-                extra={"reference": reference},
-                exc_info=True
-            )
+                extra={"reference": reference})
             raise PaystackError(f"Payment initialization failed: {str(e)}")
 
     @retry(
@@ -238,18 +234,14 @@ class PaystackClient:
                     )
 
         except httpx.HTTPError as e:
-            logger.error(
+            logger.exception(
                 f"HTTP error verifying transaction: {e}",
-                extra={"reference": reference},
-                exc_info=True
-            )
+                extra={"reference": reference})
             raise PaystackError(f"Failed to connect to Paystack: {str(e)}")
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Unexpected error verifying transaction: {e}",
-                extra={"reference": reference},
-                exc_info=True
-            )
+                extra={"reference": reference})
             raise PaystackError(f"Payment verification failed: {str(e)}")
 
     def verify_webhook_signature(self, payload: bytes, signature: str) -> bool:
@@ -382,18 +374,14 @@ class PaystackClient:
                     )
 
         except httpx.HTTPError as e:
-            logger.error(
+            logger.exception(
                 f"HTTP error initiating refund: {e}",
-                extra={"reference": transaction_reference},
-                exc_info=True
-            )
+                extra={"reference": transaction_reference})
             raise PaystackError(f"Failed to connect to Paystack: {str(e)}")
         except Exception as e:
-            logger.error(
+            logger.exception(
                 f"Unexpected error initiating refund: {e}",
-                extra={"reference": transaction_reference},
-                exc_info=True
-            )
+                extra={"reference": transaction_reference})
             raise PaystackError(f"Refund failed: {str(e)}")
 
 

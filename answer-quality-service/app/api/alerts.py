@@ -390,11 +390,9 @@ async def test_alert(
         }
 
     except Exception as e:
-        logger.error(
+        logger.exception(
             f"Test alert failed: {e}",
-            tenant_id=tenant_id,
-            exc_info=True
-        )
+            tenant_id=tenant_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to send test alert: {str(e)}"
@@ -429,11 +427,9 @@ async def check_alerts_now(
         }
 
     except Exception as e:
-        logger.error(
+        logger.exception(
             f"Manual alert check failed: {e}",
-            tenant_id=tenant_id,
-            exc_info=True
-        )
+            tenant_id=tenant_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to check alerts: {str(e)}"

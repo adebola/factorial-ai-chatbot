@@ -178,10 +178,10 @@ class UsageEventConsumer:
                     raise Exception(f"Failed to process event: {event_type}")
 
             except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse event JSON: {e}", exc_info=True)
+                logger.exception(f"Failed to parse event JSON: {e}")
                 # Reject without requeue (malformed message) - auto-handled by context manager
             except Exception as e:
-                logger.error(f"Error processing event: {e}", exc_info=True)
+                logger.exception(f"Error processing event: {e}")
                 # Re-raise to trigger nack+requeue via context manager
                 raise
 
@@ -298,7 +298,7 @@ class UsageEventConsumer:
 
         except Exception as e:
             db.rollback()
-            logger.error(f"Failed to process usage event: {e}", exc_info=True)
+            logger.exception(f"Failed to process usage event: {e}")
             return False
         finally:
             db.close()
@@ -372,7 +372,7 @@ class UsageEventConsumer:
                         )
 
         except Exception as e:
-            logger.error(f"Failed to check/publish limit warning: {e}", exc_info=True)
+            logger.exception(f"Failed to check/publish limit warning: {e}")
 
     async def _publish_limit_warning(
         self,
@@ -440,7 +440,7 @@ class UsageEventConsumer:
             )
 
         except Exception as e:
-            logger.error(f"Failed to publish limit warning: {e}", exc_info=True)
+            logger.exception(f"Failed to publish limit warning: {e}")
 
 
 # Global consumer instance

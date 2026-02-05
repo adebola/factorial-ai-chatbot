@@ -71,7 +71,7 @@ async def submit_feedback(
         return result
 
     except Exception as e:
-        logger.error(f"Error submitting feedback: {e}", exc_info=True)
+        logger.exception(f"Error submitting feedback: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to submit feedback: {str(e)}"
@@ -245,7 +245,7 @@ async def submit_widget_feedback(
         return result
 
     except Exception as e:
-        logger.error(f"Error submitting widget feedback: {e}", exc_info=True)
+        logger.exception(f"Error submitting widget feedback: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to submit feedback: {str(e)}"
