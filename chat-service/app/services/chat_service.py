@@ -163,7 +163,7 @@ class ChatService:
         )
         search_duration = (time.time() - search_start) * 1000
 
-        self.logger.info(f"Search contents: {relevant_docs}")
+        self.logger.debug(f"Search contents: {relevant_docs}")
 
         # Calculate average retrieval score from document relevance
         retrieval_score = self._calculate_retrieval_score(relevant_docs)

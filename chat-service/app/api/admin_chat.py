@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from ..core.database import get_db
 from ..models.chat_models import ChatSession, ChatMessage
 from ..core.logging_config import get_logger
-from ..services.dependencies import validate_token, require_system_admin, TokenClaims
+from ..services.dependencies import validate_token, require_system_admin, require_admin, TokenClaims
 
 router = APIRouter()
 logger = get_logger("chat")
@@ -274,3 +274,307 @@ async def get_chat_stats(
 
     logger.info("System admin retrieved chat stats", stats=stats, filtered_tenant=tenant_id)
     return stats
+
+
+# ============================================================================
+# TENANT ADMIN ROUTES (ROLE_TENANT_ADMIN)
+# These routes are automatically scoped to the authenticated tenant's data
+# Tenant admins cannot access other tenants' data
+# ============================================================================
+
+@router.get("/tenant/sessions", response_model=List[ChatSessionResponse])
+async def list_tenant_chat_sessions(
+    limit: int = Query(50, ge=1, le=500, description="Number of sessions to return"),
+    offset: int = Query(0, ge=0, description="Number of sessions to skip"),
+    active_only: bool = Query(False, description="Filter for active sessions only"),
+    claims: TokenClaims = Depends(require_admin),  # TENANT_ADMIN only
+    db: Session = Depends(get_db)
+):
+    """
+    List chat sessions for the authenticated tenant admin's organization.
+
+    This endpoint is automatically scoped to the tenant from the JWT token.
+    Tenant admins can only view sessions from their own organization.
+
+    Args:
+        limit: Maximum number of sessions to return (1-500)
+        offset: Number of sessions to skip for pagination
+        active_only: If True, only return active sessions
+        claims: JWT token claims (automatically injected)
+        db: Database session (automatically injected)
+
+    Returns:
+        List of chat sessions with metadata and message counts
+
+    Raises:
+        403: If user doesn't have ROLE_TENANT_ADMIN authority
+    """
+    logger.info(
+        f"Tenant admin listing sessions - tenant_id: {claims.tenant_id}, "
+        f"user_id: {claims.user_id}, limit: {limit}, offset: {offset}, "
+        f"active_only: {active_only}"
+    )
+
+    # Build query - ALWAYS filtered by tenant_id from token
+    query = db.query(ChatSession).filter(ChatSession.tenant_id == claims.tenant_id)
+
+    # Apply active filter if requested
+    if active_only:
+        query = query.filter(ChatSession.is_active == True)
+
+    # Order by last activity (most recent first)
+    query = query.order_by(desc(ChatSession.last_activity))
+
+    # Get total count for this tenant
+    total = query.count()
+
+    # Apply pagination
+    sessions = query.offset(offset).limit(limit).all()
+
+    # Get message counts for each session
+    session_responses = []
+    for session in sessions:
+        message_count = db.query(ChatMessage).filter(
+            ChatMessage.session_id == session.session_id
+        ).count()
+
+        session_responses.append(ChatSessionResponse(
+            id=session.id,
+            session_id=session.session_id,
+            user_identifier=session.user_identifier,
+            is_active=session.is_active,
+            created_at=session.created_at,
+            last_activity=session.last_activity,
+            message_count=message_count
+        ))
+
+    logger.info(
+        f"Returning {len(session_responses)} sessions for tenant {claims.tenant_id} "
+        f"(total: {total})"
+    )
+
+    return session_responses
+
+
+@router.get("/tenant/stats")
+async def get_tenant_chat_stats(
+    claims: TokenClaims = Depends(require_admin),  # TENANT_ADMIN only
+    db: Session = Depends(get_db)
+):
+    """
+    Get chat statistics for the authenticated tenant admin's organization.
+
+    This endpoint is automatically scoped to the tenant from the JWT token.
+    Returns aggregated statistics for the tenant's chat sessions and messages.
+
+    Args:
+        claims: JWT token claims (automatically injected)
+        db: Database session (automatically injected)
+
+    Returns:
+        Chat statistics including session counts, message counts, and recent activity
+
+    Raises:
+        403: If user doesn't have ROLE_TENANT_ADMIN authority
+    """
+    logger.info(
+        f"Tenant admin requesting stats - tenant_id: {claims.tenant_id}, "
+        f"user_id: {claims.user_id}"
+    )
+
+    # All queries automatically filtered by tenant_id from token
+    tenant_id = claims.tenant_id
+
+    # Get session statistics
+    total_sessions = db.query(ChatSession).filter(
+        ChatSession.tenant_id == tenant_id
+    ).count()
+
+    active_sessions = db.query(ChatSession).filter(
+        ChatSession.tenant_id == tenant_id,
+        ChatSession.is_active == True
+    ).count()
+
+    # Get message statistics
+    total_messages = db.query(ChatMessage).filter(
+        ChatMessage.tenant_id == tenant_id
+    ).count()
+
+    user_messages = db.query(ChatMessage).filter(
+        ChatMessage.tenant_id == tenant_id,
+        ChatMessage.message_type == "user"
+    ).count()
+
+    assistant_messages = db.query(ChatMessage).filter(
+        ChatMessage.tenant_id == tenant_id,
+        ChatMessage.message_type == "assistant"
+    ).count()
+
+    # Get recent activity (last 24 hours)
+    from datetime import timedelta
+    yesterday = datetime.utcnow() - timedelta(days=1)
+    recent_messages = db.query(ChatMessage).filter(
+        ChatMessage.tenant_id == tenant_id,
+        ChatMessage.created_at >= yesterday
+    ).count()
+
+    stats = {
+        "total_sessions": total_sessions,
+        "active_sessions": active_sessions,
+        "total_messages": total_messages,
+        "user_messages": user_messages,
+        "assistant_messages": assistant_messages,
+        "recent_messages_24h": recent_messages,
+        "tenant_id": tenant_id
+    }
+
+    logger.info(
+        f"Returning stats for tenant {tenant_id}: "
+        f"sessions={total_sessions}, messages={total_messages}"
+    )
+
+    return stats
+
+
+@router.get("/tenant/sessions/{session_id}", response_model=ChatSessionWithMessagesResponse)
+async def get_tenant_chat_session(
+    session_id: str,
+    message_limit: int = Query(100, ge=1, le=1000, description="Max messages to return"),
+    claims: TokenClaims = Depends(require_admin),  # TENANT_ADMIN only
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific chat session with its messages for tenant admin.
+
+    This endpoint verifies the session belongs to the authenticated tenant
+    before returning data. Tenant admins can only access their own sessions.
+
+    Args:
+        session_id: The session ID to retrieve
+        message_limit: Maximum number of messages to return (1-1000)
+        claims: JWT token claims (automatically injected)
+        db: Database session (automatically injected)
+
+    Returns:
+        Complete session with messages
+
+    Raises:
+        403: If user doesn't have ROLE_TENANT_ADMIN authority
+        404: If session not found or doesn't belong to tenant
+    """
+    logger.info(
+        f"Tenant admin requesting session - session_id: {session_id}, "
+        f"tenant_id: {claims.tenant_id}, user_id: {claims.user_id}"
+    )
+
+    # Get session and verify it belongs to this tenant
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.tenant_id == claims.tenant_id  # Security check
+    ).first()
+
+    if not session:
+        logger.warning(
+            f"Session not found or access denied - session_id: {session_id}, "
+            f"tenant_id: {claims.tenant_id}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found or access denied"
+        )
+
+    # Get messages for this session
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id
+    ).order_by(ChatMessage.created_at).limit(message_limit).all()
+
+    # Get message count
+    message_count = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id
+    ).count()
+
+    # Build response
+    session_response = ChatSessionResponse(
+        id=session.id,
+        session_id=session.session_id,
+        user_identifier=session.user_identifier,
+        is_active=session.is_active,
+        created_at=session.created_at,
+        last_activity=session.last_activity,
+        message_count=message_count
+    )
+
+    message_responses = [ChatMessageResponse.from_orm(message) for message in messages]
+
+    logger.info(
+        f"Returning session {session_id} with {len(message_responses)} messages "
+        f"for tenant {claims.tenant_id}"
+    )
+
+    return ChatSessionWithMessagesResponse(
+        session=session_response,
+        messages=message_responses
+    )
+
+
+@router.get("/tenant/sessions/{session_id}/messages", response_model=List[ChatMessageResponse])
+async def get_tenant_session_messages(
+    session_id: str,
+    limit: int = Query(100, ge=1, le=1000, description="Number of messages to return"),
+    offset: int = Query(0, ge=0, description="Number of messages to skip"),
+    claims: TokenClaims = Depends(require_admin),  # TENANT_ADMIN only
+    db: Session = Depends(get_db)
+):
+    """
+    Get messages for a specific chat session (tenant-scoped).
+
+    This endpoint verifies the session belongs to the authenticated tenant
+    before returning messages. Useful for pagination of messages.
+
+    Args:
+        session_id: The session ID to retrieve messages for
+        limit: Maximum number of messages to return (1-1000)
+        offset: Number of messages to skip for pagination
+        claims: JWT token claims (automatically injected)
+        db: Database session (automatically injected)
+
+    Returns:
+        List of chat messages ordered by creation time
+
+    Raises:
+        403: If user doesn't have ROLE_TENANT_ADMIN authority
+        404: If session not found or doesn't belong to tenant
+    """
+    logger.info(
+        f"Tenant admin requesting messages - session_id: {session_id}, "
+        f"tenant_id: {claims.tenant_id}, user_id: {claims.user_id}, "
+        f"limit: {limit}, offset: {offset}"
+    )
+
+    # Verify session belongs to this tenant
+    session = db.query(ChatSession).filter(
+        ChatSession.session_id == session_id,
+        ChatSession.tenant_id == claims.tenant_id  # Security check
+    ).first()
+
+    if not session:
+        logger.warning(
+            f"Session not found or access denied - session_id: {session_id}, "
+            f"tenant_id: {claims.tenant_id}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Session {session_id} not found or access denied"
+        )
+
+    # Get messages for this session
+    messages = db.query(ChatMessage).filter(
+        ChatMessage.session_id == session_id
+    ).order_by(ChatMessage.created_at).offset(offset).limit(limit).all()
+
+    logger.info(
+        f"Returning {len(messages)} messages for session {session_id} "
+        f"(tenant: {claims.tenant_id})"
+    )
+
+    return [ChatMessageResponse.from_orm(message) for message in messages]
