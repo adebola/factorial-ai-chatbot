@@ -87,6 +87,59 @@ public class TenantService {
         return apiKey.toString();
     }
 
+    /**
+     * DB-only tenant insert. No side effects (no RabbitMQ, no Redis cache, no settings).
+     * Designed to participate in an outer transaction managed by RegistrationService.
+     */
+    public Tenant insertTenant(String name, String domain) {
+        // Check if tenant already exists (only if domain is provided)
+        if (domain != null && tenantMapper.findByDomain(domain) != null) {
+            throw new IllegalArgumentException("A tenant with this domain already exists");
+        }
+
+        if (tenantMapper.findByName(name) != null) {
+            throw new IllegalArgumentException("A tenant with this name already exists");
+        }
+
+        // Generate unique API key
+        String apiKey = generateApiKey();
+        while (tenantMapper.findByApiKey(apiKey) != null) {
+            apiKey = generateApiKey();
+        }
+
+        // Get free-tier plan ID from billing service
+        String freePlanId = null;
+        try {
+            freePlanId = billingServiceClient.getFreeTierPlanId();
+            log.info("Retrieved free-tier plan ID from billing service: {} for new tenant", freePlanId);
+        } catch (Exception e) {
+            log.warn("Failed to retrieve free-tier plan ID from billing service, tenant will be created without plan: {}", e.getMessage());
+        }
+
+        // Create new tenant
+        Tenant tenant = Tenant.builder()
+                .id(UUID.randomUUID().toString())
+                .name(name.trim())
+                .domain(domain != null ? domain.toLowerCase().trim() : null)
+                .apiKey(apiKey)
+                .planId(freePlanId)
+                .isActive(true)
+                .createdAt(OffsetDateTime.now())
+                .updatedAt(OffsetDateTime.now())
+                .build();
+
+        int result = tenantMapper.insert(tenant);
+        if (result <= 0) {
+            throw new RuntimeException("Failed to create tenant");
+        }
+
+        log.info("Inserted tenant record: id={}, name={}, domain={}, apiKey={}",
+                tenant.getId(), tenant.getName(), tenant.getDomain(),
+                apiKey.substring(0, 8) + "...");
+
+        return tenant;
+    }
+
     @Transactional
     public Tenant createTenant(String name, String domain, String description) {
         // Check if tenant already exists (only if domain is provided)
@@ -131,10 +184,14 @@ public class TenantService {
             throw new RuntimeException("Failed to create tenant");
         }
 
-        rabbitTemplate.convertAndSend(exchange, widgetRoutingKey, tenant.getId());
-        
-        log.info("Created new tenant: id={}, name={}, domain={}, apiKey={}", 
-                tenant.getId(), tenant.getName(), tenant.getDomain(), 
+        try {
+            rabbitTemplate.convertAndSend(exchange, widgetRoutingKey, tenant.getId());
+        } catch (Exception e) {
+            log.warn("Failed to publish widget generation event for tenant: {} - {}", tenant.getId(), e.getMessage());
+        }
+
+        log.info("Created new tenant: id={}, name={}, domain={}, apiKey={}",
+                tenant.getId(), tenant.getName(), tenant.getDomain(),
                 apiKey.substring(0, 8) + "..." // Log only first 8 characters for security
         );
         

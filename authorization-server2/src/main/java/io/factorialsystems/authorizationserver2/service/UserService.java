@@ -69,6 +69,64 @@ public class UserService {
         return user;
     }
     
+    /**
+     * DB-only user insert. No side effects (no Redis cache, no email, no verification token).
+     * Designed to participate in an outer transaction managed by RegistrationService.
+     */
+    public User insertUser(String tenantId, String username, String email, String password,
+                           String firstName, String lastName) {
+        // Check if user already exists
+        if (userMapper.findByUsername(username) != null) {
+            throw new IllegalArgumentException("A user with this username already exists");
+        }
+
+        if (userMapper.findByEmail(email) != null) {
+            throw new IllegalArgumentException("A user with this email already exists");
+        }
+
+        User user = User.builder()
+                .id(UUID.randomUUID().toString())
+                .tenantId(tenantId)
+                .username(username.toLowerCase().trim())
+                .email(email.toLowerCase().trim())
+                .password(password != null ? passwordEncoder.encode(password) : null)
+                .firstName(firstName != null ? firstName.trim() : null)
+                .lastName(lastName != null ? lastName.trim() : null)
+                .isActive(false)
+                .isEmailVerified(false)
+                .createdAt(OffsetDateTime.now())
+                .updatedAt(OffsetDateTime.now())
+                .build();
+
+        int result = userMapper.insert(user);
+        if (result <= 0) {
+            throw new RuntimeException("Failed to create user");
+        }
+
+        log.info("Inserted user record: id={}, username={}, email={}, tenant={}",
+                user.getId(), user.getUsername(), user.getEmail(), user.getTenantId());
+
+        return user;
+    }
+
+    /**
+     * DB-only role assignment. No side effects.
+     * Designed to participate in an outer transaction managed by RegistrationService.
+     */
+    public void assignRole(String userId, String roleName) {
+        String roleId = userMapper.findRoleIdByName(roleName);
+        if (roleId == null) {
+            throw new RuntimeException(roleName + " role not found in the system");
+        }
+
+        int roleResult = userMapper.insertUserRole(userId, roleId);
+        if (roleResult <= 0) {
+            throw new RuntimeException("Failed to assign " + roleName + " role to user");
+        }
+
+        log.info("Assigned role {} to user: {}", roleName, userId);
+    }
+
     @Transactional
     public User createUser(String tenantId, String username, String email, String password,
                           String firstName, String lastName, boolean isEmailVerified) {
