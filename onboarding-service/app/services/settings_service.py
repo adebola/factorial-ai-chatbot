@@ -197,10 +197,11 @@ class SettingsService:
             # Send a message to OAuth2 server to update tenant settings logo URL
             try:
                 from .rabbitmq_service import rabbitmq_service
-                rabbitmq_service.publish_logo_uploaded(
+                import asyncio
+                asyncio.ensure_future(rabbitmq_service.publish_logo_uploaded(
                     tenant_id=tenant_id,
                     logo_url=public_logo_url
-                )
+                ))
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.info(

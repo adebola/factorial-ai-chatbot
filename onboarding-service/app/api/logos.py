@@ -43,7 +43,7 @@ async def upload_logo(
 
         # Publish logo uploaded event to RabbitMQ with permanent URL
         try:
-            rabbitmq_service.publish_logo_uploaded(
+            await rabbitmq_service.publish_logo_uploaded(
                 tenant_id=tenant_id,
                 logo_url=public_logo_url
             )
