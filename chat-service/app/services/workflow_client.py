@@ -1,5 +1,6 @@
 import aiohttp
 import os
+import redis.asyncio as aioredis
 from typing import Dict, Any, Optional
 from ..core.logging_config import get_logger
 
@@ -9,10 +10,99 @@ logger = get_logger("workflow_client")
 class WorkflowClient:
     """Client for communicating with the workflow service"""
 
+    _session: Optional[aiohttp.ClientSession] = None
+    _redis: Optional[aioredis.Redis] = None
+
     def __init__(self, api_key: str = None):
         self.workflow_service_url = os.environ.get("WORKFLOW_SERVICE_URL", "http://localhost:8002")
         self.api_base = f"{self.workflow_service_url}/api/v1"
         self.api_key = api_key  # Tenant API key for service-to-service auth
+
+    @classmethod
+    async def _get_session(cls) -> aiohttp.ClientSession:
+        """Get or create a shared aiohttp session with connection pooling."""
+        if cls._session is None or cls._session.closed:
+            connector = aiohttp.TCPConnector(limit=10)
+            cls._session = aiohttp.ClientSession(connector=connector)
+        return cls._session
+
+    @classmethod
+    async def _get_redis(cls) -> aioredis.Redis:
+        """Get or create a shared async Redis client."""
+        if cls._redis is None:
+            redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379")
+            cls._redis = aioredis.from_url(redis_url, decode_responses=True)
+        return cls._redis
+
+    @classmethod
+    async def close(cls):
+        """Close the shared aiohttp session and Redis client. Call during app shutdown."""
+        if cls._session and not cls._session.closed:
+            await cls._session.close()
+            cls._session = None
+        if cls._redis:
+            await cls._redis.close()
+            cls._redis = None
+
+    async def has_workflows(self, tenant_id: str) -> bool:
+        """
+        Check if a tenant has any active workflows, using Redis cache.
+
+        Cache strategy:
+        - Redis key: workflow:has_workflows:{tenant_id}
+        - Value: "1" (has workflows) or "0" (no workflows)
+        - TTL: 300s (5 minutes) as safety net
+        - Invalidated instantly via RabbitMQ when workflows change
+        """
+        cache_key = f"workflow:has_workflows:{tenant_id}"
+        try:
+            r = await self._get_redis()
+            cached = await r.get(cache_key)
+            if cached is not None:
+                return cached == "1"
+        except Exception as e:
+            logger.warning(f"Redis cache check failed for has_workflows: {e}")
+
+        # Cache miss — call workflow service
+        try:
+            session = await self._get_session()
+            headers = {}
+            if self.api_key:
+                headers["X-API-Key"] = self.api_key
+
+            async with session.get(
+                f"{self.api_base}/workflows/exists",
+                params={"tenant_id": tenant_id},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=3.0)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    exists = result.get("exists", False)
+
+                    # Cache the result with 5-minute TTL
+                    try:
+                        r = await self._get_redis()
+                        await r.setex(cache_key, 300, "1" if exists else "0")
+                    except Exception as e:
+                        logger.warning(f"Failed to cache has_workflows result: {e}")
+
+                    return exists
+                else:
+                    logger.warning(
+                        f"Workflow exists check returned {response.status}",
+                        extra={"tenant_id": tenant_id}
+                    )
+                    # On error, assume workflows might exist to avoid skipping
+                    return True
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to check workflow existence: {e}",
+                extra={"tenant_id": tenant_id}
+            )
+            # On error, assume workflows might exist to avoid skipping
+            return True
 
     async def check_triggers(
         self,
@@ -36,37 +126,37 @@ class WorkflowClient:
             if self.api_key:
                 headers["X-API-Key"] = self.api_key
 
-            async with aiohttp.ClientSession() as session:
-                logger.info(f"Calling workflow service: {self.api_base}/triggers/check with payload: {payload}")
-                async with session.post(
-                    f"{self.api_base}/triggers/check",
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=5.0)
-                ) as response:
-                    logger.info(f"Workflow service response status: {response.status}")
-                    if response.status == 200:
-                        result = await response.json()
+            session = await self._get_session()
+            logger.info(f"Calling workflow service: {self.api_base}/triggers/check with payload: {payload}")
+            async with session.post(
+                f"{self.api_base}/triggers/check",
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=5.0)
+            ) as response:
+                logger.info(f"Workflow service response status: {response.status}")
+                if response.status == 200:
+                    result = await response.json()
 
-                        logger.info(
-                            "Workflow trigger check completed",
-                            tenant_id=tenant_id,
-                            session_id=session_id,
-                            triggered=result.get("triggered", False),
-                            workflow_id=result.get("workflow_id"),
-                            workflow_name=result.get("workflow_name")
-                        )
+                    logger.info(
+                        "Workflow trigger check completed",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        triggered=result.get("triggered", False),
+                        workflow_id=result.get("workflow_id"),
+                        workflow_name=result.get("workflow_name")
+                    )
 
-                        return result
-                    else:
-                        logger.warning(
-                            "Workflow service returned error",
-                            tenant_id=tenant_id,
-                            session_id=session_id,
-                            status_code=response.status,
-                            response_text=await response.text()
-                        )
-                        return {"triggered": False}
+                    return result
+                else:
+                    logger.warning(
+                        "Workflow service returned error",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        status_code=response.status,
+                        response_text=await response.text()
+                    )
+                    return {"triggered": False}
 
         except aiohttp.ClientTimeout:
             logger.warning(
@@ -107,35 +197,35 @@ class WorkflowClient:
             if self.api_key:
                 headers["X-API-Key"] = self.api_key
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.api_base}/executions/start",
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10.0)
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
+            session = await self._get_session()
+            async with session.post(
+                f"{self.api_base}/executions/start",
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10.0)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
 
-                        logger.info(
-                            "Workflow execution started",
-                            tenant_id=tenant_id,
-                            workflow_id=workflow_id,
-                            session_id=session_id,
-                            execution_id=result.get("execution_id")
-                        )
+                    logger.info(
+                        "Workflow execution started",
+                        tenant_id=tenant_id,
+                        workflow_id=workflow_id,
+                        session_id=session_id,
+                        execution_id=result.get("execution_id")
+                    )
 
-                        return result
-                    else:
-                        logger.error(
-                            "Failed to start workflow execution",
-                            tenant_id=tenant_id,
-                            workflow_id=workflow_id,
-                            session_id=session_id,
-                            status_code=response.status,
-                            response_text=await response.text()
-                        )
-                        return {"error": "Failed to start workflow execution"}
+                    return result
+                else:
+                    logger.error(
+                        "Failed to start workflow execution",
+                        tenant_id=tenant_id,
+                        workflow_id=workflow_id,
+                        session_id=session_id,
+                        status_code=response.status,
+                        response_text=await response.text()
+                    )
+                    return {"error": "Failed to start workflow execution"}
 
         except Exception as e:
             logger.error(
@@ -169,34 +259,34 @@ class WorkflowClient:
             if self.api_key:
                 headers["X-API-Key"] = self.api_key
 
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{self.api_base}/executions/step",
-                    json=payload,
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=10.0)
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
+            session = await self._get_session()
+            async with session.post(
+                f"{self.api_base}/executions/step",
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10.0)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
 
-                        logger.info(
-                            "Workflow step executed",
-                            tenant_id=tenant_id,
-                            session_id=session_id,
-                            step_type=result.get("step_type"),
-                            completed=result.get("completed", False)
-                        )
+                    logger.info(
+                        "Workflow step executed",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        step_type=result.get("step_type"),
+                        completed=result.get("completed", False)
+                    )
 
-                        return result
-                    else:
-                        logger.error(
-                            "Failed to execute workflow step",
-                            tenant_id=tenant_id,
-                            session_id=session_id,
-                            status_code=response.status,
-                            response_text=await response.text()
-                        )
-                        return {"error": "Failed to execute workflow step"}
+                    return result
+                else:
+                    logger.error(
+                        "Failed to execute workflow step",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        status_code=response.status,
+                        response_text=await response.text()
+                    )
+                    return {"error": "Failed to execute workflow step"}
 
         except Exception as e:
             logger.error(
@@ -219,35 +309,35 @@ class WorkflowClient:
             if self.api_key:
                 headers["X-API-Key"] = self.api_key
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{self.api_base}/executions/session/{session_id}/state",
-                    params={"tenant_id": tenant_id},
-                    headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=5.0)
-                ) as response:
-                    if response.status == 200:
-                        result = await response.json()
+            session = await self._get_session()
+            async with session.get(
+                f"{self.api_base}/executions/session/{session_id}/state",
+                params={"tenant_id": tenant_id},
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=5.0)
+            ) as response:
+                if response.status == 200:
+                    result = await response.json()
 
-                        logger.debug(
-                            "Retrieved workflow state",
-                            tenant_id=tenant_id,
-                            session_id=session_id,
-                            has_active_workflow=bool(result.get("workflow_id"))
-                        )
+                    logger.debug(
+                        "Retrieved workflow state",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        has_active_workflow=bool(result.get("workflow_id"))
+                    )
 
-                        return result
-                    elif response.status == 404:
-                        # No active workflow for this session
-                        return None
-                    else:
-                        logger.warning(
-                            "Failed to get workflow state",
-                            tenant_id=tenant_id,
-                            session_id=session_id,
-                            status_code=response.status
-                        )
-                        return None
+                    return result
+                elif response.status == 404:
+                    # No active workflow for this session
+                    return None
+                else:
+                    logger.warning(
+                        "Failed to get workflow state",
+                        tenant_id=tenant_id,
+                        session_id=session_id,
+                        status_code=response.status
+                    )
+                    return None
 
         except Exception as e:
             logger.error(

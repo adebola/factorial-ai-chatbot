@@ -1,3 +1,4 @@
+import asyncio
 import time
 from sqlalchemy.orm import Session
 from typing import Dict, List, Any, Optional
@@ -32,7 +33,7 @@ class ChatService:
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set. Please set it in your .env file.")
         
-        self.openai_client = OpenAI(api_key=openai_api_key)
+        self.openai_client = OpenAI(api_key=openai_api_key, timeout=60.0, max_retries=2)
         self.vector_store = TenantVectorStore()
         self.redis_client = redis.from_url(os.environ["REDIS_URL"])
         self.tenant_client = TenantClient()
@@ -46,9 +47,11 @@ class ChatService:
 
         Guidelines:
         - Answer based on the provided context when possible
-        - If you can't find the answer in the context, say so politely
+        - When the context contains specific items (job listings, services, products, events, etc.), enumerate and list them with their details rather than giving a generic summary
+        - Always cite specific details, names, requirements, and facts found in the context
+        - If you truly cannot find relevant information in the context, say so politely
         - Be conversational and helpful
-        - Reference specific sources when possible
+        - Never say information is unavailable if the context contains relevant details, even if partial
         """
 
         # Intent-based content type mappings for smart filtering
@@ -114,16 +117,69 @@ class ChatService:
         #     return self.intent_patterns[top_intent]['content_types']
         # return None
 
+    async def pre_search(
+        self,
+        tenant_id: str,
+        user_message: str,
+        session_id: str,
+        tenant: Dict = None
+    ) -> Dict[str, Any]:
+        """
+        Run vector search + history fetch ahead of time (for parallelization).
+
+        Returns a dict with relevant_docs, conversation_history, tenant,
+        content_type_filter, and search_duration_ms.
+        """
+        # Use provided tenant or fetch from service
+        if not tenant:
+            tenant = await self.tenant_client.get_tenant_by_id(tenant_id)
+        if not tenant:
+            raise ValueError("Tenant not found")
+
+        content_type_filter = self._detect_content_type_intent(user_message)
+
+        loop = asyncio.get_event_loop()
+        search_start = time.time()
+
+        relevant_docs_future = loop.run_in_executor(
+            None,
+            lambda: self.vector_store.search_similar(
+                tenant_id=tenant_id,
+                query=user_message,
+                k=10,
+                content_types=content_type_filter
+            )
+        )
+        history_future = loop.run_in_executor(
+            None,
+            lambda: self._get_conversation_history(session_id)
+        )
+
+        relevant_docs, conversation_history = await asyncio.gather(
+            relevant_docs_future, history_future
+        )
+        search_duration = (time.time() - search_start) * 1000
+
+        return {
+            "relevant_docs": relevant_docs,
+            "conversation_history": conversation_history,
+            "tenant": tenant,
+            "content_type_filter": content_type_filter,
+            "search_duration_ms": search_duration
+        }
+
     async def generate_response(
         self,
         tenant_id: str,
         user_message: str,
-        session_id: str
+        session_id: str,
+        tenant: Dict = None,
+        pre_search_result: Dict = None
     ) -> Dict[str, Any]:
         """Generate AI response with RAG and conversation memory"""
-        
+
         start_time = time.time()
-        
+
         # Log incoming message
         log_chat_message(
             direction="incoming",
@@ -131,37 +187,58 @@ class ChatService:
             session_id=session_id,
             message_length=len(user_message)
         )
-        
-        # Get tenant info from the onboarding service
-        tenant = await self.tenant_client.get_tenant_by_id(tenant_id)
-        if not tenant:
-            self.logger.error(
-                "Tenant not found",
-                tenant_id=tenant_id,
-                session_id=session_id
+
+        if pre_search_result:
+            # Use pre-computed search results (from parallelized path)
+            relevant_docs = pre_search_result["relevant_docs"]
+            conversation_history = pre_search_result["conversation_history"]
+            tenant = pre_search_result["tenant"]
+            content_type_filter = pre_search_result["content_type_filter"]
+            search_duration = pre_search_result["search_duration_ms"]
+        else:
+            # Use provided tenant or fetch from service
+            if not tenant:
+                tenant = await self.tenant_client.get_tenant_by_id(tenant_id)
+            if not tenant:
+                self.logger.error(
+                    "Tenant not found",
+                    tenant_id=tenant_id,
+                    session_id=session_id
+                )
+                raise ValueError("Tenant not found")
+
+            # Detect content type intent for smart filtering
+            content_type_filter = self._detect_content_type_intent(user_message)
+
+            # Run vector search and conversation history fetch in parallel
+            # Both are sync/blocking, so we offload to the thread pool
+            loop = asyncio.get_event_loop()
+            search_start = time.time()
+
+            relevant_docs_future = loop.run_in_executor(
+                None,
+                lambda: self.vector_store.search_similar(
+                    tenant_id=tenant_id,
+                    query=user_message,
+                    k=10,
+                    content_types=content_type_filter
+                )
             )
-            raise ValueError("Tenant not found")
-        
+            history_future = loop.run_in_executor(
+                None,
+                lambda: self._get_conversation_history(session_id)
+            )
+
+            relevant_docs, conversation_history = await asyncio.gather(
+                relevant_docs_future, history_future
+            )
+            search_duration = (time.time() - search_start) * 1000
+
         log_tenant_operation(
             operation="tenant_lookup",
             tenant_id=tenant_id,
             tenant_name=tenant.get('name', 'Unknown')
         )
-
-        # Detect content type intent for smart filtering
-        content_type_filter = self._detect_content_type_intent(user_message)
-
-        # Search relevant documents with optional content type filtering
-        # Increased k from 4 to 10 to provide more context to AI, especially important
-        # with categorized content to ensure comprehensive coverage
-        search_start = time.time()
-        relevant_docs = self.vector_store.search_similar(
-            tenant_id=tenant_id,
-            query=user_message,
-            k=10,  # Increased from 4 to 10 for better accuracy
-            content_types=content_type_filter
-        )
-        search_duration = (time.time() - search_start) * 1000
 
         self.logger.debug(f"Search contents: {relevant_docs}")
 
@@ -174,7 +251,7 @@ class ChatService:
             results_count=len(relevant_docs),
             duration_ms=search_duration
         )
-        
+
         # Build context from relevant documents
         context_parts = []
         sources = []
@@ -199,9 +276,6 @@ class ChatService:
 
         # Convert sets to lists for JSON serialization
         categorization_metadata['content_types'] = list(categorization_metadata['content_types'])
-        
-        # Get conversation history
-        conversation_history = self._get_conversation_history(session_id)
         
         # Build messages for OpenAI API
         messages = [
@@ -231,10 +305,11 @@ class ChatService:
         try:
             ai_start = time.time()
             response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=messages,
                 temperature=0.7,
-                max_tokens=1500
+                max_tokens=1500,
+                timeout=30.0
             )
             response_content = response.choices[0].message.content
             ai_duration = (time.time() - ai_start) * 1000

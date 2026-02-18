@@ -29,8 +29,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 engine_vector = create_engine(
     VECTOR_DATABASE_URL,
     poolclass=QueuePool,
-    pool_size=5,
-    max_overflow=10,
+    pool_size=10,
+    max_overflow=20,
     pool_pre_ping=True,
     pool_recycle=300,  # Recycle connections every 5 minutes
     pool_timeout=30,   # Wait max 30 seconds for connection

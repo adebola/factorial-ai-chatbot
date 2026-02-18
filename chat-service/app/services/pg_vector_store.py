@@ -2,11 +2,12 @@ import os
 import hashlib
 from typing import List, Dict, Any, Tuple
 from langchain_core.documents import Document
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker, Session
 from openai import OpenAI
 
 from ..core.config import settings
+from ..core.database import engine_vector
 from ..core.logging_config import get_logger
 
 
@@ -18,6 +19,9 @@ class PgVectorStore:
     All write operations (add_documents, delete_documents) are handled by the onboarding service.
     """
 
+    # Maximum cosine distance for results to be considered relevant
+    MAX_DISTANCE = 1.5
+
     def __init__(self):
         self.logger = get_logger("pg_vector_store")
 
@@ -26,10 +30,10 @@ class PgVectorStore:
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set.")
 
-        self.openai_client = OpenAI(api_key=openai_api_key)
+        self.openai_client = OpenAI(api_key=openai_api_key, timeout=60.0, max_retries=2)
 
-        # Database connection
-        self.engine = create_engine(os.environ['VECTOR_DATABASE_URL'])
+        # Reuse shared vector database engine from database.py (with connection pooling)
+        self.engine = engine_vector
         self.SessionLocal = sessionmaker(bind=self.engine)
 
         self.logger.info("PgVectorStore initialized successfully")
@@ -39,7 +43,8 @@ class PgVectorStore:
         try:
             response = self.openai_client.embeddings.create(
                 model="text-embedding-ada-002",
-                input=texts
+                input=texts,
+                timeout=15.0
             )
             return [item.embedding for item in response.data]
         except Exception as e:
@@ -76,12 +81,16 @@ class PgVectorStore:
 
             session = self.SessionLocal()
             try:
-                # Build dynamic WHERE clause for filters
-                where_clauses = ["tenant_id = :tenant_id"]
+                # Build dynamic WHERE clause for filters (includes distance threshold)
+                where_clauses = [
+                    "tenant_id = :tenant_id",
+                    "(embedding <=> :query_embedding) < :max_distance"
+                ]
                 params = {
                     "tenant_id": tenant_id,
                     "query_embedding": str(query_embedding),
-                    "k": k
+                    "k": k,
+                    "max_distance": self.MAX_DISTANCE
                 }
 
                 # Add category filter if provided

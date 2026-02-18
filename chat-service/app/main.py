@@ -20,6 +20,7 @@ from .core.logging_config import (
     log_api_response
 )
 from .services.limit_warning_consumer import limit_warning_consumer
+from .services.workflow_event_consumer import workflow_event_consumer
 from .services.event_publisher import event_publisher
 from .services.rabbitmq_diagnostics import log_diagnostics
 
@@ -58,6 +59,16 @@ async def lifespan(app: FastAPI):
         logger.info("Running RabbitMQ connection diagnostics...")
         log_diagnostics()
 
+    # Start RabbitMQ workflow event consumer
+    workflow_consumer_started = False
+    try:
+        await workflow_event_consumer.start()
+        workflow_consumer_started = True
+        logger.info("Workflow event consumer started successfully")
+    except Exception as e:
+        logger.exception(f"Failed to start workflow event consumer: {e}")
+        logger.warning("Chat service will continue without workflow event consumer")
+
     # Connect event publisher (aio-pika with automatic reconnection)
     publisher_connected = False
     try:
@@ -75,12 +86,14 @@ async def lifespan(app: FastAPI):
     # Log RabbitMQ connection summary
     rabbitmq_status = {
         "event_publisher": "connected" if publisher_connected else "disconnected",
-        "limit_warning_consumer": "started" if consumer_started else "not_started"
+        "limit_warning_consumer": "started" if consumer_started else "not_started",
+        "workflow_event_consumer": "started" if workflow_consumer_started else "not_started"
     }
     logger.info(
         f"RabbitMQ Integration Status: "
         f"Publisher={rabbitmq_status['event_publisher']}, "
-        f"Consumer={rabbitmq_status['limit_warning_consumer']}",
+        f"LimitConsumer={rabbitmq_status['limit_warning_consumer']}, "
+        f"WorkflowConsumer={rabbitmq_status['workflow_event_consumer']}",
         extra=rabbitmq_status
     )
 
@@ -97,6 +110,21 @@ async def lifespan(app: FastAPI):
         logger.info("Limit warning consumer stopped successfully")
     except Exception as e:
         logger.exception(f"Error stopping limit warning consumer: {e}")
+
+    # Stop workflow event consumer
+    try:
+        await workflow_event_consumer.stop()
+        logger.info("Workflow event consumer stopped successfully")
+    except Exception as e:
+        logger.exception(f"Error stopping workflow event consumer: {e}")
+
+    # Close WorkflowClient shared session
+    from .services.workflow_client import WorkflowClient
+    try:
+        await WorkflowClient.close()
+        logger.info("WorkflowClient session closed successfully")
+    except Exception as e:
+        logger.exception(f"Error closing WorkflowClient session: {e}")
 
     # Close event publisher
     try:
