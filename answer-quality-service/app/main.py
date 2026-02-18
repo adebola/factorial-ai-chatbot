@@ -83,10 +83,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Configure CORS
+# CORS is handled by the Spring Cloud Gateway - no need to configure here
 # app.add_middleware(
 #     CORSMiddleware,
-#     allow_origins=["*"],  # Configure appropriately for production
+#     allow_origins=["*"],
 #     allow_credentials=True,
 #     allow_methods=["*"],
 #     allow_headers=["*"],
