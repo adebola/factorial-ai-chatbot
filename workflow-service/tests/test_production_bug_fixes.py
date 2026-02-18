@@ -150,7 +150,7 @@ class TestProductionBugScenario:
         return WorkflowDefinition(
             name="Create Account",
             description="Account creation workflow that was stuck in production",
-            trigger={"type": "manual"},
+            trigger={"type": "keyword", "keywords": ["test"]},
             steps=steps,
             variables={},
             settings={}
@@ -175,7 +175,7 @@ class TestProductionBugScenario:
         definition = WorkflowDefinition(
             name="Bug Reproduction: Choice->Message->Action",
             description="Reproduces the exact bug pattern from production",
-            trigger={"type": "manual"},
+            trigger={"type": "keyword", "keywords": ["test"]},
             steps=[
                 WorkflowStep(
                     id="marital_status",
@@ -294,7 +294,7 @@ class TestProductionBugScenario:
         definition = WorkflowDefinition(
             name="Counter Test",
             description="Verify step counter increments correctly",
-            trigger={"type": "manual"},
+            trigger={"type": "keyword", "keywords": ["test"]},
             steps=[
                 WorkflowStep(
                     id="step1",
@@ -387,7 +387,7 @@ class TestProductionBugScenario:
         definition = WorkflowDefinition(
             name="Simple Message+Action Test",
             description="Test MESSAGE doesn't block ACTION",
-            trigger={"type": "manual"},
+            trigger={"type": "keyword", "keywords": ["test"]},
             steps=[
                 WorkflowStep(
                     id="msg1",

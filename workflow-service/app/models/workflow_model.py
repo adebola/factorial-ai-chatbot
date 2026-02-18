@@ -18,7 +18,6 @@ class TriggerType(enum.Enum):
     MESSAGE = "message"
     INTENT = "intent"
     KEYWORD = "keyword"
-    MANUAL = "manual"
 
 
 class Workflow(Base):

@@ -17,6 +17,8 @@ from ..core.exceptions import (
 )
 from ..core.logging_config import get_logger
 from .workflow_parser import WorkflowParser
+from .intent_embedding_service import IntentEmbeddingService
+from .rabbitmq_publisher import rabbitmq_publisher
 
 logger = get_logger("workflow_service")
 
@@ -65,6 +67,19 @@ class WorkflowService:
                 updated_by=user_id
             )
 
+            # Pre-compute intent embeddings at write-time
+            if workflow.trigger_type in ("intent", TriggerType.INTENT):
+                intent_patterns = (workflow.trigger_config or {}).get("intent_patterns", [])
+                if intent_patterns:
+                    try:
+                        embedding_service = IntentEmbeddingService()
+                        embeddings = embedding_service.generate_pattern_embeddings(intent_patterns)
+                        trigger_config = workflow.trigger_config or {}
+                        trigger_config["intent_embeddings"] = embeddings
+                        workflow.trigger_config = trigger_config
+                    except Exception as e:
+                        logger.warning(f"Failed to generate intent embeddings: {e}")
+
             self.db.add(workflow)
             self.db.commit()
             self.db.refresh(workflow)
@@ -73,6 +88,16 @@ class WorkflowService:
             self._create_version(workflow, "Initial version", user_id)
 
             logger.info(f"Created workflow {workflow.id} for tenant {tenant_id}")
+
+            # Publish workflow changed event (fire-and-forget)
+            try:
+                import asyncio
+                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                    tenant_id=tenant_id, action="created", workflow_id=workflow.id
+                ))
+            except Exception as pub_err:
+                logger.warning(f"Failed to publish workflow created event: {pub_err}")
+
             return self._to_response(workflow)
 
         except Exception as e:
@@ -206,6 +231,21 @@ class WorkflowService:
             if workflow_data.trigger_config is not None:
                 workflow.trigger_config = workflow_data.trigger_config
 
+            # Re-compute intent embeddings if trigger_type or trigger_config changed
+            trigger_type = workflow_data.trigger_type or workflow.trigger_type
+            trigger_type_str = trigger_type.value if hasattr(trigger_type, 'value') else str(trigger_type)
+            if trigger_type_str == "intent":
+                intent_patterns = (workflow.trigger_config or {}).get("intent_patterns", [])
+                if intent_patterns:
+                    try:
+                        embedding_service = IntentEmbeddingService()
+                        embeddings = embedding_service.generate_pattern_embeddings(intent_patterns)
+                        trigger_config = workflow.trigger_config or {}
+                        trigger_config["intent_embeddings"] = embeddings
+                        workflow.trigger_config = trigger_config
+                    except Exception as e:
+                        logger.warning(f"Failed to generate intent embeddings on update: {e}")
+
             if workflow_data.is_active is not None:
                 workflow.is_active = workflow_data.is_active
 
@@ -257,6 +297,16 @@ class WorkflowService:
             self.db.commit()
 
             logger.info(f"Deleted workflow {workflow_id}")
+
+            # Publish workflow changed event (fire-and-forget)
+            try:
+                import asyncio
+                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                    tenant_id=tenant_id, action="deleted", workflow_id=workflow_id
+                ))
+            except Exception as pub_err:
+                logger.warning(f"Failed to publish workflow deleted event: {pub_err}")
+
             return True
 
         except Exception as e:
@@ -291,6 +341,16 @@ class WorkflowService:
             self.db.refresh(workflow)
 
             logger.info(f"Activated workflow {workflow_id}")
+
+            # Publish workflow changed event (fire-and-forget)
+            try:
+                import asyncio
+                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                    tenant_id=tenant_id, action="activated", workflow_id=workflow_id
+                ))
+            except Exception as pub_err:
+                logger.warning(f"Failed to publish workflow activated event: {pub_err}")
+
             return self._to_response(workflow)
 
         except Exception as e:
@@ -325,6 +385,16 @@ class WorkflowService:
             self.db.refresh(workflow)
 
             logger.info(f"Deactivated workflow {workflow_id}")
+
+            # Publish workflow changed event (fire-and-forget)
+            try:
+                import asyncio
+                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                    tenant_id=tenant_id, action="deactivated", workflow_id=workflow_id
+                ))
+            except Exception as pub_err:
+                logger.warning(f"Failed to publish workflow deactivated event: {pub_err}")
+
             return self._to_response(workflow)
 
         except Exception as e:

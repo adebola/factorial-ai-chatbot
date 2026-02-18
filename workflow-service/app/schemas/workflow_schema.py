@@ -15,7 +15,6 @@ class TriggerType(str, Enum):
     MESSAGE = "message"
     INTENT = "intent"
     KEYWORD = "keyword"
-    MANUAL = "manual"
 
 
 class StepType(str, Enum):

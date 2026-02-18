@@ -12,6 +12,7 @@ from ..core.exceptions import (
 )
 from ..core.logging_config import get_logger
 
+from ..models.workflow_model import Workflow
 from ..schemas.workflow_schema import (
     WorkflowCreate,
     WorkflowUpdate,
@@ -49,6 +50,20 @@ async def list_workflows(
     except Exception as e:
         logger.error(f"Error retrieving Workflows {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/exists")
+async def check_workflows_exist(
+    tenant_id: str = Query(...),
+    db: Session = Depends(get_db)
+) -> dict:
+    """Check if a tenant has any active workflows. Lightweight endpoint for caching."""
+    count = db.query(Workflow).filter(
+        Workflow.tenant_id == tenant_id,
+        Workflow.is_active == True,
+        Workflow.status == "active"
+    ).count()
+    return {"exists": count > 0}
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)

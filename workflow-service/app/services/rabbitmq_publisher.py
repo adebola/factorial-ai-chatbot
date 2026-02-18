@@ -149,6 +149,63 @@ class RabbitMQPublisher:
                 "error": str(e)
             }
 
+    async def publish_workflow_changed(
+        self,
+        tenant_id: str,
+        action: str,
+        workflow_id: str
+    ) -> Dict[str, Any]:
+        """
+        Publish workflow lifecycle event (created/deleted/activated/deactivated).
+
+        Args:
+            tenant_id: Tenant identifier
+            action: Action performed (created, deleted, activated, deactivated)
+            workflow_id: Workflow identifier
+
+        Returns:
+            Dict with success status
+        """
+        try:
+            await self.connect()
+
+            message_data = {
+                "tenant_id": tenant_id,
+                "action": action,
+                "workflow_id": workflow_id,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+            async with self.connection.channel() as channel:
+                exchange = await channel.declare_exchange(
+                    "workflow.events",
+                    ExchangeType.TOPIC,
+                    durable=True
+                )
+
+                message = Message(
+                    body=json.dumps(message_data, default=str).encode(),
+                    delivery_mode=DeliveryMode.PERSISTENT,
+                    content_type="application/json"
+                )
+
+                await exchange.publish(message, routing_key="workflow.changed")
+
+            logger.info(
+                f"Workflow changed event published: {action}",
+                extra={
+                    "tenant_id": tenant_id,
+                    "workflow_id": workflow_id,
+                    "action": action
+                }
+            )
+
+            return {"success": True}
+
+        except Exception as e:
+            logger.exception(f"Error publishing workflow changed event: {e}")
+            return {"success": False, "error": str(e)}
+
     async def publish_sms(
         self,
         tenant_id: str,

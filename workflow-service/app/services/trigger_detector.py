@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from ..models.workflow_model import Workflow, TriggerType
 from ..schemas.workflow_schema import TriggerCheckResponse
 from ..core.logging_config import get_logger, log_workflow_trigger
+from .intent_embedding_service import IntentEmbeddingService
 
 logger = get_logger("trigger_detector")
 
@@ -85,6 +86,19 @@ class TriggerDetector:
             )
             return TriggerCheckResponse(triggered=False)
 
+        # Pre-compute message embedding once if any workflow uses intent triggers
+        message_embedding = None
+        has_intent_workflows = any(
+            (w.trigger_type.value if hasattr(w.trigger_type, 'value') else w.trigger_type) == "intent"
+            for w in active_workflows
+        )
+        if has_intent_workflows:
+            try:
+                embedding_service = IntentEmbeddingService()
+                message_embedding = embedding_service.embed_message(message)
+            except Exception as e:
+                logger.warning(f"Failed to embed message for intent matching, falling back to keyword: {e}")
+
         # Check each workflow for triggers
         best_match = None
         highest_confidence = 0.0
@@ -92,7 +106,7 @@ class TriggerDetector:
         for workflow in active_workflows:
             trigger_type_str = workflow.trigger_type.value if hasattr(workflow.trigger_type, 'value') else workflow.trigger_type
             logger.info(f"Checking workflow {workflow.id} ('{workflow.name}'): trigger_type={trigger_type_str}, keywords={workflow.trigger_config.get('keywords', [])}")
-            confidence = self._calculate_trigger_confidence(workflow, message, user_context)
+            confidence = self._calculate_trigger_confidence(workflow, message, user_context, message_embedding=message_embedding)
             logger.info(f"Workflow {workflow.id} confidence: {confidence}")
 
             if confidence > highest_confidence and confidence > 0.5:  # Minimum confidence threshold
@@ -138,7 +152,8 @@ class TriggerDetector:
         self,
         workflow: Workflow,
         message: str,
-        user_context: Optional[Dict[str, Any]] = None
+        user_context: Optional[Dict[str, Any]] = None,
+        message_embedding: Optional[List[float]] = None
     ) -> float:
         """Calculate confidence score for workflow trigger (0.0 to 1.0)"""
 
@@ -150,9 +165,7 @@ class TriggerDetector:
         elif trigger_type_str == "keyword":
             return self._check_keyword_trigger(workflow, message)
         elif trigger_type_str == "intent":
-            return self._check_intent_trigger(workflow, message, user_context)
-        elif trigger_type_str == "manual":
-            return 0.0  # Manual triggers are not automatic
+            return self._check_intent_trigger(workflow, message, user_context, message_embedding=message_embedding)
         else:
             return 0.0
 
@@ -193,22 +206,55 @@ class TriggerDetector:
     def _check_intent_trigger(
         workflow: Workflow,
         message: str,
-        user_context: Optional[Dict[str, Any]] = None
+        user_context: Optional[Dict[str, Any]] = None,
+        message_embedding: Optional[List[float]] = None
     ) -> float:
-        """Check intent-based triggers (simplified implementation)"""
+        """
+        Check intent-based triggers using embeddings when available,
+        falling back to keyword matching otherwise.
+        """
         trigger_config = workflow.trigger_config or {}
         intent_patterns = trigger_config.get("intent_patterns", [])
 
         if not intent_patterns:
             return 0.0
 
-        # Simple intent detection based on patterns
-        # In a real implementation, this would use NLP/ML models
+        # Use embedding-based cosine similarity when both message embedding
+        # and pre-computed pattern embeddings are available
+        intent_embeddings = trigger_config.get("intent_embeddings", [])
+        if message_embedding and intent_embeddings:
+            best_similarity = 0.0
+            best_pattern = None
+            for entry in intent_embeddings:
+                pattern_vec = entry.get("embedding")
+                if not pattern_vec:
+                    continue
+                similarity = IntentEmbeddingService.cosine_similarity(message_embedding, pattern_vec)
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    best_pattern = entry.get("text", "")
+
+            # Map cosine similarity (typically 0.7-1.0 range for related text) to confidence
+            # Threshold: similarity >= 0.82 → high confidence trigger
+            if best_similarity >= 0.82:
+                confidence = min(1.0, (best_similarity - 0.7) / 0.3)  # 0.7→0, 1.0→1.0
+                logger.info(
+                    f"[INTENT NLP] Workflow {workflow.id}: best match '{best_pattern}' "
+                    f"similarity={best_similarity:.3f} confidence={confidence:.3f}"
+                )
+                return confidence
+
+            logger.info(
+                f"[INTENT NLP] Workflow {workflow.id}: no match above threshold, "
+                f"best='{best_pattern}' similarity={best_similarity:.3f}"
+            )
+            return 0.0
+
+        # Fallback: keyword-based matching (no embeddings stored)
         message_lower = message.lower()
 
         for pattern in intent_patterns:
             if isinstance(pattern, str):
-                # Simple pattern matching - could be enhanced with ML
                 pattern_keywords = pattern.lower().split()
                 matches = sum(1 for keyword in pattern_keywords if keyword in message_lower)
 
