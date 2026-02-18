@@ -55,13 +55,15 @@ class WidgetService:
         production_domain = os.getenv("PRODUCTION_DOMAIN", "api.chatcraft.cc")
 
         if environment == "production" or environment == "prod":
-            # Production URLs
+            # Production URLs - all go through the same domain
             backend_url = f"https://{production_domain}"
             chat_service_url = f"https://{production_domain}"
+            gateway_url = f"https://{production_domain}"
         else:
             # Development URLs - use gateway for backend requests
             backend_url = os.getenv("BACKEND_URL", "http://localhost:8080")
             chat_service_url = os.getenv("CHAT_SERVICE_URL", "http://localhost:8000")
+            gateway_url = os.getenv("GATEWAY_URL", "http://localhost:8080")
 
         context = {
             "tenant_id": tenant_id,
@@ -72,6 +74,7 @@ class WidgetService:
             "widget_id": f"factorial-chat-{tenant_id}",
             "backend_url": backend_url,
             "chat_service_url": chat_service_url,
+            "gateway_url": gateway_url,
             "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
             # Settings-based customization
             "hover_text": tenant_settings.get("hover_text", "Chat with us!"),
@@ -210,6 +213,7 @@ class WidgetService:
         apiKey: '{{ api_key }}',
         backendUrl: '{{ backend_url }}',
         chatServiceUrl: '{{ chat_service_url }}',
+        gatewayUrl: '{{ gateway_url }}',
         widgetId: '{{ widget_id }}',
         colors: {
             primary: '{{ colors.primary }}',
@@ -1093,7 +1097,7 @@ class WidgetService:
             }
 
             // Submit feedback to API (widget-specific endpoint)
-            fetch(`${CONFIG.backendUrl}/api/v1/feedback/widget/submit`, {
+            fetch(`${CONFIG.gatewayUrl}/api/v1/feedback/widget/submit`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

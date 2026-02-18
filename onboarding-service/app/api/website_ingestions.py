@@ -396,8 +396,13 @@ async def delete_ingestion(
                 url=ingestion.base_url
             )
         except Exception as e:
-            # Log error but don't fail the request
             logger.error(f"Failed to publish website removal usage event: {e}", tenant_id=claims.tenant_id)
+            # HTTP fallback: decrement usage directly via billing API
+            try:
+                billing_client = BillingClient(claims.access_token)
+                await billing_client.decrement_usage("websites")
+            except Exception as fallback_err:
+                logger.error(f"HTTP fallback for website usage decrement also failed: {fallback_err}", tenant_id=claims.tenant_id)
 
         return {
             "message": "Website ingestion deleted successfully",

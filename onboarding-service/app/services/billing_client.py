@@ -201,6 +201,62 @@ class BillingClient:
                 "reason": "billing_service_unexpected_error"
             }
 
+    async def decrement_usage(self, usage_type: str) -> bool:
+        """
+        Decrement usage count by 1 via the billing service HTTP API.
+
+        Used as a fallback when RabbitMQ publish fails for removal events,
+        ensuring the usage count is still decremented.
+
+        Args:
+            usage_type: Type of usage to decrement. Valid values:
+                - "documents" - Document count
+                - "websites" - Website ingestion count
+
+        Returns:
+            True if the decrement succeeded, False otherwise.
+        """
+        endpoint = f"{self.billing_url}/api/v1/usage/increment/{usage_type}"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                logger.info(
+                    "Decrementing usage via HTTP fallback",
+                    usage_type=usage_type,
+                    endpoint=endpoint
+                )
+
+                response = await client.post(
+                    endpoint,
+                    params={"amount": -1},
+                    headers={"Authorization": f"Bearer {self.access_token}"},
+                    timeout=5.0
+                )
+
+                if response.status_code == 200:
+                    logger.info(
+                        "Usage decremented successfully via HTTP fallback",
+                        usage_type=usage_type
+                    )
+                    return True
+                else:
+                    logger.error(
+                        "Failed to decrement usage via HTTP fallback",
+                        usage_type=usage_type,
+                        status_code=response.status_code,
+                        response_text=response.text[:200]
+                    )
+                    return False
+
+        except Exception as e:
+            logger.error(
+                "Exception during HTTP usage decrement fallback",
+                usage_type=usage_type,
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return False
+
     async def check_can_upload_document(self, tenant_id: str) -> Dict[str, Any]:
         """
         Check if tenant can upload a document based on subscription limits.

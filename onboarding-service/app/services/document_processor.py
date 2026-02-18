@@ -39,8 +39,8 @@ class DocumentProcessor:
         self.categorized_vector_store = CategorizedVectorStore(self.vector_db, db)
 
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,
-            chunk_overlap=50,
+            chunk_size=1000,
+            chunk_overlap=200,
             length_function=len,
         )
     

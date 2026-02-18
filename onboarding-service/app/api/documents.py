@@ -295,8 +295,13 @@ async def delete_document(
                 filename=existing_doc.original_filename
             )
         except Exception as e:
-            # Log error but don't fail the request
-            print(f"Failed to publish document removal usage event: {e}")
+            logger.error(f"Failed to publish document removal usage event: {e}", tenant_id=claims.tenant_id)
+            # HTTP fallback: decrement usage directly via billing API
+            try:
+                billing_client = BillingClient(claims.access_token)
+                await billing_client.decrement_usage("documents")
+            except Exception as fallback_err:
+                logger.error(f"HTTP fallback for document usage decrement also failed: {fallback_err}", tenant_id=claims.tenant_id)
 
         return {
             "message": "Document deleted successfully",
