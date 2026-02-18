@@ -208,8 +208,11 @@ class UsageEventConsumer:
             # Get or create usage tracking record
             subscription = subscription_service.get_subscription_by_tenant(tenant_id)
             if not subscription:
-                logger.warning(f"No subscription found for tenant: {tenant_id}")
-                return True  # Acknowledge anyway (tenant might not have subscription yet)
+                logger.error(
+                    f"No subscription found for tenant {tenant_id} — event will be re-queued",
+                    extra={"event_type": event_type, "tenant_id": tenant_id}
+                )
+                return False  # Nack + requeue — event retried
 
             usage = db.query(UsageTracking).filter(
                 UsageTracking.subscription_id == subscription.id
