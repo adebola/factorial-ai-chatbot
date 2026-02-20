@@ -1,3 +1,4 @@
+import asyncio
 import aiohttp
 import os
 import redis.asyncio as aioredis
@@ -59,11 +60,14 @@ class WorkflowClient:
             r = await self._get_redis()
             cached = await r.get(cache_key)
             if cached is not None:
-                return cached == "1"
+                result = cached == "1"
+                logger.info(f"has_workflows cache hit: key={cache_key}, cached={cached}, result={result}")
+                return result
         except Exception as e:
             logger.warning(f"Redis cache check failed for has_workflows: {e}")
 
         # Cache miss — call workflow service
+        logger.info(f"has_workflows cache miss for {tenant_id}, calling workflow service")
         try:
             session = await self._get_session()
             headers = {}
@@ -79,6 +83,7 @@ class WorkflowClient:
                 if response.status == 200:
                     result = await response.json()
                     exists = result.get("exists", False)
+                    logger.info(f"has_workflows HTTP result for {tenant_id}: exists={exists}, caching {'1' if exists else '0'}")
 
                     # Cache the result with 5-minute TTL
                     try:
@@ -158,7 +163,7 @@ class WorkflowClient:
                     )
                     return {"triggered": False}
 
-        except aiohttp.ClientTimeout:
+        except asyncio.TimeoutError:
             logger.warning(
                 "Workflow service timeout",
                 tenant_id=tenant_id,
@@ -180,16 +185,22 @@ class WorkflowClient:
         tenant_id: str,
         workflow_id: str,
         session_id: str,
-        initial_variables: Optional[Dict[str, Any]] = None
+        initial_variables: Optional[Dict[str, Any]] = None,
+        user_message: Optional[str] = None
     ) -> Dict[str, Any]:
         """Start a workflow execution"""
 
         try:
+            context = {}
+            if user_message:
+                context["triggering_message"] = user_message
+
             payload = {
                 "tenant_id": tenant_id,
                 "workflow_id": workflow_id,
                 "session_id": session_id,
-                "initial_variables": initial_variables or {}
+                "initial_variables": initial_variables or {},
+                "context": context
             }
 
             # Prepare headers with API key if available

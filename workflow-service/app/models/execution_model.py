@@ -21,8 +21,6 @@ class StepType(enum.Enum):
     INPUT = "input"
     CONDITION = "condition"
     ACTION = "action"
-    SUB_WORKFLOW = "sub_workflow"
-    DELAY = "delay"
 
 
 class WorkflowExecution(Base):

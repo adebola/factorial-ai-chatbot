@@ -23,8 +23,6 @@ class StepType(str, Enum):
     INPUT = "input"
     CONDITION = "condition"
     ACTION = "action"
-    SUB_WORKFLOW = "sub_workflow"
-    DELAY = "delay"
 
 
 # Workflow Step Schemas

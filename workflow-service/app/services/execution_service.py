@@ -23,7 +23,6 @@ from ..core.logging_config import get_logger
 from ..core.config import settings
 from .workflow_parser import WorkflowParser
 from .variable_resolver import VariableResolver
-from .action_service import ActionService
 from .state_manager import StateManager
 from .execution.workflow_executor import WorkflowExecutor
 
@@ -35,7 +34,6 @@ class ExecutionService:
 
     def __init__(self, db: Session):
         self.db = db
-        self.action_service = ActionService(db=db)
         self.state_manager = StateManager(db)
 
         # Always use refactored WorkflowExecutor with Strategy pattern
@@ -225,8 +223,6 @@ class ExecutionService:
                 result = await self._execute_condition_step(step, variables, definition)
             elif step.type == SchemaStepType.ACTION:
                 result = await self._execute_action_step(step, variables, execution, definition)
-            elif step.type == SchemaStepType.DELAY:
-                result = await self._execute_delay_step(step, variables, definition)
             else:
                 raise StepExecutionError(step.id, f"Unsupported step type: {step.type}")
 
@@ -563,30 +559,6 @@ class ExecutionService:
             "workflow_completed": workflow_completed
         }
 
-    async def _execute_delay_step(self, step, variables: Dict[str, Any], definition) -> Dict[str, Any]:
-        """Execute a delay step"""
-        # For now, just continue to next step
-        # In production, this would schedule continuation
-
-        # Check if next_step is None OR doesn't exist in the workflow
-        workflow_completed = False
-        next_step_id = step.next_step
-
-        if not next_step_id:
-            workflow_completed = True
-        else:
-            next_step_exists = WorkflowParser.get_step_by_id(definition, next_step_id) is not None
-            if not next_step_exists:
-                logger.info(f"DELAY step next_step '{next_step_id}' does not exist, marking workflow as completed")
-                workflow_completed = True
-                next_step_id = None
-
-        return {
-            "delay_processed": True,
-            "next_step_id": next_step_id,
-            "workflow_completed": workflow_completed
-        }
-
     def _process_user_input(self, step, user_input: str, variables: Dict[str, Any]) -> Dict[str, Any]:
         """Process user input for input steps"""
         if step.variable:
@@ -742,6 +714,9 @@ class ExecutionService:
         self.db.commit()
         self.db.refresh(execution)
 
+        # Extract triggering message from context (passed by chat service)
+        triggering_message = (request.context or {}).get("triggering_message")
+
         # Save the initial state
         await self.state_manager.save_state(
             session_id=request.session_id,
@@ -749,7 +724,8 @@ class ExecutionService:
             workflow_id=workflow.id,
             tenant_id=tenant_id,
             current_step_id=first_step.id,
-            variables=variables
+            variables=variables,
+            last_user_message=triggering_message
         )
 
         # Update workflow usage

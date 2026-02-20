@@ -63,6 +63,16 @@ async def check_workflows_exist(
         Workflow.is_active == True,
         Workflow.status == "active"
     ).count()
+
+    # Diagnostic: log all workflows for this tenant to spot is_active/status mismatches
+    all_workflows = db.query(Workflow.id, Workflow.name, Workflow.is_active, Workflow.status).filter(
+        Workflow.tenant_id == tenant_id
+    ).all()
+    logger.info(
+        f"Workflow exists check for tenant {tenant_id}: "
+        f"active_count={count}, all_workflows={[(w.id, w.name, w.is_active, w.status) for w in all_workflows]}"
+    )
+
     return {"exists": count > 0}
 
 

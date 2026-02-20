@@ -303,9 +303,10 @@ class ChatWebSocket:
 
                                 if workflow_result.get("fallback_to_ai", False):
                                     logger.warning(f"Workflow step failed, falling back to AI: {error_message}", tenant_id=tenant_id)
+                                    original_message = workflow_state.get("last_user_message") or user_message
                                     ai_response = await self.chat_service.generate_response(
                                         tenant_id=tenant_id,
-                                        user_message=user_message,
+                                        user_message=original_message,
                                         session_id=session_id,
                                         tenant=tenant
                                     )
@@ -323,20 +324,35 @@ class ChatWebSocket:
                                         }
                                     }
                             else:
-                                message = workflow_result.get("message", "")
-                                choices = workflow_result.get("choices")
+                                # Check if workflow completed with fallback to AI
+                                if workflow_result.get("workflow_completed") and workflow_result.get("fallback_to_ai"):
+                                    logger.info("Workflow completed with fallback to AI", tenant_id=tenant_id, session_id=session_id)
+                                    # Use the original triggering message stored in workflow state,
+                                    # not the current user_message (which is the choice text like "No thanks")
+                                    original_message = workflow_state.get("last_user_message") or user_message
+                                    ai_response = await self.chat_service.generate_response(
+                                        tenant_id=tenant_id,
+                                        user_message=original_message,
+                                        session_id=session_id,
+                                        tenant=tenant
+                                    )
+                                    t_ai = time.time()
+                                    timing_path = "workflow->ai"
+                                else:
+                                    message = workflow_result.get("message") or ""
+                                    choices = workflow_result.get("choices")
 
-                                ai_response = {
-                                    "content": message,
-                                    "metadata": {
-                                        "workflow_step": True,
-                                        "step_type": workflow_result.get("step_type"),
-                                        "workflow_id": workflow_result.get("workflow_id"),
-                                        "completed": workflow_result.get("workflow_completed", False),
-                                        "choices": choices,
-                                        "input_required": workflow_result.get("input_required")
+                                    ai_response = {
+                                        "content": message,
+                                        "metadata": {
+                                            "workflow_step": True,
+                                            "step_type": workflow_result.get("step_type"),
+                                            "workflow_id": workflow_result.get("workflow_id"),
+                                            "completed": workflow_result.get("workflow_completed", False),
+                                            "choices": choices,
+                                            "input_required": workflow_result.get("input_required")
+                                        }
                                     }
-                                }
 
                         else:
                             # No active workflow — check triggers
@@ -359,7 +375,8 @@ class ChatWebSocket:
                                 execution_result = await self.workflow_client.start_workflow_execution(
                                     tenant_id=tenant_id,
                                     workflow_id=trigger_result["workflow_id"],
-                                    session_id=session_id
+                                    session_id=session_id,
+                                    user_message=user_message
                                 )
 
                                 t_trigger_or_step = time.time()
@@ -392,23 +409,35 @@ class ChatWebSocket:
                                         t_ai = t_trigger_or_step
                                         timing_path = "trigger->workflow"
                                 else:
-                                    message = first_step.get("message", "Workflow started")
-                                    choices = first_step.get("choices")
+                                    # Check if first step completed workflow with fallback to AI
+                                    if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
+                                        logger.info("Workflow start completed with fallback to AI", tenant_id=tenant_id, session_id=session_id)
+                                        ai_response = await self.chat_service.generate_response(
+                                            tenant_id=tenant_id,
+                                            user_message=user_message,
+                                            session_id=session_id,
+                                            tenant=tenant
+                                        )
+                                        t_ai = time.time()
+                                        timing_path = "trigger->ai"
+                                    else:
+                                        message = first_step.get("message") or "Workflow started"
+                                        choices = first_step.get("choices")
 
-                                    ai_response = {
-                                        "content": message,
-                                        "metadata": {
-                                            "workflow_triggered": True,
-                                            "workflow_id": trigger_result["workflow_id"],
-                                            "workflow_name": trigger_result.get("workflow_name"),
-                                            "execution_id": execution_result.get("id"),
-                                            "step_type": first_step.get("step_type"),
-                                            "choices": choices,
-                                            "input_required": first_step.get("input_required")
+                                        ai_response = {
+                                            "content": message,
+                                            "metadata": {
+                                                "workflow_triggered": True,
+                                                "workflow_id": trigger_result["workflow_id"],
+                                                "workflow_name": trigger_result.get("workflow_name"),
+                                                "execution_id": execution_result.get("id"),
+                                                "step_type": first_step.get("step_type"),
+                                                "choices": choices,
+                                                "input_required": first_step.get("input_required")
+                                            }
                                         }
-                                    }
-                                    t_ai = t_trigger_or_step
-                                    timing_path = "trigger->workflow"
+                                        t_ai = t_trigger_or_step
+                                        timing_path = "trigger->workflow"
                             else:
                                 # No workflow triggered — use pre-computed search results for AI
                                 t_trigger_or_step = time.time()
@@ -456,7 +485,8 @@ class ChatWebSocket:
 
                     # Only send response to client if there's content or choices to display
                     # This prevents blank messages from being shown to the user
-                    if ai_response.get("content") or ai_response.get("metadata", {}).get("choices"):
+                    metadata = ai_response.get("metadata", {})
+                    if ai_response.get("content") or metadata.get("choices") or metadata.get("completed"):
                         # Send response to client
                         response_msg = {
                             "type": "message",

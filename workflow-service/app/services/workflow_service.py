@@ -23,6 +23,12 @@ from .rabbitmq_publisher import rabbitmq_publisher
 logger = get_logger("workflow_service")
 
 
+def _log_publish_failure(task):
+    """Callback for fire-and-forget asyncio tasks to log failures."""
+    if task.exception():
+        logger.error(f"Workflow event publish failed: {task.exception()}")
+
+
 class WorkflowService:
     """Service for managing workflows"""
 
@@ -67,14 +73,23 @@ class WorkflowService:
                 updated_by=user_id
             )
 
+            # Auto-sync status with is_active
+            if workflow.is_active:
+                workflow.status = WorkflowStatus.ACTIVE.value
+
             # Pre-compute intent embeddings at write-time
             if workflow.trigger_type in ("intent", TriggerType.INTENT):
+                # Check trigger_config first, fall back to definition.trigger
                 intent_patterns = (workflow.trigger_config or {}).get("intent_patterns", [])
+                if not intent_patterns:
+                    definition_dict = WorkflowParser.to_dict(workflow_data.definition)
+                    intent_patterns = definition_dict.get("trigger", {}).get("intent_patterns", [])
                 if intent_patterns:
                     try:
                         embedding_service = IntentEmbeddingService()
                         embeddings = embedding_service.generate_pattern_embeddings(intent_patterns)
                         trigger_config = workflow.trigger_config or {}
+                        trigger_config["intent_patterns"] = intent_patterns
                         trigger_config["intent_embeddings"] = embeddings
                         workflow.trigger_config = trigger_config
                     except Exception as e:
@@ -92,9 +107,10 @@ class WorkflowService:
             # Publish workflow changed event (fire-and-forget)
             try:
                 import asyncio
-                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                task = asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
                     tenant_id=tenant_id, action="created", workflow_id=workflow.id
                 ))
+                task.add_done_callback(_log_publish_failure)
             except Exception as pub_err:
                 logger.warning(f"Failed to publish workflow created event: {pub_err}")
 
@@ -235,12 +251,17 @@ class WorkflowService:
             trigger_type = workflow_data.trigger_type or workflow.trigger_type
             trigger_type_str = trigger_type.value if hasattr(trigger_type, 'value') else str(trigger_type)
             if trigger_type_str == "intent":
+                # Check trigger_config first, fall back to definition.trigger
                 intent_patterns = (workflow.trigger_config or {}).get("intent_patterns", [])
+                if not intent_patterns:
+                    definition = workflow.definition or {}
+                    intent_patterns = definition.get("trigger", {}).get("intent_patterns", [])
                 if intent_patterns:
                     try:
                         embedding_service = IntentEmbeddingService()
                         embeddings = embedding_service.generate_pattern_embeddings(intent_patterns)
                         trigger_config = workflow.trigger_config or {}
+                        trigger_config["intent_patterns"] = intent_patterns
                         trigger_config["intent_embeddings"] = embeddings
                         workflow.trigger_config = trigger_config
                     except Exception as e:
@@ -248,6 +269,9 @@ class WorkflowService:
 
             if workflow_data.is_active is not None:
                 workflow.is_active = workflow_data.is_active
+                # Auto-sync status if not explicitly provided
+                if workflow_data.status is None:
+                    workflow.status = WorkflowStatus.ACTIVE.value if workflow_data.is_active else WorkflowStatus.INACTIVE.value
 
             if workflow_data.status is not None:
                 workflow.status = workflow_data.status
@@ -263,6 +287,18 @@ class WorkflowService:
                 self._create_version(workflow, "Updated workflow definition", user_id)
 
             logger.info(f"Updated workflow {workflow_id}")
+
+            # Publish workflow changed event if activation state changed
+            if workflow_data.is_active is not None or workflow_data.status is not None:
+                try:
+                    import asyncio
+                    task = asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                        tenant_id=tenant_id, action="updated", workflow_id=workflow_id
+                    ))
+                    task.add_done_callback(_log_publish_failure)
+                except Exception as pub_err:
+                    logger.warning(f"Failed to publish workflow updated event: {pub_err}")
+
             return self._to_response(workflow)
 
         except Exception as e:
@@ -301,9 +337,10 @@ class WorkflowService:
             # Publish workflow changed event (fire-and-forget)
             try:
                 import asyncio
-                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                task = asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
                     tenant_id=tenant_id, action="deleted", workflow_id=workflow_id
                 ))
+                task.add_done_callback(_log_publish_failure)
             except Exception as pub_err:
                 logger.warning(f"Failed to publish workflow deleted event: {pub_err}")
 
@@ -345,9 +382,10 @@ class WorkflowService:
             # Publish workflow changed event (fire-and-forget)
             try:
                 import asyncio
-                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                task = asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
                     tenant_id=tenant_id, action="activated", workflow_id=workflow_id
                 ))
+                task.add_done_callback(_log_publish_failure)
             except Exception as pub_err:
                 logger.warning(f"Failed to publish workflow activated event: {pub_err}")
 
@@ -389,9 +427,10 @@ class WorkflowService:
             # Publish workflow changed event (fire-and-forget)
             try:
                 import asyncio
-                asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
+                task = asyncio.create_task(rabbitmq_publisher.publish_workflow_changed(
                     tenant_id=tenant_id, action="deactivated", workflow_id=workflow_id
                 ))
+                task.add_done_callback(_log_publish_failure)
             except Exception as pub_err:
                 logger.warning(f"Failed to publish workflow deactivated event: {pub_err}")
 

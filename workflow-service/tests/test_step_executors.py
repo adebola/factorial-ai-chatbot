@@ -18,7 +18,6 @@ from app.services.step_executors.choice_executor import ChoiceStepExecutor
 from app.services.step_executors.input_executor import InputStepExecutor
 from app.services.step_executors.condition_executor import ConditionStepExecutor
 from app.services.step_executors.action_executor import ActionStepExecutor
-from app.services.step_executors.delay_executor import DelayStepExecutor
 from app.schemas.workflow_schema import WorkflowStep, WorkflowDefinition, StepType
 
 
@@ -63,7 +62,7 @@ class TestMessageStepExecutor:
         execution_context = {"workflow_id": "test-workflow", "execution_id": "test-exec"}
 
         # Mock WorkflowParser to return next step exists
-        with patch('app.services.step_executors.message_executor.WorkflowParser') as mock_parser:
+        with patch('app.services.step_executors.base.WorkflowParser') as mock_parser:
             mock_parser.get_step_by_id.return_value = Mock()  # Next step exists
 
             result = await executor.execute(step, variables, mock_definition, execution_context)
@@ -135,7 +134,7 @@ class TestMessageStepExecutor:
 
         # Mock definition that returns None for non-existent step
         mock_definition = Mock()
-        with patch('app.services.step_executors.message_executor.WorkflowParser') as mock_parser:
+        with patch('app.services.step_executors.base.WorkflowParser') as mock_parser:
             mock_parser.get_step_by_id.return_value = None
 
             variables = {}
@@ -196,7 +195,7 @@ class TestChoiceStepExecutor:
         execution_context = {"workflow_id": "test"}
 
         # Mock next step exists
-        with patch('app.services.step_executors.choice_executor.WorkflowParser') as mock_parser:
+        with patch('app.services.step_executors.base.WorkflowParser') as mock_parser:
             mock_parser.get_step_by_id.return_value = Mock()
 
             result = await executor.execute(step, variables, mock_definition, execution_context)
@@ -254,7 +253,7 @@ class TestChoiceStepExecutor:
         execution_context = {"workflow_id": "test"}
 
         # Mock step doesn't exist
-        with patch('app.services.step_executors.choice_executor.WorkflowParser') as mock_parser:
+        with patch('app.services.step_executors.base.WorkflowParser') as mock_parser:
             mock_parser.get_step_by_id.return_value = None
 
             mock_definition = Mock()
@@ -355,7 +354,7 @@ class TestActionStepExecutor:
             })
 
             # Mock next step exists
-            with patch('app.services.step_executors.action_executor.WorkflowParser') as mock_parser:
+            with patch('app.services.step_executors.base.WorkflowParser') as mock_parser:
                 mock_parser.get_step_by_id.return_value = Mock()
 
                 result = await executor.execute(step, variables, mock_definition, execution_context)
@@ -461,7 +460,7 @@ class TestInputStepExecutor:
         variables = {"user_name": "John Doe"}
         execution_context = {"workflow_id": "test"}
 
-        with patch('app.services.step_executors.input_executor.WorkflowParser') as mock_parser:
+        with patch('app.services.step_executors.base.WorkflowParser') as mock_parser:
             mock_parser.get_step_by_id.return_value = Mock()
 
             result = await executor.execute(step, variables, mock_definition, execution_context)
@@ -525,7 +524,7 @@ class TestConditionStepExecutor:
         variables = {"age": 25}
         execution_context = {"workflow_id": "test"}
 
-        with patch('app.services.step_executors.condition_executor.WorkflowParser') as mock_parser:
+        with patch('app.services.step_executors.base.WorkflowParser') as mock_parser:
             # Mock that next step exists
             mock_parser.get_step_by_id.return_value = Mock(id="adult_step")
 
@@ -557,40 +556,3 @@ class TestConditionStepExecutor:
         assert result.input_required is None
 
 
-# ============================================================================
-# DelayStepExecutor Tests
-# ============================================================================
-
-class TestDelayStepExecutor:
-    """Test DELAY step executor"""
-
-    @pytest.fixture
-    def executor(self):
-        return DelayStepExecutor()
-
-    @pytest.fixture
-    def mock_definition(self):
-        mock = Mock(spec=WorkflowDefinition); mock.steps = []; return mock
-
-    @pytest.mark.asyncio
-    async def test_delay_executes_immediately_for_now(self, executor, mock_definition):
-        """Verify DELAY continues to next step after short delay"""
-        step = WorkflowStep(
-            id="delay1",
-            name="Wait 1 second",
-            type=StepType.DELAY,
-            params={"seconds": 1},  # Use params dict for delay config
-            next_step="step2"
-        )
-
-        variables = {}
-        execution_context = {"workflow_id": "test"}
-
-        with patch('app.services.step_executors.delay_executor.WorkflowParser') as mock_parser:
-            mock_parser.get_step_by_id.return_value = Mock(id="step2")
-
-            result = await executor.execute(step, variables, mock_definition, execution_context)
-
-            assert result.next_step_id == "step2"
-            assert result.input_required is None
-            assert result.workflow_completed is False

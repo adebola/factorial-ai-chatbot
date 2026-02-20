@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 from pydantic import ValidationError
 
 from ..schemas.workflow_schema import WorkflowDefinition, WorkflowStep, WorkflowTrigger
+from ..schemas.execution_schema import FALLBACK_TO_AI_SENTINEL
 from ..core.logging_config import get_logger
 
 logger = get_logger("workflow_parser")
@@ -59,7 +60,7 @@ class WorkflowParser:
         # Validate step references
         for step in definition.steps:
             # Validate Next Steps for all steps, ensure it is in available steps and not pointing to itself
-            if step.next_step and step.next_step not in step_ids and step.next_step != step.id:
+            if step.next_step and step.next_step not in step_ids and step.next_step != step.id and step.next_step != FALLBACK_TO_AI_SENTINEL:
                 errors.append(f"Step '{step.id}' references non-existent step '{step.next_step}'")
 
             # Validate condition steps have conditions
@@ -73,12 +74,18 @@ class WorkflowParser:
             # Validate a choice option next_step references
             if step.type == "choice" and step.options:
                 for idx, option in enumerate(step.options):
-                    if option.next_step and option.next_step not in step_ids:
+                    if option.next_step and option.next_step not in step_ids and option.next_step != FALLBACK_TO_AI_SENTINEL:
                         errors.append(f"Choice step '{step.id}' option {idx} references non-existent step '{option.next_step}'")
 
             # Validate action steps have action type
             if step.type == "action" and not step.action:
                 errors.append(f"Action step '{step.id}' missing action type")
+
+            # Validate action type is supported
+            if step.type == "action" and step.action:
+                valid_actions = ["log", "send_email", "api_call"]
+                if step.action not in valid_actions:
+                    errors.append(f"Action step '{step.id}' has unsupported action type '{step.action}'. Valid: {valid_actions}")
 
         # Check for unreachable steps (no entry point)
         if definition.steps:
@@ -86,14 +93,14 @@ class WorkflowParser:
             referenced_steps = set()
 
             for step in definition.steps:
-                # Collect step-level next_step references
-                if step.next_step:
+                # Collect step-level next_step references (exclude sentinel)
+                if step.next_step and step.next_step != FALLBACK_TO_AI_SENTINEL:
                     referenced_steps.add(step.next_step)
 
-                # Collect next_step references from choice options
+                # Collect next_step references from choice options (exclude sentinel)
                 if step.type == "choice" and step.options:
                     for option in step.options:
-                        if option.next_step:
+                        if option.next_step and option.next_step != FALLBACK_TO_AI_SENTINEL:
                             referenced_steps.add(option.next_step)
 
             # Find steps that are not the first step and not referenced by any other step
@@ -227,7 +234,7 @@ EXAMPLE_LEAD_QUALIFICATION = {
             "params": {
                 "to": "{{email}}",
                 "subject": "Pricing for {{company_size}} companies",
-                "body": "Thanks for your interest in {{use_case}}!"
+                "content": "Thanks for your interest in {{use_case}}!"
             }
         }
     ]
@@ -271,11 +278,17 @@ EXAMPLE_SUPPORT_ESCALATION = {
         {
             "id": "create_ticket",
             "type": "action",
-            "action": "create_support_ticket",
+            "action": "api_call",
             "params": {
-                "priority": "high",
-                "category": "{{issue_type}}",
-                "description": "{{issue_details}}"
+                "url": "https://api.example.com/support/tickets",
+                "body": {
+                    "priority": "high",
+                    "category": "{{issue_type}}",
+                    "description": "{{issue_details}}"
+                },
+                "headers": {
+                    "Authorization": "Bearer {{api_token}}"
+                }
             }
         }
     ]

@@ -4,6 +4,9 @@ from datetime import datetime
 from enum import Enum
 
 
+FALLBACK_TO_AI_SENTINEL = "__fallback_to_ai"
+
+
 class ExecutionStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
@@ -18,8 +21,6 @@ class StepType(str, Enum):
     INPUT = "input"
     CONDITION = "condition"
     ACTION = "action"
-    SUB_WORKFLOW = "sub_workflow"
-    DELAY = "delay"
 
 
 # Execution Request Schemas

@@ -10,6 +10,34 @@ from .intent_embedding_service import IntentEmbeddingService
 logger = get_logger("trigger_detector")
 
 
+def _get_intent_patterns(workflow: Workflow) -> list:
+    """
+    Resolve intent_patterns for an intent workflow.
+
+    Checks multiple locations in priority order because the WorkflowTrigger schema
+    has both 'conditions' and 'intent_patterns' fields, and callers may use either:
+      1. trigger_config.intent_patterns
+      2. definition.trigger.intent_patterns
+      3. trigger_config.conditions  (commonly used for intent phrases)
+      4. definition.trigger.conditions
+    """
+    trigger_config = workflow.trigger_config or {}
+    definition = workflow.definition or {}
+    trigger_def = definition.get("trigger", {})
+
+    # Check intent_patterns first (both locations), then fall back to conditions
+    for source, key in [
+        (trigger_config, "intent_patterns"),
+        (trigger_def, "intent_patterns"),
+        (trigger_config, "conditions"),
+        (trigger_def, "conditions"),
+    ]:
+        patterns = source.get(key, []) or []
+        if patterns:
+            return patterns
+    return []
+
+
 def _check_message_trigger(workflow: Workflow, message: str) -> float:
     """
     Check message-based triggers
@@ -76,6 +104,30 @@ class TriggerDetector:
         logger.info(f"Found {len(active_workflows)} active workflows for tenant {tenant_id}")
         logger.info(f"Checking message: '{message}' against workflows")
 
+        # Backfill: generate missing intent_embeddings for workflows whose
+        # trigger_config is incomplete (patterns only in definition, or
+        # embeddings missing because OPENAI_API_KEY was unavailable at create time)
+        for workflow in active_workflows:
+            trigger_type_str = workflow.trigger_type.value if hasattr(workflow.trigger_type, 'value') else workflow.trigger_type
+            if trigger_type_str == "intent":
+                trigger_config = workflow.trigger_config or {}
+                intent_patterns = _get_intent_patterns(workflow)
+                intent_embeddings = trigger_config.get("intent_embeddings", [])
+                if intent_patterns and not intent_embeddings:
+                    try:
+                        embedding_service = IntentEmbeddingService()
+                        embeddings = embedding_service.generate_pattern_embeddings(intent_patterns)
+                        # Sync intent_patterns + embeddings into trigger_config
+                        trigger_config["intent_patterns"] = intent_patterns
+                        trigger_config["intent_embeddings"] = embeddings
+                        workflow.trigger_config = trigger_config
+                        from sqlalchemy.orm.attributes import flag_modified
+                        flag_modified(workflow, "trigger_config")
+                        self.db.commit()
+                        logger.info(f"Backfilled intent_patterns and embeddings for workflow {workflow.id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to backfill intent embeddings for workflow {workflow.id}: {e}")
+
         if not active_workflows:
             log_workflow_trigger(
                 tenant_id=tenant_id,
@@ -105,7 +157,12 @@ class TriggerDetector:
 
         for workflow in active_workflows:
             trigger_type_str = workflow.trigger_type.value if hasattr(workflow.trigger_type, 'value') else workflow.trigger_type
-            logger.info(f"Checking workflow {workflow.id} ('{workflow.name}'): trigger_type={trigger_type_str}, keywords={workflow.trigger_config.get('keywords', [])}")
+            tc = workflow.trigger_config or {}
+            logger.info(
+                f"Checking workflow {workflow.id} ('{workflow.name}'): trigger_type={trigger_type_str}, "
+                f"trigger_config_keys={list(tc.keys())}, conditions={tc.get('conditions', [])}, "
+                f"intent_patterns_raw={tc.get('intent_patterns', [])}, resolved_patterns={_get_intent_patterns(workflow)}"
+            )
             confidence = self._calculate_trigger_confidence(workflow, message, user_context, message_embedding=message_embedding)
             logger.info(f"Workflow {workflow.id} confidence: {confidence}")
 
@@ -214,9 +271,10 @@ class TriggerDetector:
         falling back to keyword matching otherwise.
         """
         trigger_config = workflow.trigger_config or {}
-        intent_patterns = trigger_config.get("intent_patterns", [])
+        intent_patterns = _get_intent_patterns(workflow)
 
         if not intent_patterns:
+            logger.info(f"[INTENT] Workflow {workflow.id}: no intent_patterns in trigger_config or definition")
             return 0.0
 
         # Use embedding-based cosine similarity when both message embedding
@@ -251,6 +309,7 @@ class TriggerDetector:
             return 0.0
 
         # Fallback: keyword-based matching (no embeddings stored)
+        logger.info(f"[INTENT FALLBACK] Workflow {workflow.id}: no intent_embeddings stored, using keyword fallback")
         message_lower = message.lower()
 
         for pattern in intent_patterns:
