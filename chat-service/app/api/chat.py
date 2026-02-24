@@ -16,9 +16,10 @@ async def websocket_chat_endpoint(
     api_key: str = Query(None, description="Tenant API key"),
     tenant_id: str = Query(None, description="Tenant ID"),
     user_identifier: str = Query(None, description="Optional user identifier"),
+    session_id: str = Query(None, description="Resume an authenticated session by ID"),
     db: Session = Depends(get_db)
 ):
     """WebSocket endpoint for chat functionality (auth-free but requires tenant identification)"""
     logger.info(f"WebSocket endpoint: {websocket}")
     chat_ws = ChatWebSocket(db)
-    await chat_ws.handle_connection(websocket, api_key, tenant_id, user_identifier)
+    await chat_ws.handle_connection(websocket, api_key, tenant_id, user_identifier, session_id=session_id)

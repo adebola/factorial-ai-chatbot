@@ -13,7 +13,7 @@ class OAuth2ServiceClient:
     """Client for interacting with the OAuth2 Authorization Server"""
     
     def __init__(self):
-        self.auth_server_url = os.environ.get("AUTHORIZATION_SERVER_URL", "http://localhost:9000")
+        self.auth_server_url = os.environ.get("AUTHORIZATION_SERVER_URL", "http://localhost:9002/auth")
         self.client_id = os.environ.get("OAUTH2_CLIENT_ID", "chatcraft-client")
         self.client_secret = os.environ.get("OAUTH2_CLIENT_SECRET", "secret")
         self.timeout = 30.0

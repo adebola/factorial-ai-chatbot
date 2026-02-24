@@ -36,4 +36,19 @@ public class TenantSettingsRequest {
     private String chatWindowTitle;
     
     private Map<String, Object> additionalSettings;
+
+    // End-user OAuth2 PKCE authentication
+    private Boolean allowAuthentication;
+
+    @Size(max = 1000, message = "Authorization endpoint URL must be 1000 characters or less")
+    private String authAuthorizationEndpoint;
+
+    @Size(max = 1000, message = "Token endpoint URL must be 1000 characters or less")
+    private String authTokenEndpoint;
+
+    @Size(max = 255, message = "Auth client ID must be 255 characters or less")
+    private String authClientId;
+
+    @Size(max = 500, message = "Auth scopes must be 500 characters or less")
+    private String authScopes;
 }

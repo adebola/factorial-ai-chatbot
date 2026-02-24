@@ -3,11 +3,12 @@ API Call Action Handler
 
 Makes outbound HTTP POST requests to external APIs.
 Replaces the old 'webhook' action with a simpler, POST-only interface.
+Supports opt-in forwarding of end-user OAuth2 tokens via `forward_user_token: true`.
 """
 
 import json
 import httpx
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from .base import ActionHandler
 from ...core.exceptions import ActionExecutionError
@@ -30,7 +31,8 @@ class ApiCallActionHandler(ActionHandler):
         params: Dict[str, Any],
         tenant_id: str,
         execution_id: str,
-        variables: Dict[str, Any]
+        variables: Dict[str, Any],
+        execution_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         url = params.get("url")
         if not url:
@@ -41,6 +43,18 @@ class ApiCallActionHandler(ActionHandler):
 
         headers.setdefault("Content-Type", "application/json")
         headers.setdefault("User-Agent", f"ChatCraft-Workflow/{execution_id}")
+
+        # Opt-in user token forwarding: when the workflow step specifies
+        # forward_user_token: true, inject the end-user's Bearer token
+        if params.get("forward_user_token") and execution_context:
+            user_token = execution_context.get("user_access_token")
+            if user_token:
+                headers["Authorization"] = f"Bearer {user_token}"
+                logger.info(
+                    "Forwarding user access token to external API",
+                    url=url,
+                    execution_id=execution_id
+                )
 
         try:
             async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
@@ -85,10 +99,11 @@ class ApiCallActionHandler(ActionHandler):
         return {
             "description": "Make an outbound HTTP POST request to an external API",
             "required_params": ["url"],
-            "optional_params": ["body", "headers"],
+            "optional_params": ["body", "headers", "forward_user_token"],
             "example": {
                 "url": "https://api.example.com/webhook",
                 "headers": {"Authorization": "Bearer token"},
-                "body": {"user_id": "{{user_id}}", "event": "workflow_completed"}
+                "body": {"user_id": "{{user_id}}", "event": "workflow_completed"},
+                "forward_user_token": True
             }
         }

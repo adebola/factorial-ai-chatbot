@@ -174,7 +174,14 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
-              # Chat Service Routes
+              # Chat Service Routes (auth endpoints are public - OAuth2 PKCE callback/exchange)
+            - id: chat-auth
+              uri: http://chat-service:8000
+              predicates:
+                - Path=/api/v1/auth/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             - id: chat-api
               uri: http://chat-service:8000
               predicates:

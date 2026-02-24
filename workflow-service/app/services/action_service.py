@@ -26,7 +26,8 @@ class ActionService:
         action_params: Dict[str, Any],
         variables: Dict[str, Any],
         tenant_id: str,
-        execution_id: str
+        execution_id: str,
+        execution_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Execute a workflow action.
@@ -53,7 +54,7 @@ class ActionService:
                     f"Unknown action type: {action_type}. Available: {get_available_action_types()}"
                 )
 
-            return await handler.execute(resolved_params, tenant_id, execution_id, variables)
+            return await handler.execute(resolved_params, tenant_id, execution_id, variables, execution_context=execution_context)
 
         except ActionExecutionError:
             raise

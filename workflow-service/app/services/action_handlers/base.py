@@ -6,7 +6,7 @@ Mirrors the StepExecutor strategy pattern for action dispatching.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
 class ActionHandler(ABC):
@@ -28,7 +28,8 @@ class ActionHandler(ABC):
         params: Dict[str, Any],
         tenant_id: str,
         execution_id: str,
-        variables: Dict[str, Any]
+        variables: Dict[str, Any],
+        execution_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Execute the action with resolved parameters.
@@ -38,6 +39,7 @@ class ActionHandler(ABC):
             tenant_id: Tenant ID
             execution_id: Execution ID
             variables: Current workflow variables
+            execution_context: Optional execution context (contains user_access_token, etc.)
 
         Returns:
             Dict with at least {"success": True/False, ...}

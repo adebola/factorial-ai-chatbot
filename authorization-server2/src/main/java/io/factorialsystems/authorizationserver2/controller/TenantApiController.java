@@ -3,8 +3,10 @@ package io.factorialsystems.authorizationserver2.controller;
 import io.factorialsystems.authorizationserver2.dto.TenantConfigUpdateRequest;
 import io.factorialsystems.authorizationserver2.dto.TenantResponse;
 import io.factorialsystems.authorizationserver2.model.Tenant;
+import io.factorialsystems.authorizationserver2.model.TenantSettings;
 import io.factorialsystems.authorizationserver2.model.User;
 import io.factorialsystems.authorizationserver2.service.TenantService;
+import io.factorialsystems.authorizationserver2.service.TenantSettingsService;
 import io.factorialsystems.authorizationserver2.service.UserService;
 import io.factorialsystems.authorizationserver2.service.RedisCacheService;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +30,7 @@ public class TenantApiController {
     private final TenantService tenantService;
     private final UserService userService;
     private final RedisCacheService redisCacheService;
+    private final TenantSettingsService tenantSettingsService;
     
     /**
      * Get tenant details by ID (for authenticated services)
@@ -91,7 +94,23 @@ public class TenantApiController {
         response.put("domain", tenant.getDomain());
         response.put("is_active", tenant.getIsActive());
         response.put("widget_available", true);
-        
+
+        // Include auth config if end-user authentication is enabled
+        try {
+            var settingsResponse = tenantSettingsService.getOrCreateSettings(tenant.getId());
+            if (settingsResponse != null && Boolean.TRUE.equals(settingsResponse.getAllowAuthentication())) {
+                Map<String, Object> authConfig = new HashMap<>();
+                authConfig.put("enabled", true);
+                authConfig.put("authorization_endpoint", settingsResponse.getAuthAuthorizationEndpoint());
+                authConfig.put("client_id", settingsResponse.getAuthClientId());
+                authConfig.put("scopes", settingsResponse.getAuthScopes());
+                // Note: token_endpoint intentionally excluded — only backend needs it
+                response.put("auth", authConfig);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load auth settings for tenant {}: {}", tenant.getId(), e.getMessage());
+        }
+
         log.info("Successfully found tenant: {} for API key", tenant.getName());
         return ResponseEntity.ok(response);
     }

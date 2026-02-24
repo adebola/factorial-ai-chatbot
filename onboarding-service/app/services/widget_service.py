@@ -65,6 +65,15 @@ class WidgetService:
             chat_service_url = os.getenv("CHAT_SERVICE_URL", "http://localhost:8000")
             gateway_url = os.getenv("GATEWAY_URL", "http://localhost:8080")
 
+        # Auth configuration
+        auth_enabled = bool(tenant_settings.get("allow_authentication", False))
+        auth_config = {
+            "enabled": auth_enabled,
+            "authorization_endpoint": tenant_settings.get("auth_authorization_endpoint", ""),
+            "client_id": tenant_settings.get("auth_client_id", ""),
+            "scopes": tenant_settings.get("auth_scopes", "openid profile email"),
+        } if auth_enabled else {"enabled": False}
+
         context = {
             "tenant_id": tenant_id,
             "tenant_name": tenant_name,
@@ -81,6 +90,8 @@ class WidgetService:
             "welcome_message": tenant_settings.get("welcome_message", "Hello! How can I help you today?"),
             "chat_window_title": tenant_settings.get("chat_window_title", "Chat Support"),
             "has_custom_logo": logo_info.get("is_custom", False),
+            # End-user OAuth2 PKCE authentication
+            "auth_config": auth_config,
             # Environment info for debugging
             "environment": environment,
             "production_domain": production_domain
@@ -155,7 +166,7 @@ class WidgetService:
         # Try to get custom company logo from OAuth2 server public endpoint
         if hasattr(self, '_tenant_id'):
             try:
-                oauth2_server_url = os.getenv("AUTHORIZATION_SERVER_URL", "http://localhost:9000")
+                oauth2_server_url = os.getenv("AUTHORIZATION_SERVER_URL", "http://localhost:9002/auth")
                 public_logo_url = f"{oauth2_server_url}/api/v1/tenants/public/logos/{self._tenant_id}"
                 
                 # Check if the logo exists by making a HEAD request
@@ -234,7 +245,14 @@ class WidgetService:
         // Customizable text
         hoverText: '{{ hover_text }}',
         welcomeMessage: '{{ welcome_message }}',
-        chatWindowTitle: '{{ chat_window_title }}'
+        chatWindowTitle: '{{ chat_window_title }}',
+        // End-user authentication (OAuth2 PKCE)
+        auth: {
+            enabled: {{ 'true' if auth_config.enabled else 'false' }},
+            authorizationEndpoint: '{{ auth_config.authorization_endpoint|default("", true) }}',
+            clientId: '{{ auth_config.client_id|default("", true) }}',
+            scopes: '{{ auth_config.scopes|default("openid profile email", true) }}'
+        }
     };
     
     // Chat Widget Class
@@ -256,8 +274,11 @@ class WidgetService:
                 this.chatContainer = null;
                 this.messagesContainer = null;
                 this.inputField = null;
-                this.sessionId = null;
+                this.sessionId = sessionStorage.getItem('factorial_session_id') || null;
                 this.feedbackSubmitted = new Set();
+                this.isAuthenticated = false;
+                this.authUser = null;
+                this._refreshTimer = null;
 
                 this.init();
 
@@ -287,6 +308,266 @@ class WidgetService:
             }
         }
         
+        // ---- PKCE Auth Helpers ----
+        generateCodeVerifier() {
+            const array = new Uint8Array(32);
+            crypto.getRandomValues(array);
+            return Array.from(array, b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async generateCodeChallenge(verifier) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(verifier);
+            const digest = await crypto.subtle.digest('SHA-256', data);
+            return btoa(String.fromCharCode(...new Uint8Array(digest)))
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+
+        generateState() {
+            return Array.from(crypto.getRandomValues(new Uint8Array(16)),
+                b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async login() {
+            // Clean up any stale listener from a previous login attempt
+            if (this._authHandler) {
+                window.removeEventListener('message', this._authHandler);
+                this._authHandler = null;
+            }
+
+            const codeVerifier = this.generateCodeVerifier();
+            const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+            const state = this.generateState();
+
+            // Store PKCE params for the callback
+            sessionStorage.setItem('factorial_pkce_verifier', codeVerifier);
+            sessionStorage.setItem('factorial_pkce_state', state);
+
+            const callbackUrl = CONFIG.gatewayUrl + '/api/v1/auth/callback';
+
+            const params = new URLSearchParams({
+                response_type: 'code',
+                client_id: CONFIG.auth.clientId,
+                redirect_uri: callbackUrl,
+                scope: CONFIG.auth.scopes,
+                state: state,
+                code_challenge: codeChallenge,
+                code_challenge_method: 'S256'
+            });
+
+            const authUrl = CONFIG.auth.authorizationEndpoint + '?' + params.toString();
+
+            // Open popup
+            const popup = window.open(authUrl, 'factorial_auth',
+                'width=500,height=600,scrollbars=yes');
+
+            // Listen for the callback message from the popup
+            this._authHandler = async (event) => {
+                if (!event.data || event.data.type !== 'factorial_auth_callback') return;
+                window.removeEventListener('message', this._authHandler);
+                this._authHandler = null;
+
+                const { code, state: returnedState } = event.data;
+
+                // Verify state
+                const savedState = sessionStorage.getItem('factorial_pkce_state');
+                if (returnedState !== savedState) {
+                    console.error('PKCE state mismatch');
+                    sessionStorage.removeItem('factorial_pkce_verifier');
+                    sessionStorage.removeItem('factorial_pkce_state');
+                    this.addMessage('bot', 'Authentication failed: security check failed. Please try again.');
+                    return;
+                }
+
+                // Exchange code for token via chat service BFF
+                await this.exchangeCode(code, codeVerifier, callbackUrl);
+            };
+            window.addEventListener('message', this._authHandler);
+        }
+
+        async exchangeCode(code, codeVerifier, redirectUri) {
+            try {
+                const response = await fetch(CONFIG.gatewayUrl + '/api/v1/auth/pkce/exchange', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        api_key: CONFIG.apiKey,
+                        authorization_code: code,
+                        code_verifier: codeVerifier,
+                        redirect_uri: redirectUri
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Token exchange failed');
+                }
+
+                const data = await response.json();
+                this.sessionId = data.session_id;
+                this.isAuthenticated = true;
+                this.authUser = data.user;
+
+                // Clear PKCE artifacts — no longer needed
+                sessionStorage.removeItem('factorial_pkce_verifier');
+                sessionStorage.removeItem('factorial_pkce_state');
+
+                // Persist session across page refreshes (cleared on tab close)
+                sessionStorage.setItem('factorial_session_id', data.session_id);
+                sessionStorage.setItem('factorial_auth_user', JSON.stringify(data.user));
+
+                // Update UI to show authenticated state
+                this.showAuthenticatedHeader();
+
+                // Schedule proactive token refresh
+                if (data.expires_in) {
+                    this.scheduleTokenRefresh(data.expires_in);
+                }
+
+                // Hide auth prompt and connect WebSocket with authenticated session
+                this.hideAuthPrompt();
+                this.connectWebSocket();
+
+            } catch (error) {
+                console.error('Token exchange error:', error);
+                // Clear PKCE artifacts on failure too
+                sessionStorage.removeItem('factorial_pkce_verifier');
+                sessionStorage.removeItem('factorial_pkce_state');
+                this.addMessage('bot', 'Authentication failed. Please try again or continue as a guest.');
+            }
+        }
+
+        showAuthenticatedHeader() {
+            const header = this.chatContainer.querySelector('.factorial-chat-title');
+            if (header && this.authUser && this.authUser.name) {
+                header.textContent = CONFIG.chatWindowTitle + ' — ' + this.authUser.name;
+            }
+        }
+
+        showAuthPrompt() {
+            // Create auth prompt overlay in the messages area
+            const promptDiv = document.createElement('div');
+            promptDiv.id = 'factorial-auth-prompt';
+            promptDiv.style.cssText = 'padding:20px;text-align:center;';
+            promptDiv.innerHTML = `
+                <p style="margin-bottom:16px;color:${CONFIG.colors.darkGray};font-size:14px;">
+                    Log in to access personalized services, or continue as a guest.
+                </p>
+                <button id="factorial-auth-login-btn" style="
+                    padding:10px 24px;background:${CONFIG.colors.primary};color:#fff;
+                    border:none;border-radius:6px;cursor:pointer;font-size:14px;
+                    font-weight:600;margin:4px;">
+                    Log In
+                </button>
+                <button id="factorial-auth-guest-btn" style="
+                    padding:10px 24px;background:transparent;color:${CONFIG.colors.primary};
+                    border:2px solid ${CONFIG.colors.primary};border-radius:6px;cursor:pointer;
+                    font-size:14px;font-weight:600;margin:4px;">
+                    Continue as Guest
+                </button>
+            `;
+            this.messagesContainer.appendChild(promptDiv);
+
+            document.getElementById('factorial-auth-login-btn').addEventListener('click', () => {
+                this.login();
+            });
+            document.getElementById('factorial-auth-guest-btn').addEventListener('click', () => {
+                this.hideAuthPrompt();
+                this.connectWebSocket();
+            });
+        }
+
+        hideAuthPrompt() {
+            const prompt = document.getElementById('factorial-auth-prompt');
+            if (prompt) prompt.remove();
+        }
+
+        scheduleTokenRefresh(expiresIn) {
+            if (this._refreshTimer) {
+                clearTimeout(this._refreshTimer);
+                this._refreshTimer = null;
+            }
+            // Refresh at 80% of expiry, minimum 30 seconds
+            const refreshMs = Math.max(expiresIn * 0.8 * 1000, 30000);
+            console.log('Scheduling token refresh in', Math.round(refreshMs / 1000), 'seconds');
+            this._refreshTimer = setTimeout(() => {
+                this.refreshToken();
+            }, refreshMs);
+        }
+
+        async refreshToken() {
+            if (!this.sessionId) return;
+            try {
+                const response = await fetch(CONFIG.gatewayUrl + '/api/v1/auth/pkce/refresh', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: this.sessionId,
+                        api_key: CONFIG.apiKey
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Token refreshed, next refresh in', data.expires_in, 'seconds');
+                    this.scheduleTokenRefresh(data.expires_in);
+                } else if (response.status === 401) {
+                    console.warn('Token refresh failed (401), session expired');
+                    this.handleAuthExpired('Your session has expired. Please log in again.');
+                } else {
+                    // Non-auth error — retry once after 10 seconds
+                    console.warn('Token refresh failed (' + response.status + '), retrying in 10s');
+                    this._refreshTimer = setTimeout(() => {
+                        this.refreshToken();
+                    }, 10000);
+                }
+            } catch (error) {
+                console.error('Token refresh network error:', error);
+                // Retry once after 10 seconds on network error
+                this._refreshTimer = setTimeout(() => {
+                    this.refreshToken();
+                }, 10000);
+            }
+        }
+
+        handleAuthExpired(message) {
+            // Clear refresh timer
+            if (this._refreshTimer) {
+                clearTimeout(this._refreshTimer);
+                this._refreshTimer = null;
+            }
+
+            // Clear persisted session
+            sessionStorage.removeItem('factorial_session_id');
+            sessionStorage.removeItem('factorial_auth_user');
+
+            // Reset auth state
+            this.isAuthenticated = false;
+            this.authUser = null;
+            this.sessionId = null;
+
+            // Close WebSocket
+            if (this.socket) {
+                this.socket.close();
+                this.socket = null;
+            }
+            this.isConnected = false;
+
+            // Reset header title
+            const header = this.chatContainer.querySelector('.factorial-chat-title');
+            if (header) {
+                header.textContent = CONFIG.chatWindowTitle;
+            }
+
+            // Show expiry message
+            this.addMessage('bot', message || 'Your session has expired. Please log in again.');
+
+            // Show auth prompt if auth is enabled
+            if (CONFIG.auth.enabled) {
+                this.showAuthPrompt();
+            }
+        }
+        // ---- End PKCE Auth Helpers ----
+
         injectCSS() {
             if (document.getElementById('factorial-chat-css')) return;
             
@@ -845,8 +1126,27 @@ class WidgetService:
             this.inputField.focus();
 
             if (!this.isConnected) {
-                console.log('FactorialChatWidget: Not connected, initializing WebSocket...');
-                this.connectWebSocket();
+                // Check if auth is enabled and user hasn't chosen yet
+                if (CONFIG.auth.enabled && !this.isAuthenticated && !this.sessionId) {
+                    // Check for persisted authenticated session from sessionStorage
+                    const savedUser = sessionStorage.getItem('factorial_auth_user');
+                    if (savedUser) {
+                        this.isAuthenticated = true;
+                        this.authUser = JSON.parse(savedUser);
+                        this.showAuthenticatedHeader();
+                        this.connectWebSocket();
+                        // Proactively validate/refresh the token on session restore
+                        this.refreshToken();
+                    } else {
+                        this.showAuthPrompt();
+                    }
+                } else {
+                    console.log('FactorialChatWidget: Not connected, initializing WebSocket...');
+                    if (this.isAuthenticated) {
+                        this.showAuthenticatedHeader();
+                    }
+                    this.connectWebSocket();
+                }
             }
             console.log('FactorialChatWidget: Chat window opened');
         }
@@ -864,7 +1164,12 @@ class WidgetService:
 
             // For production domains, ensure we use the direct /ws/chat path
             // since nginx proxies /ws/chat directly to the chat service
-            const wsEndpoint = `${wsUrl}/ws/chat?api_key=${CONFIG.apiKey}`;
+            let wsEndpoint = `${wsUrl}/ws/chat?api_key=${CONFIG.apiKey}`;
+
+            // If we have an authenticated session, include the session_id
+            if (this.sessionId) {
+                wsEndpoint += `&session_id=${encodeURIComponent(this.sessionId)}`;
+            }
             
             try {
                 this.socket = new WebSocket(wsEndpoint);
@@ -897,6 +1202,23 @@ class WidgetService:
                         // Extract session_id from connection message
                         if (data.session_id) {
                             this.sessionId = data.session_id;
+                            sessionStorage.setItem('factorial_session_id', data.session_id);
+                        }
+                        // Show authenticated user info if returned from server
+                        if (data.authenticated && data.user) {
+                            this.isAuthenticated = true;
+                            this.authUser = data.user;
+                            sessionStorage.setItem('factorial_auth_user', JSON.stringify(data.user));
+                            this.showAuthenticatedHeader();
+                        }
+                    } else if (data.type === 'auth_expired') {
+                        this.handleAuthExpired(data.message);
+                    } else if (data.type === 'auth_required') {
+                        this.hideTypingIndicator();
+                        this.enableSendButton();
+                        this.addMessage('bot', data.message || 'This feature requires you to log in.');
+                        if (CONFIG.auth.enabled) {
+                            this.showAuthPrompt();
                         }
                     } else if (data.type === 'error') {
                         console.error('Chat service error:', data.message);

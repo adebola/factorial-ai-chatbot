@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
 from ..models.workflow_model import Workflow, WorkflowVersion, WorkflowTemplate, WorkflowStatus, TriggerType
+from ..models.intent_embedding_model import WorkflowIntentEmbedding
 from ..schemas.workflow_schema import (
     WorkflowCreate, WorkflowUpdate, WorkflowResponse, WorkflowSummary, WorkflowList,
     WorkflowTemplateCreate, WorkflowTemplateResponse
@@ -69,6 +70,7 @@ class WorkflowService:
                 trigger_type=workflow_data.trigger_type,
                 trigger_config=workflow_data.trigger_config,
                 is_active=workflow_data.is_active,
+                requires_auth=workflow_data.requires_auth,
                 created_by=user_id,
                 updated_by=user_id
             )
@@ -92,6 +94,15 @@ class WorkflowService:
                         trigger_config["intent_patterns"] = intent_patterns
                         trigger_config["intent_embeddings"] = embeddings
                         workflow.trigger_config = trigger_config
+
+                        # Write embeddings to pgvector table for indexed search
+                        for entry in embeddings:
+                            self.db.add(WorkflowIntentEmbedding(
+                                tenant_id=workflow.tenant_id,
+                                workflow_id=workflow.id,
+                                pattern_text=entry["text"],
+                                embedding=entry["embedding"]
+                            ))
                     except Exception as e:
                         logger.warning(f"Failed to generate intent embeddings: {e}")
 
@@ -264,8 +275,28 @@ class WorkflowService:
                         trigger_config["intent_patterns"] = intent_patterns
                         trigger_config["intent_embeddings"] = embeddings
                         workflow.trigger_config = trigger_config
+
+                        # Replace pgvector embeddings: clear old, insert new
+                        self.db.query(WorkflowIntentEmbedding).filter(
+                            WorkflowIntentEmbedding.workflow_id == workflow.id
+                        ).delete()
+                        for entry in embeddings:
+                            self.db.add(WorkflowIntentEmbedding(
+                                tenant_id=workflow.tenant_id,
+                                workflow_id=workflow.id,
+                                pattern_text=entry["text"],
+                                embedding=entry["embedding"]
+                            ))
                     except Exception as e:
                         logger.warning(f"Failed to generate intent embeddings on update: {e}")
+            else:
+                # If trigger type changed away from intent, clean up old embeddings
+                self.db.query(WorkflowIntentEmbedding).filter(
+                    WorkflowIntentEmbedding.workflow_id == workflow.id
+                ).delete()
+
+            if workflow_data.requires_auth is not None:
+                workflow.requires_auth = workflow_data.requires_auth
 
             if workflow_data.is_active is not None:
                 workflow.is_active = workflow_data.is_active
@@ -329,6 +360,11 @@ class WorkflowService:
             workflow.status = WorkflowStatus.ARCHIVED.value
             workflow.is_active = False
             workflow.updated_at = datetime.utcnow()
+
+            # Remove intent embeddings so archived workflows don't match
+            self.db.query(WorkflowIntentEmbedding).filter(
+                WorkflowIntentEmbedding.workflow_id == workflow_id
+            ).delete()
 
             self.db.commit()
 
@@ -659,6 +695,7 @@ class WorkflowService:
             trigger_type=workflow.trigger_type,
             trigger_config=workflow.trigger_config,
             is_active=workflow.is_active,
+            requires_auth=workflow.requires_auth,
             usage_count=workflow.usage_count,
             last_used_at=workflow.last_used_at,
             created_at=workflow.created_at,
@@ -676,6 +713,7 @@ class WorkflowService:
             status=workflow.status,
             trigger_type=workflow.trigger_type,
             is_active=workflow.is_active,
+            requires_auth=workflow.requires_auth,
             usage_count=workflow.usage_count,
             last_used_at=workflow.last_used_at,
             created_at=workflow.created_at

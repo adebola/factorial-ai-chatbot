@@ -30,6 +30,7 @@ class ExecutionStartRequest(BaseModel):
     user_identifier: Optional[str] = None
     initial_variables: Optional[Dict[str, Any]] = None
     context: Optional[Dict[str, Any]] = None
+    # user_access_token can also be passed via context.user_access_token
 
 
 class ExecutionStepRequest(BaseModel):
@@ -38,6 +39,7 @@ class ExecutionStepRequest(BaseModel):
     user_input: Optional[str] = None
     user_choice: Optional[str] = None
     context: Optional[Dict[str, Any]] = None
+    # user_access_token can also be passed via context.user_access_token
 
 
 class ExecutionUpdateRequest(BaseModel):

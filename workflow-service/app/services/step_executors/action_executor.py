@@ -72,7 +72,8 @@ class ActionStepExecutor(StepExecutor):
             action_params=step.params or {},
             variables=variables,
             tenant_id=execution_context.get("tenant_id"),
-            execution_id=execution_context.get("execution_id")
+            execution_id=execution_context.get("execution_id"),
+            execution_context=execution_context
         )
 
         logger.info(

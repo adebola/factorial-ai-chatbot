@@ -258,7 +258,8 @@ class WorkflowExecutor:
                 "workflow_id": execution.workflow_id,
                 "tenant_id": execution.tenant_id,
                 "session_id": execution.session_id,
-                "user_identifier": execution.user_identifier
+                "user_identifier": execution.user_identifier,
+                "user_access_token": getattr(execution, '_user_access_token', None)
             }
 
             # Execute the step!

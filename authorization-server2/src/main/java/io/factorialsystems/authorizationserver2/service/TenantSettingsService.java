@@ -96,7 +96,21 @@ public class TenantSettingsService {
         if (request.getAdditionalSettings() != null) {
             settings.setAdditionalSettings(request.getAdditionalSettings());
         }
-        
+        if (request.getAllowAuthentication() != null) {
+            settings.setAllowAuthentication(request.getAllowAuthentication());
+        }
+        if (request.getAuthAuthorizationEndpoint() != null) {
+            settings.setAuthAuthorizationEndpoint(request.getAuthAuthorizationEndpoint());
+        }
+        if (request.getAuthTokenEndpoint() != null) {
+            settings.setAuthTokenEndpoint(request.getAuthTokenEndpoint());
+        }
+        if (request.getAuthClientId() != null) {
+            settings.setAuthClientId(request.getAuthClientId());
+        }
+        if (request.getAuthScopes() != null) {
+            settings.setAuthScopes(request.getAuthScopes());
+        }
         // Update in database
         int updated = tenantSettingsMapper.updateByTenantId(settings);
         if (updated == 0) {
@@ -232,6 +246,11 @@ public class TenantSettingsService {
                 .chatWindowTitle(settings.getChatWindowTitle())
                 .companyLogoUrl(settings.getCompanyLogoUrl())
                 .chatLogo(settings.getChatLogoInfo(companyName))
+                .allowAuthentication(settings.getAllowAuthentication())
+                .authAuthorizationEndpoint(settings.getAuthAuthorizationEndpoint())
+                .authTokenEndpoint(settings.getAuthTokenEndpoint())
+                .authClientId(settings.getAuthClientId())
+                .authScopes(settings.getAuthScopes())
                 .additionalSettings(settings.getAdditionalSettings())
                 .isActive(settings.getIsActive())
                 .createdAt(settings.getCreatedAt())

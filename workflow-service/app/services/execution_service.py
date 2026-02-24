@@ -680,6 +680,14 @@ class ExecutionService:
             logger.error("Cannot execute inactive workflow")
             raise WorkflowExecutionError("Cannot execute inactive workflow")
 
+        # Auth gate: reject unauthenticated users for auth-required workflows
+        if workflow.requires_auth:
+            user_token = (request.context or {}).get("user_access_token")
+            if not user_token:
+                raise WorkflowExecutionError(
+                    "This workflow requires authentication. Please log in to continue."
+                )
+
         # Parse workflow definition
         definition = WorkflowParser.parse_from_dict(workflow.definition)
 
@@ -695,6 +703,15 @@ class ExecutionService:
             request.context or {}
         )
         variables = VariableResolver.add_system_variables(variables)
+
+        # Inject authenticated user claims as template variables
+        user_ctx = request.context or {}
+        if user_ctx.get("user_email"):
+            variables["__user_email"] = user_ctx["user_email"]
+        if user_ctx.get("user_name"):
+            variables["__user_name"] = user_ctx["user_name"]
+        if user_ctx.get("user_sub"):
+            variables["__user_sub"] = user_ctx["user_sub"]
 
         # Create an execution record
         execution = WorkflowExecution(
@@ -716,6 +733,10 @@ class ExecutionService:
 
         # Extract triggering message from context (passed by chat service)
         triggering_message = (request.context or {}).get("triggering_message")
+
+        # Attach user access token as transient attribute for workflow steps
+        # (not persisted to DB — only used during this execution run)
+        execution._user_access_token = (request.context or {}).get("user_access_token")
 
         # Save the initial state
         await self.state_manager.save_state(
@@ -841,6 +862,9 @@ class ExecutionService:
         # Update context if provided
         if request.context:
             variables = VariableResolver.merge_variables(variables, request.context)
+
+        # Attach user access token as transient attribute for workflow steps
+        execution._user_access_token = (request.context or {}).get("user_access_token")
 
         # Execute using WorkflowExecutor!
         # This replaces the 185-line while loop with clean delegation

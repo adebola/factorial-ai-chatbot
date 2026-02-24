@@ -140,6 +140,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 \c workflow_db
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- =====================================================
 -- 9. ENABLE EXTENSIONS - answer_quality_db

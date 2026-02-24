@@ -35,7 +35,14 @@ public class TenantSettingsResponse {
     // Company logo settings
     private String companyLogoUrl;        // Public URL for the uploaded logo
     private TenantSettings.ChatLogoInfo chatLogo;  // Chat logo information (URL or initials)
-    
+
+    // End-user OAuth2 PKCE authentication
+    private Boolean allowAuthentication;
+    private String authAuthorizationEndpoint;
+    private String authTokenEndpoint;
+    private String authClientId;
+    private String authScopes;
+
     // Future extensibility
     private Map<String, Object> additionalSettings;
     

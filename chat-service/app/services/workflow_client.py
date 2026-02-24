@@ -186,7 +186,9 @@ class WorkflowClient:
         workflow_id: str,
         session_id: str,
         initial_variables: Optional[Dict[str, Any]] = None,
-        user_message: Optional[str] = None
+        user_message: Optional[str] = None,
+        user_access_token: Optional[str] = None,
+        user_claims: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Start a workflow execution"""
 
@@ -194,6 +196,12 @@ class WorkflowClient:
             context = {}
             if user_message:
                 context["triggering_message"] = user_message
+            if user_access_token:
+                context["user_access_token"] = user_access_token
+            if user_claims:
+                context["user_email"] = user_claims.get("email")
+                context["user_name"] = user_claims.get("name")
+                context["user_sub"] = user_claims.get("sub")
 
             payload = {
                 "tenant_id": tenant_id,
@@ -253,7 +261,8 @@ class WorkflowClient:
         session_id: str,
         execution_id: str,
         user_input: Optional[str] = None,
-        user_choice: Optional[str] = None
+        user_choice: Optional[str] = None,
+        user_access_token: Optional[str] = None
     ) -> Dict[str, Any]:
         """Execute the next workflow step"""
 
@@ -264,6 +273,10 @@ class WorkflowClient:
                 "user_input": user_input,
                 "user_choice": user_choice
             }
+            if user_access_token:
+                if "context" not in payload:
+                    payload["context"] = {}
+                payload["context"]["user_access_token"] = user_access_token
 
             # Prepare headers with API key if available
             headers = {"Content-Type": "application/json"}

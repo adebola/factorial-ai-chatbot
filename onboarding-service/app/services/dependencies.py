@@ -223,7 +223,7 @@ def get_tenant_settings(tenant_id: str, access_token: Optional[str] = None) -> D
     """Get tenant settings from the OAuth2 server for widget customization"""
     try:
         # Get settings from OAuth2 server
-        oauth2_server_url = os.getenv("AUTHORIZATION_SERVER_URL", "http://localhost:9000")
+        oauth2_server_url = os.getenv("AUTHORIZATION_SERVER_URL", "http://localhost:9002/auth")
         settings_url = f"{oauth2_server_url}/api/v1/tenants/{tenant_id}/settings"
         
         # For now, we'll need a way to authenticate with the OAuth2 server
@@ -251,6 +251,12 @@ def get_tenant_settings(tenant_id: str, access_token: Optional[str] = None) -> D
                     "welcome_message": settings_data.get("welcomeMessage"),
                     "chat_window_title": settings_data.get("chatWindowTitle"),
                     "logo_url": settings_data.get("companyLogoUrl"),
+                    # End-user OAuth2 PKCE authentication
+                    "allow_authentication": settings_data.get("allowAuthentication", False),
+                    "auth_authorization_endpoint": settings_data.get("authAuthorizationEndpoint"),
+                    "auth_token_endpoint": settings_data.get("authTokenEndpoint"),
+                    "auth_client_id": settings_data.get("authClientId"),
+                    "auth_scopes": settings_data.get("authScopes", "openid profile email"),
                 }
             else:
                 logger.warning(f"Failed to fetch settings from OAuth2 server: {response.status_code}")

@@ -13,7 +13,7 @@ def generate_uuid():
 
 class ChatSession(Base):
     __tablename__ = "chat_sessions"
-    
+
     id = Column(String(36), primary_key=True, index=True, default=generate_uuid)
     tenant_id = Column(String(255), nullable=False, index=True)
     session_id = Column(String(255), unique=True, index=True)
@@ -21,6 +21,12 @@ class ChatSession(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_activity = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # End-user OAuth2 PKCE authentication fields (tokens stored in Redis, not here)
+    is_authenticated = Column(Boolean, default=False)
+    auth_user_sub = Column(String(255), nullable=True)    # Subject from IdP token
+    auth_user_email = Column(String(255), nullable=True)   # Email from IdP token
+    auth_user_name = Column(String(255), nullable=True)    # Display name from IdP token
 
 
 class ChatMessage(Base):

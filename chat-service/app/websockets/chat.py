@@ -1,6 +1,6 @@
 from fastapi import WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import Dict, List
+from typing import Dict, List, Optional
 import asyncio
 import json
 import uuid
@@ -14,6 +14,7 @@ from ..services.tenant_client import TenantClient
 from ..services.workflow_client import WorkflowClient
 from ..services.event_publisher import event_publisher
 from ..services.usage_cache import usage_cache
+from ..services.session_auth_service import session_auth_service
 from ..core.logging_config import get_logger
 
 logger = get_logger("ws")
@@ -76,17 +77,33 @@ class ChatWebSocket:
         self.chat_service = ChatService(db)
         self.workflow_client = None  # Will be initialized with API key after tenant is identified
     
-    async def handle_connection(self, websocket: WebSocket, api_key: str = None, tenant_id: str = None, user_identifier: str = None):
+    def _get_current_access_token(self, session_id: str) -> Optional[str]:
+        """Read access token from Redis per-use (not cached) so refreshed tokens are picked up."""
+        if not self._is_authenticated:
+            return None
+        return session_auth_service.get_access_token(session_id)
+
+    def _get_user_claims(self, session_id: str) -> Optional[Dict]:
+        """Extract user identity claims from session auth data for workflow variable injection."""
+        if not self._is_authenticated:
+            return None
+        auth_data = session_auth_service.get_session_auth(session_id)
+        if not auth_data or not auth_data.get("user_info"):
+            return None
+        info = auth_data["user_info"]
+        return {"email": info.get("email"), "name": info.get("name"), "sub": info.get("sub")}
+
+    async def handle_connection(self, websocket: WebSocket, api_key: str = None, tenant_id: str = None, user_identifier: str = None, session_id: str = None):
         # Identify tenant (no authentication required)
         tenant = None
-        
+
         if api_key:
             # Try to find a tenant by API key
             tenant = await self.tenant_client.get_tenant_by_api_key(api_key)
         elif tenant_id:
             # Try to find a tenant by ID
             tenant = await self.tenant_client.get_tenant_by_id(tenant_id)
-        
+
         if not tenant:
             await websocket.close(code=4000, reason="Tenant not found. Please provide valid api_key or tenant_id")
             return
@@ -95,17 +112,56 @@ class ChatWebSocket:
         tenant_api_key = tenant.get("api_key") or api_key  # Use tenant's API key from the tenant object, or the one provided
         self.workflow_client = WorkflowClient(api_key=tenant_api_key)
 
-        # Create or get a chat session
-        session_id = str(uuid.uuid4())
         tenant_id = tenant["id"]  # tenant is now a dict from HTTP API
-        chat_session = ChatSession(
-            tenant_id=tenant_id,
-            session_id=session_id,
-            user_identifier=user_identifier,
-            is_active=True
-        )
-        self.db.add(chat_session)
-        await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
+
+        # Session resumption: if session_id provided, try to resume an existing authenticated session
+        is_authenticated = False
+        auth_expired = False
+        if session_id:
+            existing_session = self.db.query(ChatSession).filter(
+                ChatSession.session_id == session_id,
+                ChatSession.tenant_id == tenant_id,
+                ChatSession.is_active == True
+            ).first()
+            if existing_session:
+                # Resume the existing session
+                if existing_session.is_authenticated:
+                    # Verify tokens still exist in Redis (not just DB flag)
+                    token = session_auth_service.get_access_token(session_id)
+                    if token:
+                        is_authenticated = True
+                        user_identifier = user_identifier or existing_session.auth_user_email or existing_session.user_identifier
+                    else:
+                        is_authenticated = False
+                        auth_expired = True
+                        logger.info(f"Session {session_id} tokens expired in Redis, marking auth_expired")
+                chat_session = existing_session
+                logger.info(f"Resumed session {session_id}, authenticated={is_authenticated}, auth_expired={auth_expired}")
+            else:
+                # session_id not found — fall through to create new session
+                session_id = str(uuid.uuid4())
+                chat_session = ChatSession(
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    user_identifier=user_identifier,
+                    is_active=True
+                )
+                self.db.add(chat_session)
+                await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
+        else:
+            # Create a new anonymous session
+            session_id = str(uuid.uuid4())
+            chat_session = ChatSession(
+                tenant_id=tenant_id,
+                session_id=session_id,
+                user_identifier=user_identifier,
+                is_active=True
+            )
+            self.db.add(chat_session)
+            await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
+
+        # Store auth state for use during message processing
+        self._is_authenticated = is_authenticated
 
         await manager.connect(websocket, tenant_id, session_id)
 
@@ -122,10 +178,23 @@ class ChatWebSocket:
                 "type": "connection",
                 "session_id": session_id,
                 "message": "Connected to chat service",
+                "authenticated": is_authenticated,
                 "timestamp": datetime.now().isoformat()
             }
+            if is_authenticated and chat_session.auth_user_name:
+                welcome_msg["user"] = {
+                    "name": chat_session.auth_user_name,
+                    "email": chat_session.auth_user_email
+                }
             await websocket.send_text(json.dumps(welcome_msg))
-            
+
+            # Notify widget if tokens expired since last connection
+            if auth_expired:
+                await websocket.send_text(json.dumps({
+                    "type": "auth_expired",
+                    "message": "Your session has expired. Please log in again."
+                }))
+
             while True:
                 # Receive a message from client
                 data = await websocket.receive_text()
@@ -219,6 +288,17 @@ class ChatWebSocket:
                             "error_type": type(e).__name__
                         })
 
+                # Detect mid-session token expiry
+                if self._is_authenticated:
+                    current_token = self._get_current_access_token(session_id)
+                    if current_token is None:
+                        self._is_authenticated = False
+                        await websocket.send_text(json.dumps({
+                            "type": "auth_expired",
+                            "message": "Your authentication has expired. Please log in again."
+                        }))
+                        # Continue processing as guest
+
                 # Check if tenant has any workflows at all (Redis-cached)
                 try:
                     tenant_has_workflows = await self.workflow_client.has_workflows(tenant_id)
@@ -284,14 +364,16 @@ class ChatWebSocket:
                                     tenant_id=tenant_id,
                                     session_id=session_id,
                                     execution_id=execution_id,
-                                    user_choice=user_message
+                                    user_choice=user_message,
+                                    user_access_token=self._get_current_access_token(session_id)
                                 )
                             else:
                                 workflow_result = await self.workflow_client.execute_workflow_step(
                                     tenant_id=tenant_id,
                                     session_id=session_id,
                                     execution_id=execution_id,
-                                    user_input=user_message
+                                    user_input=user_message,
+                                    user_access_token=self._get_current_access_token(session_id)
                                 )
 
                             t_trigger_or_step = time.time()
@@ -372,72 +454,92 @@ class ChatWebSocket:
                                 except (asyncio.CancelledError, Exception):
                                     pass
 
-                                execution_result = await self.workflow_client.start_workflow_execution(
-                                    tenant_id=tenant_id,
-                                    workflow_id=trigger_result["workflow_id"],
-                                    session_id=session_id,
-                                    user_message=user_message
-                                )
-
-                                t_trigger_or_step = time.time()
-
-                                first_step = execution_result.get("first_step_result", {})
-                                if not first_step.get("success", True):
-                                    error_message = first_step.get("error_message", "Workflow failed to start")
-
-                                    if first_step.get("fallback_to_ai", False):
-                                        logger.warning(f"Workflow start failed, falling back to AI: {error_message}", tenant_id=tenant_id)
-                                        ai_response = await self.chat_service.generate_response(
-                                            tenant_id=tenant_id,
-                                            user_message=user_message,
-                                            session_id=session_id,
-                                            tenant=tenant
-                                        )
-                                        t_ai = time.time()
-                                        timing_path = "trigger->ai"
-                                    else:
-                                        logger.error(f"Workflow start failed: {error_message}", tenant_id=tenant_id)
-                                        ai_response = {
-                                            "content": first_step.get("message", f"I encountered an error: {error_message}"),
-                                            "metadata": {
-                                                "workflow_step": True,
-                                                "workflow_error": True,
-                                                "error_message": error_message,
-                                                "completed": True
-                                            }
-                                        }
-                                        t_ai = t_trigger_or_step
-                                        timing_path = "trigger->workflow"
+                                # Soft auth gate: if workflow requires auth and user is not authenticated
+                                if trigger_result.get("requires_auth") and not self._is_authenticated:
+                                    await websocket.send_text(json.dumps({
+                                        "type": "auth_required",
+                                        "message": "This feature requires you to log in first.",
+                                        "workflow_name": trigger_result.get("workflow_name")
+                                    }))
+                                    ai_response = {
+                                        "content": "This feature requires you to log in first.",
+                                        "metadata": {"auth_required": True}
+                                    }
+                                    t_trigger_or_step = time.time()
+                                    t_ai = t_trigger_or_step
+                                    timing_path = "trigger->auth_required"
                                 else:
-                                    # Check if first step completed workflow with fallback to AI
-                                    if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
-                                        logger.info("Workflow start completed with fallback to AI", tenant_id=tenant_id, session_id=session_id)
-                                        ai_response = await self.chat_service.generate_response(
-                                            tenant_id=tenant_id,
-                                            user_message=user_message,
-                                            session_id=session_id,
-                                            tenant=tenant
-                                        )
-                                        t_ai = time.time()
-                                        timing_path = "trigger->ai"
-                                    else:
-                                        message = first_step.get("message") or "Workflow started"
-                                        choices = first_step.get("choices")
+                                    # Build user claims for variable injection
+                                    user_claims = self._get_user_claims(session_id)
 
-                                        ai_response = {
-                                            "content": message,
-                                            "metadata": {
-                                                "workflow_triggered": True,
-                                                "workflow_id": trigger_result["workflow_id"],
-                                                "workflow_name": trigger_result.get("workflow_name"),
-                                                "execution_id": execution_result.get("id"),
-                                                "step_type": first_step.get("step_type"),
-                                                "choices": choices,
-                                                "input_required": first_step.get("input_required")
+                                    execution_result = await self.workflow_client.start_workflow_execution(
+                                        tenant_id=tenant_id,
+                                        workflow_id=trigger_result["workflow_id"],
+                                        session_id=session_id,
+                                        user_message=user_message,
+                                        user_access_token=self._get_current_access_token(session_id),
+                                        user_claims=user_claims
+                                    )
+
+                                    t_trigger_or_step = time.time()
+
+                                    first_step = execution_result.get("first_step_result", {})
+                                    if not first_step.get("success", True):
+                                        error_message = first_step.get("error_message", "Workflow failed to start")
+
+                                        if first_step.get("fallback_to_ai", False):
+                                            logger.warning(f"Workflow start failed, falling back to AI: {error_message}", tenant_id=tenant_id)
+                                            ai_response = await self.chat_service.generate_response(
+                                                tenant_id=tenant_id,
+                                                user_message=user_message,
+                                                session_id=session_id,
+                                                tenant=tenant
+                                            )
+                                            t_ai = time.time()
+                                            timing_path = "trigger->ai"
+                                        else:
+                                            logger.error(f"Workflow start failed: {error_message}", tenant_id=tenant_id)
+                                            ai_response = {
+                                                "content": first_step.get("message", f"I encountered an error: {error_message}"),
+                                                "metadata": {
+                                                    "workflow_step": True,
+                                                    "workflow_error": True,
+                                                    "error_message": error_message,
+                                                    "completed": True
+                                                }
                                             }
-                                        }
-                                        t_ai = t_trigger_or_step
-                                        timing_path = "trigger->workflow"
+                                            t_ai = t_trigger_or_step
+                                            timing_path = "trigger->workflow"
+                                    else:
+                                        # Check if first step completed workflow with fallback to AI
+                                        if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
+                                            logger.info("Workflow start completed with fallback to AI", tenant_id=tenant_id, session_id=session_id)
+                                            ai_response = await self.chat_service.generate_response(
+                                                tenant_id=tenant_id,
+                                                user_message=user_message,
+                                                session_id=session_id,
+                                                tenant=tenant
+                                            )
+                                            t_ai = time.time()
+                                            timing_path = "trigger->ai"
+                                        else:
+                                            message = first_step.get("message") or "Workflow started"
+                                            choices = first_step.get("choices")
+
+                                            ai_response = {
+                                                "content": message,
+                                                "metadata": {
+                                                    "workflow_triggered": True,
+                                                    "workflow_id": trigger_result["workflow_id"],
+                                                    "workflow_name": trigger_result.get("workflow_name"),
+                                                    "execution_id": execution_result.get("id"),
+                                                    "step_type": first_step.get("step_type"),
+                                                    "choices": choices,
+                                                    "input_required": first_step.get("input_required")
+                                                }
+                                            }
+                                            t_ai = t_trigger_or_step
+                                            timing_path = "trigger->workflow"
                             else:
                                 # No workflow triggered — use pre-computed search results for AI
                                 t_trigger_or_step = time.time()

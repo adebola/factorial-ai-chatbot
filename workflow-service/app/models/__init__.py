@@ -1,5 +1,6 @@
 from .workflow_model import Workflow, WorkflowVersion, WorkflowTemplate
 from .execution_model import WorkflowExecution, WorkflowState, StepExecution, WorkflowAnalytics
+from .intent_embedding_model import WorkflowIntentEmbedding
 
 __all__ = [
     "Workflow",
@@ -9,4 +10,5 @@ __all__ = [
     "WorkflowState",
     "StepExecution",
     "WorkflowAnalytics",
+    "WorkflowIntentEmbedding",
 ]

@@ -70,6 +70,7 @@ class WorkflowCreate(BaseModel):
     trigger_type: TriggerType
     trigger_config: Optional[Dict[str, Any]] = None
     is_active: bool = False
+    requires_auth: bool = False
 
 
 class WorkflowUpdate(BaseModel):
@@ -79,6 +80,7 @@ class WorkflowUpdate(BaseModel):
     trigger_type: Optional[TriggerType] = None
     trigger_config: Optional[Dict[str, Any]] = None
     is_active: Optional[bool] = None
+    requires_auth: Optional[bool] = None
     status: Optional[WorkflowStatus] = None
 
 
@@ -94,6 +96,7 @@ class WorkflowResponse(BaseModel):
     trigger_type: TriggerType
     trigger_config: Optional[Dict[str, Any]]
     is_active: bool
+    requires_auth: bool
     usage_count: int
     last_used_at: Optional[datetime]
     created_at: datetime
@@ -112,6 +115,7 @@ class WorkflowSummary(BaseModel):
     status: WorkflowStatus
     trigger_type: TriggerType
     is_active: bool
+    requires_auth: bool
     usage_count: int
     last_used_at: Optional[datetime]
     created_at: datetime
@@ -169,4 +173,5 @@ class TriggerCheckResponse(BaseModel):
     workflow_name: Optional[str] = None
     confidence: float = 0.0
     trigger_type: Optional[TriggerType] = None
+    requires_auth: bool = False
     metadata: Optional[Dict[str, Any]] = None

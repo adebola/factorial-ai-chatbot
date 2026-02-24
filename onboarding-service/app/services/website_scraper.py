@@ -108,7 +108,79 @@ class WebsiteScraper:
                 return True
 
         return False
-    
+
+    def _normalize_url(self, url: str) -> str:
+        """Normalize URL by removing trailing slashes to prevent duplicates.
+        e.g. https://example.com/ and https://example.com are treated as the same URL."""
+        parsed = urlparse(url)
+        path = parsed.path.rstrip('/') or '/'
+        normalized = f"{parsed.scheme}://{parsed.netloc}{path}"
+        if parsed.query:
+            normalized += f"?{parsed.query}"
+        return normalized
+
+    def _domains_match(self, domain1: str, domain2: str) -> bool:
+        """Check if two domains match, ignoring www. prefix differences."""
+        return domain1.lower().removeprefix('www.') == domain2.lower().removeprefix('www.')
+
+    def _extract_links_from_html(self, html_content, base_url: str, allowed_domain: str) -> List[str]:
+        """Extract links from already-fetched HTML content (no additional HTTP request).
+        Uses the same filtering logic as _extract_links but operates on provided HTML."""
+        try:
+            if not html_content:
+                return []
+
+            soup = BeautifulSoup(html_content, 'html.parser')
+
+            # File extensions to exclude (images, documents, media files)
+            excluded_extensions = {
+                '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp',  # Images
+                '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',  # Documents
+                '.zip', '.tar', '.gz', '.rar',  # Archives
+                '.mp4', '.avi', '.mov', '.wmv', '.flv', '.mp3', '.wav',  # Media
+                '.js', '.css', '.xml', '.json',  # Web assets
+                '.exe', '.dmg', '.deb', '.rpm'  # Executables
+            }
+
+            links = []
+            for link in soup.find_all('a', href=True):
+                href = link['href']
+                full_url = urljoin(base_url, href)
+
+                # Check if URL belongs to allowed domain (flexible www matching)
+                parsed_url = urlparse(full_url)
+                if not self._domains_match(parsed_url.netloc, allowed_domain):
+                    continue
+
+                # Check if URL points to an excluded file type
+                path_lower = parsed_url.path.lower()
+                if any(path_lower.endswith(ext) for ext in excluded_extensions):
+                    continue
+
+                # Skip URLs with common non-HTML patterns
+                if any(pattern in path_lower for pattern in ['/download/', '/file/', '/asset/', '/static/', '/media/']):
+                    continue
+
+                # Remove fragments and normalize
+                clean_url = f"{parsed_url.scheme}://{parsed_url.netloc}{parsed_url.path}"
+                if parsed_url.query:
+                    clean_url += f"?{parsed_url.query}"
+                clean_url = self._normalize_url(clean_url)
+
+                if clean_url not in links:
+                    links.append(clean_url)
+
+            return links
+
+        except Exception as e:
+            logger.warning(
+                "Error extracting links from HTML content",
+                url=base_url,
+                error=str(e),
+                error_type=type(e).__name__
+            )
+            return []
+
     def start_website_ingestion(self, tenant_id: str, base_url: str) -> WebsiteIngestion:
         """Start website ingestion process"""
 
@@ -167,7 +239,7 @@ class WebsiteScraper:
             # Discover and scrape pages
             visited_urls = set()
             all_documents = []
-            urls_to_visit = [ingestion.base_url]
+            urls_to_visit = [self._normalize_url(ingestion.base_url)]
             failed_urls = []  # Track failed URLs with error details
 
             parsed_base = urlparse(ingestion.base_url)
@@ -187,6 +259,9 @@ class WebsiteScraper:
             while urls_to_visit and pages_processed < settings.MAX_PAGES_PER_SITE:
                 current_url = urls_to_visit.pop(0)
                 page_number += 1
+
+                # Normalize URL for consistent deduplication
+                current_url = self._normalize_url(current_url)
 
                 if current_url in visited_urls:
                     logger.debug(
@@ -212,8 +287,8 @@ class WebsiteScraper:
                 page_start_time = time.time()
 
                 try:
-                    # Scrape page using smart strategy
-                    page_doc = await self._scrape_page_with_strategy(
+                    # Scrape page using smart strategy (returns tuple)
+                    page_doc, page_html = await self._scrape_page_with_strategy(
                         tenant_id=tenant_id,
                         ingestion_id=ingestion_id,
                         url=current_url
@@ -248,8 +323,8 @@ class WebsiteScraper:
                             scraping_method=page_doc.metadata.get("scraping_method")
                         )
 
-                        # Find more URLs to scrape (only from same domain)
-                        new_urls = await self._extract_links_with_strategy(current_url, base_domain)
+                        # Extract links from already-fetched HTML (no extra HTTP request)
+                        new_urls = self._extract_links_from_html(page_html, current_url, base_domain)
 
                         links_added = 0
                         links_filtered = 0
@@ -259,13 +334,14 @@ class WebsiteScraper:
                                 links_filtered += 1
                                 continue
 
-                            # Check for duplicates
-                            if url not in visited_urls and url not in urls_to_visit:
-                                urls_to_visit.append(url)
+                            # Normalize and check for duplicates
+                            normalized_url = self._normalize_url(url)
+                            if normalized_url not in visited_urls and normalized_url not in urls_to_visit:
+                                urls_to_visit.append(normalized_url)
                                 links_added += 1
 
                         if links_added > 0 or links_filtered > 0:
-                            logger.debug(
+                            logger.info(
                                 f"Found {links_added} new URLs to visit ({links_filtered} filtered)",
                                 tenant_id=tenant_id,
                                 url=current_url,
@@ -414,8 +490,9 @@ class WebsiteScraper:
 
     async def _scrape_page_with_strategy(
         self, tenant_id: str, ingestion_id: str, url: str
-    ) -> Optional[Document]:
-        """Smart scraping with strategy-based fallback"""
+    ):
+        """Smart scraping with strategy-based fallback.
+        Returns (Document, html_content) tuple or (None, None) on failure."""
         domain = urlparse(url).netloc
         strategy_start_time = time.time()
 
@@ -448,9 +525,9 @@ class WebsiteScraper:
                         strategy="AUTO",
                         cache_size=len(self.domain_preferences)
                     )
-                    result = self._scrape_single_page(tenant_id, ingestion_id, url)
+                    result, result_html = self._scrape_single_page(tenant_id, ingestion_id, url)
                     if result:
-                        return result
+                        return result, result_html
                     # Cached method failed, try Playwright
                     logger.warning(
                         "↪️  Fallback Decision: Cached method failed, trying Playwright",
@@ -476,7 +553,7 @@ class WebsiteScraper:
                 will_fallback_if_insufficient="yes",
                 content_threshold=500
             )
-            result = self._scrape_single_page(tenant_id, ingestion_id, url)
+            result, result_html = self._scrape_single_page(tenant_id, ingestion_id, url)
 
             if result and len(result.page_content) > 500:
                 # Success with requests! Cache this preference
@@ -493,7 +570,7 @@ class WebsiteScraper:
                     cache_size_after=len(self.domain_preferences) + 1
                 )
                 self.domain_preferences[domain] = "requests"
-                return result
+                return result, result_html
 
             # Requests failed or returned minimal content - try Playwright
             logger.warning(
@@ -508,7 +585,7 @@ class WebsiteScraper:
                 requests_duration_ms=round((time.time() - strategy_start_time) * 1000, 2),
                 strategy="AUTO"
             )
-            result = await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
+            result, result_html = await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
             if result:
                 duration = time.time() - strategy_start_time
                 logger.info(
@@ -523,7 +600,7 @@ class WebsiteScraper:
                     cache_size_after=len(self.domain_preferences) + 1
                 )
                 self.domain_preferences[domain] = "playwright"
-            return result
+            return result, result_html
 
         # Strategy: REQUESTS_FIRST - Try requests with fallback
         elif self.strategy == ScrapingStrategy.REQUESTS_FIRST:
@@ -536,9 +613,9 @@ class WebsiteScraper:
                 strategy="REQUESTS_FIRST",
                 fallback_enabled=getattr(settings, 'ENABLE_FALLBACK', True)
             )
-            result = self._scrape_single_page(tenant_id, ingestion_id, url)
+            result, result_html = self._scrape_single_page(tenant_id, ingestion_id, url)
             if result:
-                return result
+                return result, result_html
 
             if getattr(settings, 'ENABLE_FALLBACK', True):
                 logger.warning(
@@ -551,7 +628,7 @@ class WebsiteScraper:
                     fallback_enabled=True
                 )
                 return await self._scrape_single_page_playwright(tenant_id, ingestion_id, url)
-            return None
+            return None, None
 
         # Strategy: PLAYWRIGHT_ONLY
         elif self.strategy == ScrapingStrategy.PLAYWRIGHT_ONLY:
@@ -617,8 +694,8 @@ class WebsiteScraper:
 
         return self._extract_links(base_url, allowed_domain)
 
-    def _scrape_single_page(self, tenant_id: str, ingestion_id: str, url: str) -> Optional[Document]:
-        """Scrape a single page and return document"""
+    def _scrape_single_page(self, tenant_id: str, ingestion_id: str, url: str):
+        """Scrape a single page and return (Document, raw_html) tuple, or (None, None) on failure"""
         
         # Create page record
         page_record = WebsitePage(
@@ -642,7 +719,7 @@ class WebsiteScraper:
                 page_record.status = DocumentStatus.FAILED
                 page_record.error_message = f"Non-HTML content type: {content_type}"
                 self.db.commit()
-                return None
+                return None, None
             
             # Parse HTML
             soup = BeautifulSoup(response.content, 'html.parser')
@@ -698,8 +775,8 @@ class WebsiteScraper:
                 page_record.status = DocumentStatus.FAILED
                 page_record.error_message = "No meaningful content found"
                 self.db.commit()
-                return None
-            
+                return None, None
+
             # Calculate content hash
             content_hash = hashlib.sha256(content.encode()).hexdigest()
             
@@ -734,16 +811,16 @@ class WebsiteScraper:
                 }
             )
 
-            return document
-            
+            return document, response.content
+
         except Exception as e:
             page_record.status = DocumentStatus.FAILED
             page_record.error_message = str(e)
             self.db.commit()
-            return None
+            return None, None
 
-    async def _scrape_single_page_playwright(self, tenant_id: str, ingestion_id: str, url: str) -> Optional[Document]:
-        """Scrape a single page using Playwright (handles JavaScript and popups)"""
+    async def _scrape_single_page_playwright(self, tenant_id: str, ingestion_id: str, url: str):
+        """Scrape a single page using Playwright. Returns (Document, html_str) or (None, None)."""
 
         # Create page record
         page_record = WebsitePage(
@@ -845,11 +922,28 @@ class WebsiteScraper:
                 try:
                     # Navigate to the page
                     playwright_timeout = getattr(settings, 'PLAYWRIGHT_TIMEOUT', 30000)
-                    # Use 'networkidle' instead of 'domcontentloaded' to support SPAs (React, Vue, Angular)
-                    # networkidle waits for JavaScript bundles to load and React to render
-                    response = await page.goto(url, wait_until='networkidle', timeout=playwright_timeout)
+                    # Try 'networkidle' first to support SPAs (React, Vue, Angular).
+                    # If it times out (heavy sites with persistent connections like banking sites),
+                    # proceed with whatever content the page has — don't re-navigate.
+                    response = None
+                    wait_strategy_used = 'networkidle'
+                    try:
+                        response = await page.goto(url, wait_until='networkidle', timeout=playwright_timeout)
+                    except PlaywrightTimeout:
+                        logger.warning(
+                            "⏳ Playwright: networkidle timeout, proceeding with partial content",
+                            tenant_id=tenant_id,
+                            ingestion_id=ingestion_id,
+                            url=url,
+                            timeout_ms=playwright_timeout
+                        )
+                        wait_strategy_used = 'timeout_fallback'
+                        # Don't re-navigate — the page already loaded, just didn't reach idle state.
+                        # Wait briefly for JS to settle, then continue with whatever content is available.
+                        await asyncio.sleep(3)
 
-                    if not response or response.status >= 400:
+                    # Only check response status if we got a response (not on timeout fallback)
+                    if response and response.status >= 400:
                         page_record.status = DocumentStatus.FAILED
                         page_record.error_message = f"HTTP {response.status if response else 'no response'}"
                         self.db.commit()
@@ -864,15 +958,16 @@ class WebsiteScraper:
                         )
 
                         await browser.close()
-                        return None
+                        return None, None
 
                     # Log successful page load
                     logger.info(
                         "✅ Playwright: Page loaded successfully",
                         tenant_id=tenant_id,
                         url=url,
-                        http_status=response.status,
-                        content_type=response.headers.get('content-type', 'unknown')
+                        wait_strategy=wait_strategy_used,
+                        http_status=response.status if response else None,
+                        content_type=response.headers.get('content-type', 'unknown') if response else 'unknown'
                     )
 
                     # Wait for page to load and close any popups
@@ -962,7 +1057,7 @@ class WebsiteScraper:
                         )
 
                         await browser.close()
-                        return None
+                        return None, None
 
                     # Calculate content hash
                     content_hash = hashlib.sha256(content.encode()).hexdigest()
@@ -1000,7 +1095,7 @@ class WebsiteScraper:
                         }
                     )
 
-                    return document
+                    return document, content_html
 
                 except PlaywrightTimeout as e:
                     page_record.status = DocumentStatus.FAILED
@@ -1017,7 +1112,7 @@ class WebsiteScraper:
                     )
 
                     await browser.close()
-                    return None
+                    return None, None
 
         except Exception as e:
             page_record.status = DocumentStatus.FAILED
@@ -1040,7 +1135,7 @@ class WebsiteScraper:
             except:
                 pass
 
-            return None
+            return None, None
 
     def _extract_links(self, base_url: str, allowed_domain: str) -> List[str]:
         """Extract links from a page that belong to the same domain and are likely HTML pages"""
@@ -1087,7 +1182,7 @@ class WebsiteScraper:
             return links
 
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Error extracting links with requests",
                 url=base_url,
                 error=str(e),
@@ -1159,7 +1254,7 @@ class WebsiteScraper:
                     return filtered_links
 
                 except Exception as e:
-                    logger.debug(
+                    logger.warning(
                         "Error in Playwright link extraction (inner)",
                         url=base_url,
                         error=str(e),
@@ -1169,7 +1264,7 @@ class WebsiteScraper:
                     return []
 
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 "Error extracting links with Playwright",
                 url=base_url,
                 error=str(e),

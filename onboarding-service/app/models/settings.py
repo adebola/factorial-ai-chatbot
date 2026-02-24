@@ -23,6 +23,13 @@ class TenantSettings(Base):
     welcome_message = Column(Text, nullable=True, default="Hello! How can I help you today?")
     chat_window_title = Column(String(100), nullable=True, default="Chat Support")
     
+    # End-user OAuth2 PKCE authentication
+    allow_authentication = Column(Boolean, default=False, nullable=False)
+    auth_authorization_endpoint = Column(String(1000), nullable=True)
+    auth_token_endpoint = Column(String(1000), nullable=True)
+    auth_client_id = Column(String(255), nullable=True)
+    auth_scopes = Column(String(500), nullable=True, default="openid profile email")
+
     # Future extensibility
     additional_settings = Column(JSON, default={})  # For future settings without schema changes
     

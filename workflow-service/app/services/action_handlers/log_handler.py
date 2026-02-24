@@ -4,7 +4,7 @@ Log Action Handler
 Logs information during workflow execution.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from .base import ActionHandler
@@ -26,7 +26,8 @@ class LogActionHandler(ActionHandler):
         params: Dict[str, Any],
         tenant_id: str,
         execution_id: str,
-        variables: Dict[str, Any]
+        variables: Dict[str, Any],
+        execution_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         try:
             message = params.get("message", "Workflow log entry")

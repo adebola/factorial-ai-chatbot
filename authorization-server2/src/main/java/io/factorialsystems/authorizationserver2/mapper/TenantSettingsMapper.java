@@ -16,13 +16,18 @@ public interface TenantSettingsMapper {
      */
     @Insert("""
         INSERT INTO tenant_settings (
-            id, tenant_id, primary_color, secondary_color, 
+            id, tenant_id, primary_color, secondary_color,
             hover_text, welcome_message, chat_window_title,
-            company_logo_url, additional_settings, is_active, created_at
+            company_logo_url, allow_authentication,
+            auth_authorization_endpoint, auth_token_endpoint,
+            auth_client_id, auth_scopes,
+            additional_settings, is_active, created_at
         ) VALUES (
             #{id}, #{tenantId}, #{primaryColor}, #{secondaryColor},
             #{hoverText}, #{welcomeMessage}, #{chatWindowTitle},
-            #{companyLogoUrl},
+            #{companyLogoUrl}, #{allowAuthentication},
+            #{authAuthorizationEndpoint}, #{authTokenEndpoint},
+            #{authClientId}, #{authScopes},
             #{additionalSettings, typeHandler=io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler}::json,
             #{isActive}, CURRENT_TIMESTAMP
         )
@@ -35,8 +40,11 @@ public interface TenantSettingsMapper {
     @Select("""
         SELECT id, tenant_id, primary_color, secondary_color,
                hover_text, welcome_message, chat_window_title,
-               company_logo_url, additional_settings, is_active, created_at, updated_at
-        FROM tenant_settings 
+               company_logo_url, allow_authentication,
+               auth_authorization_endpoint, auth_token_endpoint,
+               auth_client_id, auth_scopes,
+               additional_settings, is_active, created_at, updated_at
+        FROM tenant_settings
         WHERE tenant_id = #{tenantId} AND is_active = true
         """)
     @Result(property = "tenantId", column = "tenant_id")
@@ -46,7 +54,12 @@ public interface TenantSettingsMapper {
     @Result(property = "welcomeMessage", column = "welcome_message")
     @Result(property = "chatWindowTitle", column = "chat_window_title")
     @Result(property = "companyLogoUrl", column = "company_logo_url")
-    @Result(property = "additionalSettings", column = "additional_settings", 
+    @Result(property = "allowAuthentication", column = "allow_authentication")
+    @Result(property = "authAuthorizationEndpoint", column = "auth_authorization_endpoint")
+    @Result(property = "authTokenEndpoint", column = "auth_token_endpoint")
+    @Result(property = "authClientId", column = "auth_client_id")
+    @Result(property = "authScopes", column = "auth_scopes")
+    @Result(property = "additionalSettings", column = "additional_settings",
             typeHandler = io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler.class)
     @Result(property = "isActive", column = "is_active")
     @Result(property = "createdAt", column = "created_at")
@@ -59,8 +72,11 @@ public interface TenantSettingsMapper {
     @Select("""
         SELECT id, tenant_id, primary_color, secondary_color,
                hover_text, welcome_message, chat_window_title,
-               company_logo_url, additional_settings, is_active, created_at, updated_at
-        FROM tenant_settings 
+               company_logo_url, allow_authentication,
+               auth_authorization_endpoint, auth_token_endpoint,
+               auth_client_id, auth_scopes,
+               additional_settings, is_active, created_at, updated_at
+        FROM tenant_settings
         WHERE id = #{id} AND is_active = true
         """)
     @Result(property = "tenantId", column = "tenant_id")
@@ -70,6 +86,11 @@ public interface TenantSettingsMapper {
     @Result(property = "welcomeMessage", column = "welcome_message")
     @Result(property = "chatWindowTitle", column = "chat_window_title")
     @Result(property = "companyLogoUrl", column = "company_logo_url")
+    @Result(property = "allowAuthentication", column = "allow_authentication")
+    @Result(property = "authAuthorizationEndpoint", column = "auth_authorization_endpoint")
+    @Result(property = "authTokenEndpoint", column = "auth_token_endpoint")
+    @Result(property = "authClientId", column = "auth_client_id")
+    @Result(property = "authScopes", column = "auth_scopes")
     @Result(property = "additionalSettings", column = "additional_settings",
             typeHandler = io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler.class)
     @Result(property = "isActive", column = "is_active")
@@ -81,13 +102,18 @@ public interface TenantSettingsMapper {
      * Update tenant settings
      */
     @Update("""
-        UPDATE tenant_settings 
+        UPDATE tenant_settings
         SET primary_color = #{primaryColor},
             secondary_color = #{secondaryColor},
             hover_text = #{hoverText},
             welcome_message = #{welcomeMessage},
             chat_window_title = #{chatWindowTitle},
             company_logo_url = #{companyLogoUrl},
+            allow_authentication = #{allowAuthentication},
+            auth_authorization_endpoint = #{authAuthorizationEndpoint},
+            auth_token_endpoint = #{authTokenEndpoint},
+            auth_client_id = #{authClientId},
+            auth_scopes = #{authScopes},
             additional_settings = #{additionalSettings, typeHandler=io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler}::json,
             updated_at = CURRENT_TIMESTAMP
         WHERE tenant_id = #{tenantId} AND is_active = true
@@ -132,8 +158,11 @@ public interface TenantSettingsMapper {
     @Select("""
         SELECT id, tenant_id, primary_color, secondary_color,
                hover_text, welcome_message, chat_window_title,
-               company_logo_url, additional_settings, is_active, created_at, updated_at
-        FROM tenant_settings 
+               company_logo_url, allow_authentication,
+               auth_authorization_endpoint, auth_token_endpoint,
+               auth_client_id, auth_scopes,
+               additional_settings, is_active, created_at, updated_at
+        FROM tenant_settings
         WHERE is_active = true
         ORDER BY created_at DESC
         """)
@@ -144,6 +173,11 @@ public interface TenantSettingsMapper {
     @Result(property = "welcomeMessage", column = "welcome_message")
     @Result(property = "chatWindowTitle", column = "chat_window_title")
     @Result(property = "companyLogoUrl", column = "company_logo_url")
+    @Result(property = "allowAuthentication", column = "allow_authentication")
+    @Result(property = "authAuthorizationEndpoint", column = "auth_authorization_endpoint")
+    @Result(property = "authTokenEndpoint", column = "auth_token_endpoint")
+    @Result(property = "authClientId", column = "auth_client_id")
+    @Result(property = "authScopes", column = "auth_scopes")
     @Result(property = "additionalSettings", column = "additional_settings",
             typeHandler = io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler.class)
     @Result(property = "isActive", column = "is_active")

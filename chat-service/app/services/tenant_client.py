@@ -21,7 +21,7 @@ class TenantClient:
     def __init__(self):
         self.redis_client = redis.from_url(os.environ['REDIS_URL'], decode_responses=True)
         # Use OAuth2 server for tenant lookups instead of onboarding service
-        self.auth_server_url = os.environ.get('AUTHORIZATION_SERVER_URL', 'http://localhost:9000')
+        self.auth_server_url = os.environ.get('AUTHORIZATION_SERVER_URL', 'http://localhost:9002/auth')
         self.cache_ttl = 300  # 5 minutes cache TTL
         
     def _get_cache_key(self, key_type: str, value: str) -> str:
@@ -107,6 +107,29 @@ class TenantClient:
 
         return tenant_data
     
+    async def get_tenant_settings(self, tenant_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetch tenant settings from the auth server.
+        Cached in Redis for 300s since auth config rarely changes.
+        """
+        cache_key = f"tenant:settings:{tenant_id}"
+        try:
+            cached = self.redis_client.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for tenant settings: {tenant_id}")
+                return json.loads(cached)
+        except Exception as e:
+            logger.error(f"Error reading settings cache: {e}")
+
+        logger.debug(f"Cache miss for tenant settings: {tenant_id}")
+        settings = await self._fetch_tenant_from_auth_server(f"/tenants/{tenant_id}/settings")
+        if settings:
+            try:
+                self.redis_client.setex(cache_key, self.cache_ttl, json.dumps(settings))
+            except Exception as e:
+                logger.error(f"Error caching tenant settings: {e}")
+        return settings
+
     async def get_tenant_by_token(self, access_token: str) -> Optional[Dict[str, Any]]:
         """Get tenant by JWT access token with caching"""
 

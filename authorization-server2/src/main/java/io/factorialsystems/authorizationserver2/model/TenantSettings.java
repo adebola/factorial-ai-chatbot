@@ -37,7 +37,16 @@ public class TenantSettings {
     // Company logo settings
     @Builder.Default
     private String companyLogoUrl = null;  // Public URL for the uploaded logo (null by default)
-    
+
+    // End-user OAuth2 PKCE authentication
+    @Builder.Default
+    private Boolean allowAuthentication = false;
+    private String authAuthorizationEndpoint;
+    private String authTokenEndpoint;
+    private String authClientId;
+    @Builder.Default
+    private String authScopes = "openid profile email";
+
     // Future extensibility
     private Map<String, Object> additionalSettings;
     

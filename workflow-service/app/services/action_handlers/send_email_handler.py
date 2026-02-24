@@ -4,7 +4,7 @@ Send Email Action Handler
 Sends email via RabbitMQ (asynchronous, non-blocking).
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from .base import ActionHandler
 from ...core.exceptions import ActionExecutionError
@@ -26,7 +26,8 @@ class SendEmailActionHandler(ActionHandler):
         params: Dict[str, Any],
         tenant_id: str,
         execution_id: str,
-        variables: Dict[str, Any]
+        variables: Dict[str, Any],
+        execution_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         try:
             required_fields = ["to", "subject", "content"]

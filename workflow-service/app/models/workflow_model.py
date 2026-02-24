@@ -1,8 +1,8 @@
-from sqlalchemy import Column, String, Text, Boolean, DateTime, Integer, JSON, Enum as SQLEnum
-from sqlalchemy.sql import func
-import uuid
 import enum
-from datetime import datetime
+import uuid
+
+from sqlalchemy import Column, String, Text, Boolean, DateTime, Integer, JSON
+from sqlalchemy.sql import func
 
 from ..core.database import Base
 
@@ -42,6 +42,7 @@ class Workflow(Base):
 
     # Workflow metadata
     is_active = Column(Boolean, default=False)
+    requires_auth = Column(Boolean, default=False)
     usage_count = Column(Integer, default=0)
     last_used_at = Column(DateTime, nullable=True)
 
