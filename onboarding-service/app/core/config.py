@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Onboarding Service"
     
     # Scraping Defaults (non-sensitive)
-    MAX_PAGES_PER_SITE: int = 100
+    MAX_PAGES_PER_SITE: int = 500
     SCRAPING_DELAY: float = 1.0
 
     # Scraping Strategy Configuration

@@ -95,6 +95,8 @@ class WebsiteIngestion(Base):
     pages_discovered = Column(Integer, default=0)
     pages_processed = Column(Integer, default=0)
     pages_failed = Column(Integer, default=0)
+    urls_found = Column(Integer, default=0)  # Total unique URLs discovered (visited + unvisited queue)
+    max_pages_limit = Column(Integer, nullable=True)  # Effective page limit used for this ingestion
     error_message = Column(Text)
     scraping_strategy = Column(String(50), default="auto", nullable=False)
     started_at = Column(DateTime(timezone=True))

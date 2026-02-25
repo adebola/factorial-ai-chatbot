@@ -73,11 +73,23 @@ async def ingest_website(
             detail=reason
         )
 
+    # Extract plan's page limit from billing response
+    plan_max_pages = limit_check.get("max_pages_per_website")
+    # Effective limit: min of plan limit and global cap (if plan has a limit)
+    if plan_max_pages is not None:
+        effective_max_pages = min(plan_max_pages, settings.MAX_PAGES_PER_SITE)
+    else:
+        effective_max_pages = settings.MAX_PAGES_PER_SITE
+
     try:
         # Start scraping in the background
         # Don't pass use_javascript parameter - let it use the default AUTO strategy
         scraper = WebsiteScraper(db)
         ingestion = scraper.start_website_ingestion(claims.tenant_id, website_url)
+
+        # Store the effective page limit on the ingestion record
+        ingestion.max_pages_limit = effective_max_pages
+        db.commit()
 
         # Process in the background (in a real app, use Celery)
         # Pass environment variables and categorization parameters to background task
@@ -92,7 +104,8 @@ async def ingest_website(
                 user_categories=categories,
                 user_tags=tags,
                 auto_categorize=categorization_enabled,
-                scraping_strategy=scraper.strategy
+                scraping_strategy=scraper.strategy,
+                max_pages=effective_max_pages
             )
         )
 
@@ -244,6 +257,9 @@ async def get_ingestion_status(
         "pages_discovered": ingestion.pages_discovered,
         "pages_processed": ingestion.pages_processed,
         "pages_failed": ingestion.pages_failed,
+        "urls_found": ingestion.urls_found or 0,
+        "max_pages_limit": ingestion.max_pages_limit,
+        "limit_reached": ingestion.pages_processed >= (ingestion.max_pages_limit or settings.MAX_PAGES_PER_SITE),
         "started_at": ingestion.started_at.isoformat() if ingestion.started_at else None,
         "completed_at": ingestion.completed_at.isoformat() if ingestion.completed_at else None,
         "error_message": ingestion.error_message,
@@ -347,6 +363,9 @@ async def list_tenant_ingestions(
                 "pages_discovered": ing.pages_discovered,
                 "pages_processed": ing.pages_processed,
                 "pages_failed": ing.pages_failed,
+                "urls_found": ing.urls_found or 0,
+                "max_pages_limit": ing.max_pages_limit,
+                "limit_reached": ing.pages_processed >= (ing.max_pages_limit or settings.MAX_PAGES_PER_SITE),
                 "started_at": ing.started_at.isoformat() if ing.started_at else None,
                 "completed_at": ing.completed_at.isoformat() if ing.completed_at else None,
                 "error_message": ing.error_message,
@@ -481,7 +500,8 @@ async def retry_ingestion(
                 website_url=ingestion.base_url,
                 ingestion_id=ingestion_id,
                 openai_api_key=openai_key,
-                scraping_strategy=strategy
+                scraping_strategy=strategy,
+                max_pages=ingestion.max_pages_limit
             )
         )
 
@@ -511,7 +531,8 @@ async def background_website_ingestion(
     user_categories: Optional[List[str]] = None,
     user_tags: Optional[List[str]] = None,
     auto_categorize: bool = False,
-    scraping_strategy: ScrapingStrategy = None
+    scraping_strategy: ScrapingStrategy = None,
+    max_pages: int = None
 ):
     """Background task for website ingestion with optional categorization - creates its own database session"""
     logger.info(
@@ -591,7 +612,7 @@ async def background_website_ingestion(
             website_url=website_url
         )
 
-        documents = await scraper.process_existing_ingestion(ingestion)
+        documents = await scraper.process_existing_ingestion(ingestion, max_pages=max_pages)
 
         # Define pages_scraped for usage tracking and logging
         pages_scraped = len(documents) if documents else 0
@@ -936,6 +957,9 @@ async def get_ingestion_stats(
             "pages_discovered": ingestion.pages_discovered,
             "pages_processed": ingestion.pages_processed,
             "pages_failed": ingestion.pages_failed,
+            "urls_found": ingestion.urls_found or 0,
+            "max_pages_limit": ingestion.max_pages_limit,
+            "limit_reached": ingestion.pages_processed >= (ingestion.max_pages_limit or settings.MAX_PAGES_PER_SITE),
             "unique_content_pages": unique_pages,
             "processing_time_seconds": processing_time,
             "started_at": ingestion.started_at.isoformat() if ingestion.started_at else None,

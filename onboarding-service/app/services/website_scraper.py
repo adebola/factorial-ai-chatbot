@@ -205,9 +205,10 @@ class WebsiteScraper:
         ingestion = self.start_website_ingestion(tenant_id, base_url)
         return self.process_existing_ingestion(ingestion)
     
-    async def process_existing_ingestion(self, ingestion: WebsiteIngestion) -> List[Document]:
+    async def process_existing_ingestion(self, ingestion: WebsiteIngestion, max_pages: int = None) -> List[Document]:
         """Process an existing ingestion record (async)"""
         start_time = time.time()
+        effective_limit = max_pages or settings.MAX_PAGES_PER_SITE
 
         # Store IDs for fetching from this session
         tenant_id = ingestion.tenant_id
@@ -220,7 +221,7 @@ class WebsiteScraper:
             ingestion_id=ingestion_id,
             base_url=base_url,
             strategy=self.strategy.value,
-            max_pages=settings.MAX_PAGES_PER_SITE
+            max_pages=effective_limit
         )
 
         try:
@@ -256,7 +257,7 @@ class WebsiteScraper:
                 base_domain=base_domain
             )
 
-            while urls_to_visit and pages_processed < settings.MAX_PAGES_PER_SITE:
+            while urls_to_visit and pages_processed < effective_limit:
                 current_url = urls_to_visit.pop(0)
                 page_number += 1
 
@@ -275,7 +276,7 @@ class WebsiteScraper:
 
                 # Log before scraping
                 logger.info(
-                    f"📄 Page {page_number}/{settings.MAX_PAGES_PER_SITE}: Starting scrape",
+                    f"📄 Page {page_number}/{effective_limit}: Starting scrape",
                     tenant_id=tenant_id,
                     ingestion_id=ingestion_id,
                     url=current_url,
@@ -404,8 +405,8 @@ class WebsiteScraper:
                     )
 
                     # Update database with progress for UI polling
-                    # pages_discovered = total unique URLs found (visited + still in queue)
-                    ingestion.pages_discovered = len(visited_urls) + len(urls_to_visit)
+                    ingestion.pages_discovered = len(visited_urls)  # Pages actually attempted
+                    ingestion.urls_found = len(visited_urls) + len(urls_to_visit)  # Total URLs discovered
                     ingestion.pages_processed = pages_processed
                     ingestion.pages_failed = pages_failed
                     self.db.commit()
@@ -416,8 +417,8 @@ class WebsiteScraper:
             # Final update - DO NOT set status to COMPLETED here
             # Status will be set to COMPLETED by the background task after categorization finishes
             total_duration = time.time() - start_time
-            # pages_discovered = total unique URLs found (visited + any remaining in queue)
-            ingestion.pages_discovered = len(visited_urls) + len(urls_to_visit)
+            ingestion.pages_discovered = len(visited_urls)  # Pages actually attempted
+            ingestion.urls_found = len(visited_urls) + len(urls_to_visit)  # Total URLs discovered
             ingestion.pages_processed = pages_processed
             ingestion.pages_failed = pages_failed
             self.db.commit()
@@ -441,8 +442,10 @@ class WebsiteScraper:
                 ingestion_id=ingestion_id,
                 base_url=base_url,
                 pages_discovered=len(visited_urls),
+                urls_found=len(visited_urls) + len(urls_to_visit),
                 pages_processed=pages_processed,
                 pages_failed=pages_failed,
+                effective_limit=effective_limit,
                 failed_urls_count=len(failed_urls),
                 total_documents=len(all_documents),
                 duration_seconds=round(total_duration, 2)

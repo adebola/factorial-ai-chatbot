@@ -259,7 +259,8 @@ class WorkflowExecutor:
                 "tenant_id": execution.tenant_id,
                 "session_id": execution.session_id,
                 "user_identifier": execution.user_identifier,
-                "user_access_token": getattr(execution, '_user_access_token', None)
+                "user_access_token": getattr(execution, '_user_access_token', None),
+                "workflow_requires_auth": getattr(execution, '_workflow_requires_auth', False)
             }
 
             # Execute the step!

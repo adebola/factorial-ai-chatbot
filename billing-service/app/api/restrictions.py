@@ -101,7 +101,7 @@ async def check_can_upload_document(
     )
 
 
-@router.get("/check/can-ingest-website/{tenant_id}", response_model=PermissionCheckResponse)
+@router.get("/check/can-ingest-website/{tenant_id}")
 async def check_can_ingest_website(
     tenant_id: str,
     db: Session = Depends(get_db)
@@ -115,17 +115,18 @@ async def check_can_ingest_website(
         tenant_id: Tenant ID to check
 
     Returns:
-        PermissionCheckResponse with allowed status and reason
+        Dict with allowed status, reason, and max_pages_per_website from plan
     """
     logger.info(f"Checking website ingestion permission for tenant {tenant_id}")
 
     checker = SubscriptionChecker(db)
-    can_ingest, reason = checker.check_can_ingest_website(tenant_id)
+    can_ingest, reason, max_pages_per_website = checker.check_can_ingest_website(tenant_id)
 
-    return PermissionCheckResponse(
-        allowed=can_ingest,
-        reason=reason
-    )
+    return {
+        "allowed": can_ingest,
+        "reason": reason,
+        "max_pages_per_website": max_pages_per_website
+    }
 
 
 @router.get("/check/can-send-chat/{tenant_id}", response_model=PermissionCheckResponse)

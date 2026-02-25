@@ -155,7 +155,7 @@ class SubscriptionChecker:
 
         return True, None
 
-    def check_can_ingest_website(self, tenant_id: str) -> Tuple[bool, Optional[str]]:
+    def check_can_ingest_website(self, tenant_id: str) -> Tuple[bool, Optional[str], Optional[int]]:
         """
         Check if tenant can ingest a website based on plan limits.
 
@@ -163,21 +163,21 @@ class SubscriptionChecker:
             tenant_id: Tenant ID
 
         Returns:
-            Tuple of (can_ingest, reason_if_not)
+            Tuple of (can_ingest, reason_if_not, max_pages_per_website)
         """
         # First check subscription is active
         is_active, reason = self.check_subscription_active(tenant_id)
         if not is_active:
-            return False, reason
+            return False, reason, None
 
         # Get subscription and plan
         subscription = self.get_active_subscription(tenant_id)
         if not subscription or not subscription.plan_id:
-            return False, "No active plan found"
+            return False, "No active plan found", None
 
         plan = self.db.query(Plan).filter(Plan.id == subscription.plan_id).first()
         if not plan:
-            return False, "Plan not found"
+            return False, "Plan not found", None
 
         # Get usage tracking
         usage = self.db.query(UsageTracking).filter(
@@ -186,14 +186,14 @@ class SubscriptionChecker:
 
         if not usage:
             # No usage record yet - allow ingestion
-            return True, None
+            return True, None, plan.max_pages_per_website
 
         # Check website limit
         if plan.website_limit is not None:
             if usage.websites_used >= plan.website_limit:
-                return False, f"Website limit reached ({plan.website_limit} websites allowed on {plan.name} plan)"
+                return False, f"Website limit reached ({plan.website_limit} websites allowed on {plan.name} plan)", plan.max_pages_per_website
 
-        return True, None
+        return True, None, plan.max_pages_per_website
 
     def check_can_send_chat(self, tenant_id: str) -> Tuple[bool, Optional[str]]:
         """

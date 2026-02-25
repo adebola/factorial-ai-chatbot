@@ -44,14 +44,22 @@ class ApiCallActionHandler(ActionHandler):
         headers.setdefault("Content-Type", "application/json")
         headers.setdefault("User-Agent", f"ChatCraft-Workflow/{execution_id}")
 
-        # Opt-in user token forwarding: when the workflow step specifies
-        # forward_user_token: true, inject the end-user's Bearer token
-        if params.get("forward_user_token") and execution_context:
+        # Forward user token if: (a) step explicitly opts in, OR (b) workflow requires auth
+        should_forward = params.get("forward_user_token") or (
+            execution_context and execution_context.get("workflow_requires_auth")
+        )
+        if should_forward and execution_context:
             user_token = execution_context.get("user_access_token")
             if user_token:
                 headers["Authorization"] = f"Bearer {user_token}"
                 logger.info(
                     "Forwarding user access token to external API",
+                    url=url,
+                    execution_id=execution_id
+                )
+            else:
+                logger.warning(
+                    "Token forwarding requested but no user_access_token in execution context",
                     url=url,
                     execution_id=execution_id
                 )

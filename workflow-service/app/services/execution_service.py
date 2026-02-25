@@ -737,6 +737,7 @@ class ExecutionService:
         # Attach user access token as transient attribute for workflow steps
         # (not persisted to DB — only used during this execution run)
         execution._user_access_token = (request.context or {}).get("user_access_token")
+        execution._workflow_requires_auth = workflow.requires_auth
 
         # Save the initial state
         await self.state_manager.save_state(
@@ -865,6 +866,7 @@ class ExecutionService:
 
         # Attach user access token as transient attribute for workflow steps
         execution._user_access_token = (request.context or {}).get("user_access_token")
+        execution._workflow_requires_auth = workflow.requires_auth
 
         # Execute using WorkflowExecutor!
         # This replaces the 185-line while loop with clean delegation
