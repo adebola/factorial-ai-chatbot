@@ -5,7 +5,7 @@ import asyncio
 import json
 import uuid
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ..core.database import get_db
 from ..models.chat_models import ChatSession, ChatMessage
@@ -114,16 +114,32 @@ class ChatWebSocket:
 
         tenant_id = tenant["id"]  # tenant is now a dict from HTTP API
 
-        # Session resumption: if session_id provided, try to resume an existing authenticated session
+        # Session resumption: if session_id provided, try to resume an existing session
         is_authenticated = False
         auth_expired = False
+        existing_session_resumed = False
         if session_id:
             existing_session = self.db.query(ChatSession).filter(
                 ChatSession.session_id == session_id,
                 ChatSession.tenant_id == tenant_id,
                 ChatSession.is_active == True
             ).first()
+
+            # Fallback: find recently-inactive session (within 24h)
+            # This handles page navigations on non-SPA sites where disconnect sets is_active=False
+            if not existing_session:
+                existing_session = self.db.query(ChatSession).filter(
+                    ChatSession.session_id == session_id,
+                    ChatSession.tenant_id == tenant_id,
+                    ChatSession.is_active == False,
+                    ChatSession.last_activity > datetime.now() - timedelta(hours=24)
+                ).first()
+                if existing_session:
+                    existing_session.is_active = True
+                    logger.info(f"Reactivated inactive session {session_id} for tenant {tenant_id}")
+
             if existing_session:
+                existing_session_resumed = True
                 # Resume the existing session
                 if existing_session.is_authenticated:
                     # Verify tokens still exist in Redis (not just DB flag)
@@ -194,6 +210,30 @@ class ChatWebSocket:
                     "type": "auth_expired",
                     "message": "Your session has expired. Please log in again."
                 }))
+
+            # Send chat history on session resumption so the widget can restore the UI
+            if existing_session_resumed:
+                try:
+                    history_messages = self.db.query(ChatMessage).filter(
+                        ChatMessage.session_id == session_id,
+                        ChatMessage.tenant_id == tenant_id
+                    ).order_by(ChatMessage.created_at.asc()).limit(50).all()
+
+                    if history_messages:
+                        history_data = [{
+                            "role": msg.message_type,
+                            "content": msg.content,
+                            "message_id": msg.id,
+                            "timestamp": msg.created_at.isoformat()
+                        } for msg in history_messages]
+
+                        await websocket.send_text(json.dumps({
+                            "type": "history",
+                            "messages": history_data,
+                            "session_id": session_id
+                        }))
+                except Exception as e:
+                    logger.error(f"Failed to send chat history: {str(e)}", extra={"session_id": session_id})
 
             while True:
                 # Receive a message from client

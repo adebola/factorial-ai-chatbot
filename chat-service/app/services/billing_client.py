@@ -21,6 +21,10 @@ class BillingServiceClient:
         self.base_url = os.environ.get("BILLING_SERVICE_URL", "http://localhost:8004")
         self.api_prefix = "/api/v1/restrictions"
         self.timeout = 5.0  # 5 second timeout
+        self._client = httpx.AsyncClient(
+            timeout=self.timeout,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
+        )
 
     @retry(
         stop=stop_after_attempt(3),
@@ -40,22 +44,21 @@ class BillingServiceClient:
         url = f"{self.base_url}{self.api_prefix}/check/can-send-chat/{tenant_id}"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url)
+            response = await self._client.get(url)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get("allowed", False), data.get("reason")
-                elif response.status_code == 404:
-                    logger.warning(f"No subscription found for tenant {tenant_id}")
-                    return False, "No active subscription found"
-                else:
-                    logger.error(
-                        f"Billing service returned error: {response.status_code}",
-                        extra={"tenant_id": tenant_id, "status": response.status_code}
-                    )
-                    # On error, fail open (allow chat) to prevent service disruption
-                    return True, None
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("allowed", False), data.get("reason")
+            elif response.status_code == 404:
+                logger.warning(f"No subscription found for tenant {tenant_id}")
+                return False, "No active subscription found"
+            else:
+                logger.error(
+                    f"Billing service returned error: {response.status_code}",
+                    extra={"tenant_id": tenant_id, "status": response.status_code}
+                )
+                # On error, fail open (allow chat) to prevent service disruption
+                return True, None
 
         except httpx.TimeoutException:
             logger.error(
@@ -97,20 +100,19 @@ class BillingServiceClient:
         url = f"{self.base_url}{self.api_prefix}/usage/{tenant_id}"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url)
+            response = await self._client.get(url)
 
-                if response.status_code == 200:
-                    return response.json()
-                elif response.status_code == 404:
-                    logger.warning(f"No subscription found for tenant {tenant_id}")
-                    return None
-                else:
-                    logger.error(
-                        f"Billing service returned error: {response.status_code}",
-                        extra={"tenant_id": tenant_id, "status": response.status_code}
-                    )
-                    return None
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 404:
+                logger.warning(f"No subscription found for tenant {tenant_id}")
+                return None
+            else:
+                logger.error(
+                    f"Billing service returned error: {response.status_code}",
+                    extra={"tenant_id": tenant_id, "status": response.status_code}
+                )
+                return None
 
         except httpx.TimeoutException:
             logger.error(
@@ -149,19 +151,18 @@ class BillingServiceClient:
         params = {"include_grace_period": include_grace_period}
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.get(url, params=params)
+            response = await self._client.get(url, params=params)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get("is_active", False), data.get("reason")
-                else:
-                    logger.error(
-                        f"Billing service returned error: {response.status_code}",
-                        extra={"tenant_id": tenant_id, "status": response.status_code}
-                    )
-                    # Fail open
-                    return True, None
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("is_active", False), data.get("reason")
+            else:
+                logger.error(
+                    f"Billing service returned error: {response.status_code}",
+                    extra={"tenant_id": tenant_id, "status": response.status_code}
+                )
+                # Fail open
+                return True, None
 
         except httpx.TimeoutException:
             logger.error(

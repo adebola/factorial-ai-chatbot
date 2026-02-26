@@ -2,19 +2,20 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 # Get database URL from environment
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:password@localhost:5432/workflow_db")
 
-# Create SQLAlchemy engine
-# Note: Set echo=True to enable SQL query logging for debugging
-# Or use environment variable: echo=True if os.environ.get("SQL_DEBUG") == "true" else False
+# Create SQLAlchemy engine with QueuePool (connection pooling)
 engine = create_engine(
     DATABASE_URL,
-    echo=False,  # Disabled to reduce log verbosity
-    poolclass=StaticPool,
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+    echo=False,
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_recycle=300,
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": 10, "options": "-c statement_timeout=30000"}
 )
 
 # Create SessionLocal

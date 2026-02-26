@@ -1,10 +1,12 @@
 import os
+import json
 import hashlib
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from langchain_core.documents import Document
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker, Session
 from openai import OpenAI
+import redis
 
 from ..core.config import settings
 from ..core.database import engine_vector
@@ -22,6 +24,9 @@ class PgVectorStore:
     # Maximum cosine distance for results to be considered relevant
     MAX_DISTANCE = 1.5
 
+    # Embedding cache TTL in seconds (1 hour)
+    EMBEDDING_CACHE_TTL = 3600
+
     def __init__(self):
         self.logger = get_logger("pg_vector_store")
 
@@ -36,20 +41,83 @@ class PgVectorStore:
         self.engine = engine_vector
         self.SessionLocal = sessionmaker(bind=self.engine)
 
+        # Redis client for embedding cache
+        try:
+            redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+            self._redis = redis.from_url(redis_url, decode_responses=True)
+            self._redis.ping()
+        except Exception as e:
+            self.logger.warning(f"Redis unavailable for embedding cache, caching disabled: {e}")
+            self._redis = None
+
         self.logger.info("PgVectorStore initialized successfully")
 
-    def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings using OpenAI API"""
+    def _embedding_cache_key(self, text: str) -> str:
+        """Generate Redis cache key for an embedding"""
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+        return f"emb:{text_hash}"
+
+    def _get_cached_embedding(self, text: str) -> Optional[List[float]]:
+        """Try to get a cached embedding from Redis"""
+        if not self._redis:
+            return None
         try:
-            response = self.openai_client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=texts,
-                timeout=15.0
-            )
-            return [item.embedding for item in response.data]
+            cached = self._redis.get(self._embedding_cache_key(text))
+            if cached:
+                return json.loads(cached)
         except Exception as e:
-            self.logger.error(f"Failed to generate embeddings: {e}")
-            raise
+            self.logger.warning(f"Redis embedding cache read error: {e}")
+        return None
+
+    def _cache_embedding(self, text: str, embedding: List[float]) -> None:
+        """Cache an embedding in Redis"""
+        if not self._redis:
+            return
+        try:
+            self._redis.setex(
+                self._embedding_cache_key(text),
+                self.EMBEDDING_CACHE_TTL,
+                json.dumps(embedding)
+            )
+        except Exception as e:
+            self.logger.warning(f"Redis embedding cache write error: {e}")
+
+    def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings using OpenAI API with Redis caching"""
+        results = [None] * len(texts)
+        uncached_texts = []
+        uncached_indices = []
+
+        # Check cache for each text
+        for i, text in enumerate(texts):
+            cached = self._get_cached_embedding(text)
+            if cached:
+                results[i] = cached
+            else:
+                uncached_texts.append(text)
+                uncached_indices.append(i)
+
+        if uncached_texts:
+            try:
+                response = self.openai_client.embeddings.create(
+                    model="text-embedding-ada-002",
+                    input=uncached_texts,
+                    timeout=15.0
+                )
+                for j, item in enumerate(response.data):
+                    idx = uncached_indices[j]
+                    results[idx] = item.embedding
+                    self._cache_embedding(uncached_texts[j], item.embedding)
+            except Exception as e:
+                self.logger.error(f"Failed to generate embeddings: {e}")
+                raise
+
+        if uncached_texts:
+            self.logger.debug(
+                f"Embedding cache: {len(texts) - len(uncached_texts)} hits, {len(uncached_texts)} misses"
+            )
+
+        return results
 
     def search_similar(
         self,

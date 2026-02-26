@@ -274,7 +274,17 @@ class WidgetService:
                 this.chatContainer = null;
                 this.messagesContainer = null;
                 this.inputField = null;
-                this.sessionId = sessionStorage.getItem('factorial_session_id') || null;
+                // Read session_id from localStorage with 24h expiry check
+                const storedSessionId = localStorage.getItem('factorial_session_id');
+                const storedSessionTs = localStorage.getItem('factorial_session_ts');
+                const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+                if (storedSessionId && storedSessionTs && (Date.now() - parseInt(storedSessionTs)) < SESSION_TTL) {
+                    this.sessionId = storedSessionId;
+                } else {
+                    this.sessionId = null;
+                    localStorage.removeItem('factorial_session_id');
+                    localStorage.removeItem('factorial_session_ts');
+                }
                 this.feedbackSubmitted = new Set();
                 this.isAuthenticated = false;
                 this.authUser = null;
@@ -411,8 +421,9 @@ class WidgetService:
                 sessionStorage.removeItem('factorial_pkce_verifier');
                 sessionStorage.removeItem('factorial_pkce_state');
 
-                // Persist session across page refreshes (cleared on tab close)
-                sessionStorage.setItem('factorial_session_id', data.session_id);
+                // Persist session across page navigations and tab close
+                localStorage.setItem('factorial_session_id', data.session_id);
+                localStorage.setItem('factorial_session_ts', Date.now().toString());
                 sessionStorage.setItem('factorial_auth_user', JSON.stringify(data.user));
 
                 // Update UI to show authenticated state
@@ -537,7 +548,8 @@ class WidgetService:
             }
 
             // Clear persisted session
-            sessionStorage.removeItem('factorial_session_id');
+            localStorage.removeItem('factorial_session_id');
+            localStorage.removeItem('factorial_session_ts');
             sessionStorage.removeItem('factorial_auth_user');
 
             // Reset auth state
@@ -1202,7 +1214,8 @@ class WidgetService:
                         // Extract session_id from connection message
                         if (data.session_id) {
                             this.sessionId = data.session_id;
-                            sessionStorage.setItem('factorial_session_id', data.session_id);
+                            localStorage.setItem('factorial_session_id', data.session_id);
+                            localStorage.setItem('factorial_session_ts', Date.now().toString());
                         }
                         // Show authenticated user info if returned from server
                         if (data.authenticated && data.user) {
@@ -1210,6 +1223,14 @@ class WidgetService:
                             this.authUser = data.user;
                             sessionStorage.setItem('factorial_auth_user', JSON.stringify(data.user));
                             this.showAuthenticatedHeader();
+                        }
+                    } else if (data.type === 'history') {
+                        // Restore previous messages on session resumption (page navigation)
+                        if (data.messages && data.messages.length > 0) {
+                            data.messages.forEach(msg => {
+                                const role = msg.role === 'user' ? 'user' : 'bot';
+                                this.addMessage(role, msg.content, msg.message_id);
+                            });
                         }
                     } else if (data.type === 'auth_expired') {
                         this.handleAuthExpired(data.message);

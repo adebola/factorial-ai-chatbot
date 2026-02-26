@@ -2,6 +2,7 @@
 State management for workflow execution.
 Handles both Redis and database persistence for workflow states.
 """
+import asyncio
 import json
 import redis
 from typing import Dict, Any, Optional
@@ -80,14 +81,15 @@ class StateManager:
                 "updated_at": now.isoformat()
             }
 
-            # Save to Redis for fast access
+            # Save to Redis and database in parallel
             redis_key = f"{self.state_prefix}{session_id}"
             ttl_seconds = ttl_hours * 3600
 
-            await self._save_to_redis(redis_key, state_data, ttl_seconds)
-
-            # Save to database for persistence
-            await self._save_to_database(state_data, expires_at)
+            loop = asyncio.get_event_loop()
+            await asyncio.gather(
+                loop.run_in_executor(None, self._save_to_redis_sync, redis_key, state_data, ttl_seconds),
+                self._save_to_database(state_data, expires_at)
+            )
 
             logger.debug(f"State saved for session {session_id}, step {current_step_id}")
             return True
@@ -404,19 +406,28 @@ class StateManager:
             logger.error(f"Failed to get active sessions for tenant {tenant_id}: {e}")
             return []
 
-    async def _save_to_redis(
+    def _save_to_redis_sync(
         self,
         key: str,
         data: Dict[str, Any],
         ttl_seconds: int
     ) -> None:
-        """Save state data to Redis"""
+        """Save state data to Redis (sync, safe for run_in_executor)"""
         try:
             serialized_data = json.dumps(data)
             self.redis_client.setex(key, ttl_seconds, serialized_data)
         except Exception as e:
             logger.error(f"Failed to save to Redis: {e}")
             raise
+
+    async def _save_to_redis(
+        self,
+        key: str,
+        data: Dict[str, Any],
+        ttl_seconds: int
+    ) -> None:
+        """Save state data to Redis (async wrapper)"""
+        self._save_to_redis_sync(key, data, ttl_seconds)
 
     async def _get_from_redis(self, key: str) -> Optional[Dict[str, Any]]:
         """Get state data from Redis"""

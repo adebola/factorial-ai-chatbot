@@ -322,8 +322,9 @@ class ChatService:
                 token_count=len(response_content)  # Approximate
             )
             
-            # Store conversation in Redis for memory
-            self._store_conversation_turn(session_id, user_message, response_content)
+            # Store conversation in Redis for memory (offloaded to avoid blocking event loop)
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(None, self._store_conversation_turn, session_id, user_message, response_content)
             
             # Log outgoing message
             log_chat_message(

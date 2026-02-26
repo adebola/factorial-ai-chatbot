@@ -6,6 +6,7 @@ to the billing service on every message. Provides sub-millisecond limit checks
 with push-based cache invalidation for accuracy.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -39,6 +40,10 @@ class UsageCacheManager:
         )
         self.cache_ttl = int(os.environ.get("USAGE_CACHE_TTL_SECONDS", "300"))  # 5 minutes default
         self.http_timeout = float(os.environ.get("BILLING_SERVICE_TIMEOUT", "5.0"))
+        self._http_client = httpx.AsyncClient(
+            timeout=self.http_timeout,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5)
+        )
 
     def _cache_key(self, tenant_id: str) -> str:
         """Generate Redis cache key for tenant usage"""
@@ -123,69 +128,68 @@ class UsageCacheManager:
             if api_key:
                 headers["X-API-Key"] = api_key
 
-            async with httpx.AsyncClient(timeout=self.http_timeout) as client:
-                response = await client.get(
+            # Fetch usage stats, daily limits, and monthly limits in parallel
+            client = self._http_client
+            response, plan_response, monthly_response = await asyncio.gather(
+                client.get(
                     f"{self.billing_service_url}/api/v1/usage/stats/{tenant_id}",
                     headers=headers
-                )
+                ),
+                client.get(
+                    f"{self.billing_service_url}/api/v1/usage/check/daily_chats",
+                    headers=headers
+                ),
+                client.get(
+                    f"{self.billing_service_url}/api/v1/usage/check/monthly_chats",
+                    headers=headers
+                ),
+            )
 
-                if response.status_code == 200:
-                    data = response.json()
-                    usage = data.get("usage", {})
+            if response.status_code == 200:
+                data = response.json()
+                usage = data.get("usage", {})
 
-                    # Build cache data structure
-                    cache_data = {
-                        "daily_used": usage.get("daily_chats_used", 0),
-                        "daily_limit": -1,  # Will be set from plan check
-                        "monthly_used": usage.get("monthly_chats_used", 0),
-                        "monthly_limit": -1,
-                        "unlimited": False,
-                        "cached_at": datetime.now(timezone.utc).isoformat()
-                    }
+                # Build cache data structure
+                cache_data = {
+                    "daily_used": usage.get("daily_chats_used", 0),
+                    "daily_limit": -1,  # Will be set from plan check
+                    "monthly_used": usage.get("monthly_chats_used", 0),
+                    "monthly_limit": -1,
+                    "unlimited": False,
+                    "cached_at": datetime.now(timezone.utc).isoformat()
+                }
 
-                    # Fetch plan limits with API key authentication
-                    plan_response = await client.get(
-                        f"{self.billing_service_url}/api/v1/usage/check/daily_chats",
-                        headers=headers
-                    )
+                if plan_response.status_code == 200:
+                    plan_data = plan_response.json()
+                    cache_data["daily_limit"] = plan_data.get("limit", -1)
+                    cache_data["unlimited"] = plan_data.get("unlimited", False)
 
-                    if plan_response.status_code == 200:
-                        plan_data = plan_response.json()
-                        cache_data["daily_limit"] = plan_data.get("limit", -1)
-                        cache_data["unlimited"] = plan_data.get("unlimited", False)
+                if monthly_response.status_code == 200:
+                    monthly_data = monthly_response.json()
+                    cache_data["monthly_limit"] = monthly_data.get("limit", -1)
 
-                    # Fetch monthly limit
-                    monthly_response = await client.get(
-                        f"{self.billing_service_url}/api/v1/usage/check/monthly_chats",
-                        headers=headers
-                    )
+                # Cache the data
+                self._cache_usage_data(tenant_id, cache_data)
 
-                    if monthly_response.status_code == 200:
-                        monthly_data = monthly_response.json()
-                        cache_data["monthly_limit"] = monthly_data.get("limit", -1)
-
-                    # Cache the data
-                    self._cache_usage_data(tenant_id, cache_data)
-
-                    # Check limits
-                    if cache_data["unlimited"]:
-                        return (True, None)
-
-                    if cache_data["daily_limit"] > 0 and cache_data["daily_used"] >= cache_data["daily_limit"]:
-                        return (False, f"Daily chat limit reached ({cache_data['daily_used']}/{cache_data['daily_limit']})")
-
-                    if cache_data["monthly_limit"] > 0 and cache_data["monthly_used"] >= cache_data["monthly_limit"]:
-                        return (False, f"Monthly chat limit reached ({cache_data['monthly_used']}/{cache_data['monthly_limit']})")
-
+                # Check limits
+                if cache_data["unlimited"]:
                     return (True, None)
 
-                elif response.status_code in [401, 403]:
-                    # Authentication/authorization failed
-                    return (False, "Unauthorized")
-                else:
-                    # Billing service error - fail open
-                    logger.warning(f"Billing service returned {response.status_code} for tenant {tenant_id}")
-                    return (True, None)
+                if cache_data["daily_limit"] > 0 and cache_data["daily_used"] >= cache_data["daily_limit"]:
+                    return (False, f"Daily chat limit reached ({cache_data['daily_used']}/{cache_data['daily_limit']})")
+
+                if cache_data["monthly_limit"] > 0 and cache_data["monthly_used"] >= cache_data["monthly_limit"]:
+                    return (False, f"Monthly chat limit reached ({cache_data['monthly_used']}/{cache_data['monthly_limit']})")
+
+                return (True, None)
+
+            elif response.status_code in [401, 403]:
+                # Authentication/authorization failed
+                return (False, "Unauthorized")
+            else:
+                # Billing service error - fail open
+                logger.warning(f"Billing service returned {response.status_code} for tenant {tenant_id}")
+                return (True, None)
 
         except httpx.TimeoutException:
             logger.warning(f"Timeout fetching usage from billing service for tenant {tenant_id}")

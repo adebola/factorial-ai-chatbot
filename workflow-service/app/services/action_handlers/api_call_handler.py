@@ -21,6 +21,17 @@ class ApiCallActionHandler(ActionHandler):
     """Handler for 'api_call' action type"""
 
     TIMEOUT = 30.0
+    _client: httpx.AsyncClient = None
+
+    @classmethod
+    def _get_client(cls) -> httpx.AsyncClient:
+        """Lazy singleton HTTP client with connection pooling."""
+        if cls._client is None:
+            cls._client = httpx.AsyncClient(
+                timeout=cls.TIMEOUT,
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
+            )
+        return cls._client
 
     @property
     def action_type(self) -> str:
@@ -65,8 +76,8 @@ class ApiCallActionHandler(ActionHandler):
                 )
 
         try:
-            async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
-                response = await client.post(url, headers=headers, json=body)
+            client = self._get_client()
+            response = await client.post(url, headers=headers, json=body)
 
             logger.info(
                 "API call completed",
