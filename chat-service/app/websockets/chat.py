@@ -328,8 +328,9 @@ class ChatWebSocket:
                             "error_type": type(e).__name__
                         })
 
-                # Detect mid-session token expiry
+                # Detect mid-session auth state changes
                 if self._is_authenticated:
+                    # Check for token expiry
                     current_token = self._get_current_access_token(session_id)
                     if current_token is None:
                         self._is_authenticated = False
@@ -338,6 +339,16 @@ class ChatWebSocket:
                             "message": "Your authentication has expired. Please log in again."
                         }))
                         # Continue processing as guest
+                else:
+                    # Detect mid-session login (user completed OAuth while WebSocket was open)
+                    token = session_auth_service.get_access_token(session_id)
+                    if token:
+                        self._is_authenticated = True
+                        logger.info(f"Mid-session login detected", session_id=session_id, tenant_id=tenant_id)
+                        await websocket.send_text(json.dumps({
+                            "type": "auth_confirmed",
+                            "message": "Authentication successful."
+                        }))
 
                 # Check if tenant has any workflows at all (Redis-cached)
                 try:

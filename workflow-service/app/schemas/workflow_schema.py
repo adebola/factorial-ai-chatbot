@@ -71,6 +71,7 @@ class WorkflowCreate(BaseModel):
     trigger_config: Optional[Dict[str, Any]] = None
     is_active: bool = False
     requires_auth: bool = False
+    status: Optional[WorkflowStatus] = None
 
 
 class WorkflowUpdate(BaseModel):

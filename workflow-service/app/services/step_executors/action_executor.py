@@ -5,12 +5,14 @@ Executes ACTION steps - performs actions like send_email, api_call, log.
 Delegates to ActionService which routes to the appropriate ActionHandler.
 """
 
+import json
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 from .base import StepExecutor
 from ...schemas.workflow_schema import WorkflowStep, WorkflowDefinition, StepType
 from ...schemas.execution_schema import StepExecutionResult
 from ..action_service import ActionService
+from ..variable_resolver import VariableResolver
 from ...core.exceptions import StepExecutionError
 from ...core.logging_config import get_logger
 
@@ -105,7 +107,7 @@ class ActionStepExecutor(StepExecutor):
         if action_type == "send_email":
             message = f"Email sent to {action_result.get('recipient', 'unknown')}"
         elif action_type == "api_call":
-            message = f"API call completed: POST {action_result.get('url', 'unknown')} (status {action_result.get('status_code', '?')})"
+            message = self._build_api_call_message(step, action_result, variables)
         else:
             message = f"Action '{action_type}' completed successfully"
 
@@ -124,3 +126,38 @@ class ActionStepExecutor(StepExecutor):
                 "action_result": action_result
             }
         )
+
+    MAX_RESPONSE_LENGTH = 2000
+
+    def _build_api_call_message(
+        self,
+        step: WorkflowStep,
+        action_result: Dict[str, Any],
+        variables: Dict[str, Any]
+    ) -> str:
+        """Build user-facing message for api_call actions based on response_mode."""
+        params = step.params or {}
+        response_mode = params.get("response_mode", "return_value")
+
+        if response_mode == "fire_and_forget":
+            raw_message = params.get("response_message", "Request submitted successfully.")
+            return VariableResolver.resolve_content(raw_message, variables)
+
+        # Default: return_value — show the actual API response
+        response_data = action_result.get("response_data")
+
+        if response_data is None:
+            return (
+                f"API call completed: POST {action_result.get('url', 'unknown')} "
+                f"(status {action_result.get('status_code', '?')})"
+            )
+
+        if isinstance(response_data, (dict, list)):
+            formatted = json.dumps(response_data, indent=2)
+        else:
+            formatted = str(response_data)
+
+        if len(formatted) > self.MAX_RESPONSE_LENGTH:
+            formatted = formatted[:self.MAX_RESPONSE_LENGTH] + "\n... (response truncated)"
+
+        return formatted

@@ -75,18 +75,37 @@ class WorkflowService:
                 updated_by=user_id
             )
 
-            # Auto-sync status with is_active
-            if workflow.is_active:
+            # Bidirectional sync between status and is_active
+            if workflow_data.status is not None:
+                status_str = workflow_data.status.value if hasattr(workflow_data.status, 'value') else str(workflow_data.status)
+                workflow.status = status_str
+                if status_str == "active":
+                    workflow.is_active = True
+            elif workflow.is_active:
                 workflow.status = WorkflowStatus.ACTIVE.value
 
             # Pre-compute intent embeddings at write-time
             if workflow.trigger_type in ("intent", TriggerType.INTENT):
-                # Check trigger_config first, fall back to definition.trigger
-                intent_patterns = (workflow.trigger_config or {}).get("intent_patterns", [])
+                # Check trigger_config.intent_patterns first, then conditions (legacy),
+                # then definition.trigger.intent_patterns, then definition.trigger.conditions
+                tc = workflow.trigger_config or {}
+                intent_patterns = tc.get("intent_patterns", [])
+                if not intent_patterns:
+                    intent_patterns = tc.get("conditions", [])
                 if not intent_patterns:
                     definition_dict = WorkflowParser.to_dict(workflow_data.definition)
-                    intent_patterns = definition_dict.get("trigger", {}).get("intent_patterns", [])
-                if intent_patterns:
+                    trigger_def = definition_dict.get("trigger", {})
+                    intent_patterns = trigger_def.get("intent_patterns", [])
+                    if not intent_patterns:
+                        intent_patterns = trigger_def.get("conditions", [])
+                if not intent_patterns:
+                    logger.warning(
+                        f"Intent workflow created without intent_patterns! "
+                        f"Workflow '{workflow.name}' will not match any messages. "
+                        f"Add intent_patterns to trigger_config or definition.trigger.",
+                        workflow_id=workflow.id, tenant_id=tenant_id
+                    )
+                else:
                     try:
                         embedding_service = IntentEmbeddingService()
                         embeddings = embedding_service.generate_pattern_embeddings(intent_patterns)
@@ -262,12 +281,26 @@ class WorkflowService:
             trigger_type = workflow_data.trigger_type or workflow.trigger_type
             trigger_type_str = trigger_type.value if hasattr(trigger_type, 'value') else str(trigger_type)
             if trigger_type_str == "intent":
-                # Check trigger_config first, fall back to definition.trigger
-                intent_patterns = (workflow.trigger_config or {}).get("intent_patterns", [])
+                # Check trigger_config.intent_patterns first, then conditions (legacy),
+                # then definition.trigger.intent_patterns, then definition.trigger.conditions
+                tc = workflow.trigger_config or {}
+                intent_patterns = tc.get("intent_patterns", [])
+                if not intent_patterns:
+                    intent_patterns = tc.get("conditions", [])
                 if not intent_patterns:
                     definition = workflow.definition or {}
-                    intent_patterns = definition.get("trigger", {}).get("intent_patterns", [])
-                if intent_patterns:
+                    trigger_def = definition.get("trigger", {})
+                    intent_patterns = trigger_def.get("intent_patterns", [])
+                    if not intent_patterns:
+                        intent_patterns = trigger_def.get("conditions", [])
+                if not intent_patterns:
+                    logger.warning(
+                        f"Intent workflow updated without intent_patterns! "
+                        f"Workflow '{workflow.name}' will not match any messages. "
+                        f"Add intent_patterns to trigger_config or definition.trigger.",
+                        workflow_id=workflow.id, tenant_id=tenant_id
+                    )
+                else:
                     try:
                         embedding_service = IntentEmbeddingService()
                         embeddings = embedding_service.generate_pattern_embeddings(intent_patterns)
@@ -305,7 +338,11 @@ class WorkflowService:
                     workflow.status = WorkflowStatus.ACTIVE.value if workflow_data.is_active else WorkflowStatus.INACTIVE.value
 
             if workflow_data.status is not None:
-                workflow.status = workflow_data.status
+                status_str = workflow_data.status.value if hasattr(workflow_data.status, 'value') else str(workflow_data.status)
+                workflow.status = status_str
+                # Auto-sync is_active with status when is_active wasn't explicitly set
+                if workflow_data.is_active is None:
+                    workflow.is_active = (status_str == "active")
 
             workflow.updated_by = user_id
             workflow.updated_at = datetime.utcnow()

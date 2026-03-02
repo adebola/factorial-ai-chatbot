@@ -118,7 +118,18 @@ class ApiCallActionHandler(ActionHandler):
         return {
             "description": "Make an outbound HTTP POST request to an external API",
             "required_params": ["url"],
-            "optional_params": ["body", "headers", "forward_user_token"],
+            "optional_params": [
+                "body", "headers", "forward_user_token",
+                "response_mode", "response_message"
+            ],
+            "param_descriptions": {
+                "response_mode": "How to present the API response to the user. "
+                                 "'return_value' (default) shows the actual response data. "
+                                 "'fire_and_forget' shows a custom or default confirmation message.",
+                "response_message": "Custom message for fire_and_forget mode. "
+                                    "Supports {{variable}} references. "
+                                    "Default: 'Request submitted successfully.'"
+            },
             "example": {
                 "url": "https://api.example.com/webhook",
                 "headers": {"Authorization": "Bearer token"},
