@@ -1137,7 +1137,7 @@ class WidgetService:
             this.chatContainer.classList.add('open');
             this.inputField.focus();
 
-            if (!this.isConnected) {
+            if (!this.isConnected || !this.socket || this.socket.readyState !== WebSocket.OPEN) {
                 // Check if auth is enabled and user hasn't chosen yet
                 if (CONFIG.auth.enabled && !this.isAuthenticated && !this.sessionId) {
                     // Check for persisted authenticated session from sessionStorage
@@ -1167,6 +1167,12 @@ class WidgetService:
             console.log('FactorialChatWidget: closeChat() called');
             this.isOpen = false;
             this.chatContainer.classList.remove('open');
+            if (this.socket) {
+                this.socket.close();
+                this.socket = null;
+            }
+            this.isConnected = false;
+            this.updateConnectionStatus(false);
             console.log('FactorialChatWidget: Chat window closed');
         }
         
@@ -1183,6 +1189,12 @@ class WidgetService:
                 wsEndpoint += `&session_id=${encodeURIComponent(this.sessionId)}`;
             }
             
+            // Clean up any stale socket before creating a new one
+            if (this.socket) {
+                try { this.socket.close(); } catch(e) {}
+                this.socket = null;
+            }
+
             try {
                 this.socket = new WebSocket(wsEndpoint);
                 
@@ -1251,6 +1263,7 @@ class WidgetService:
                 
                 this.socket.onclose = () => {
                     this.isConnected = false;
+                    this.socket = null;
                     this.updateConnectionStatus(false);
                     this.hideTypingIndicator();
                 };
