@@ -626,7 +626,8 @@ class ChatWebSocket:
                                 message_id=ai_msg_record.id,
                                 message_type="assistant",
                                 content=ai_response["content"],
-                                quality_metrics=ai_response.get("quality_metrics")
+                                quality_metrics=ai_response.get("quality_metrics"),
+                                user_question=user_message
                             ))
                         except Exception as e:
                             # Log but don't fail on event publishing errors

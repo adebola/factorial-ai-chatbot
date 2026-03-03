@@ -4,7 +4,7 @@ RAG Quality Metrics Model
 Stores quality metrics for each AI-generated answer.
 """
 
-from sqlalchemy import Column, String, Float, Integer, DateTime, func
+from sqlalchemy import Column, String, Float, Integer, Boolean, DateTime, func
 from app.core.database import Base
 
 
@@ -35,6 +35,12 @@ class RAGQualityMetrics(Base):
     # Answer Characteristics
     answer_length = Column(Integer, nullable=True)  # Character count of AI response
     response_time_ms = Column(Integer, nullable=True)  # Generation time in milliseconds
+
+    # User question that triggered this response
+    user_question = Column(String(500), nullable=True)
+
+    # Knowledge gap flag — set when confidence <= 0.15 (definitive "can't answer")
+    is_knowledge_gap = Column(Boolean, default=False, nullable=False)
 
     # Optional Basic Sentiment (VADER)
     basic_sentiment = Column(String(20), nullable=True)  # 'positive', 'neutral', 'negative', 'frustrated'

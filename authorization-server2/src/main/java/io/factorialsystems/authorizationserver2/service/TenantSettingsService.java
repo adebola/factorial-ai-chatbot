@@ -111,6 +111,9 @@ public class TenantSettingsService {
         if (request.getAuthScopes() != null) {
             settings.setAuthScopes(request.getAuthScopes());
         }
+        if (request.getUnknownAnswerBehavior() != null) {
+            settings.setUnknownAnswerBehavior(request.getUnknownAnswerBehavior());
+        }
         // Update in database
         int updated = tenantSettingsMapper.updateByTenantId(settings);
         if (updated == 0) {
@@ -251,6 +254,7 @@ public class TenantSettingsService {
                 .authTokenEndpoint(settings.getAuthTokenEndpoint())
                 .authClientId(settings.getAuthClientId())
                 .authScopes(settings.getAuthScopes())
+                .unknownAnswerBehavior(settings.getUnknownAnswerBehavior())
                 .additionalSettings(settings.getAdditionalSettings())
                 .isActive(settings.getIsActive())
                 .createdAt(settings.getCreatedAt())

@@ -83,7 +83,8 @@ class ChatEventPublisher:
         message_id: str,
         message_type: str,
         content: str,
-        quality_metrics: Optional[Dict[str, Any]] = None
+        quality_metrics: Optional[Dict[str, Any]] = None,
+        user_question: Optional[str] = None
     ) -> bool:
         """
         Publish message.created event.
@@ -95,6 +96,7 @@ class ChatEventPublisher:
             message_type: 'user' or 'assistant'
             content: Message content
             quality_metrics: Optional quality metrics (for assistant messages)
+            user_question: Optional user question that triggered this response
 
         Returns:
             True if published successfully, False otherwise
@@ -110,6 +112,7 @@ class ChatEventPublisher:
                 "message_id": message_id,
                 "message_type": message_type,
                 "content_preview": content[:200] if content else "",  # First 200 chars for sentiment
+                "user_question": user_question[:500] if user_question else None,
                 "timestamp": datetime.now().isoformat()
             }
 

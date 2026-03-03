@@ -6,9 +6,12 @@ Flags low-quality answers for admin review.
 """
 
 import uuid
+from datetime import datetime
 from typing import Optional, Dict
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from app.models.quality_metrics import RAGQualityMetrics
+from app.models.knowledge_gap import KnowledgeGap
 from app.services.sentiment_analyzer import sentiment_analyzer
 from app.core.logging_config import get_logger, log_quality_analysis
 from app.core.config import settings
@@ -33,7 +36,8 @@ class QualityAnalyzer:
         message_id: str,
         session_id: str,
         metrics: Dict,
-        content: Optional[str] = None
+        content: Optional[str] = None,
+        user_question: Optional[str] = None
     ) -> RAGQualityMetrics:
         """
         Analyze and store quality metrics for a message.
@@ -44,6 +48,7 @@ class QualityAnalyzer:
             session_id: Session ID
             metrics: Quality metrics from chat service
             content: Optional message content for sentiment analysis
+            user_question: Optional user question that triggered this response
 
         Returns:
             Created quality metrics record
@@ -64,6 +69,7 @@ class QualityAnalyzer:
             return existing_metrics
 
         # Create quality metrics record
+        is_knowledge_gap = metrics.get("is_knowledge_gap", False)
         quality_record = RAGQualityMetrics(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
@@ -74,7 +80,9 @@ class QualityAnalyzer:
             answer_confidence=metrics.get("answer_confidence"),
             sources_cited=metrics.get("sources_cited"),
             answer_length=metrics.get("answer_length"),
-            response_time_ms=metrics.get("response_time_ms")
+            response_time_ms=metrics.get("response_time_ms"),
+            user_question=user_question[:500] if user_question else None,
+            is_knowledge_gap=is_knowledge_gap,
         )
 
         # Perform sentiment analysis if enabled and content provided
@@ -166,9 +174,70 @@ class QualityAnalyzer:
                 issues=issues
             )
 
-        # TODO: Trigger knowledge gap analysis if low confidence + poor retrieval
-        # if "low_confidence" in issues and "poor_retrieval" in issues:
-        #     await self._trigger_gap_analysis(quality_record)
+        # Real-time knowledge gap flagging
+        if quality_record.is_knowledge_gap and quality_record.user_question:
+            await self._create_immediate_gap(quality_record)
+
+    async def _create_immediate_gap(self, quality_record: RAGQualityMetrics):
+        """
+        Immediately create a KnowledgeGap record for a definitive "can't answer" response.
+
+        If an existing unresolved gap with the same question pattern exists for this tenant,
+        increment its occurrence_count instead of creating a duplicate.
+        """
+        try:
+            question_pattern = quality_record.user_question[:500]
+
+            # Check for existing unresolved gap with the same pattern
+            existing_gap = self.db.query(KnowledgeGap).filter(
+                and_(
+                    KnowledgeGap.tenant_id == quality_record.tenant_id,
+                    KnowledgeGap.question_pattern == question_pattern,
+                    KnowledgeGap.status != "resolved"
+                )
+            ).first()
+
+            if existing_gap:
+                existing_gap.occurrence_count += 1
+                existing_gap.last_occurrence_at = datetime.now()
+                # Append to example_questions if not already full
+                examples = existing_gap.example_questions or []
+                if len(examples) < 5:
+                    examples.append(question_pattern)
+                    existing_gap.example_questions = examples
+                self.db.commit()
+                logger.info(
+                    "Updated existing knowledge gap",
+                    gap_id=existing_gap.id,
+                    tenant_id=quality_record.tenant_id,
+                    occurrence_count=existing_gap.occurrence_count
+                )
+            else:
+                gap = KnowledgeGap(
+                    id=str(uuid.uuid4()),
+                    tenant_id=quality_record.tenant_id,
+                    question_pattern=question_pattern,
+                    example_questions=[question_pattern],
+                    occurrence_count=1,
+                    avg_confidence=quality_record.answer_confidence,
+                    negative_feedback_count=0,
+                    status="detected"
+                )
+                self.db.add(gap)
+                self.db.commit()
+                logger.info(
+                    "Created immediate knowledge gap",
+                    gap_id=gap.id,
+                    tenant_id=quality_record.tenant_id,
+                    question=question_pattern[:50]
+                )
+        except Exception as e:
+            logger.error(
+                f"Error creating immediate knowledge gap: {e}",
+                tenant_id=quality_record.tenant_id,
+                message_id=quality_record.message_id
+            )
+            self.db.rollback()
 
     async def get_message_quality(
         self,

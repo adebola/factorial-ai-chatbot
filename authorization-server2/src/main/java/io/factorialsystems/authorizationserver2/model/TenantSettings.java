@@ -47,6 +47,10 @@ public class TenantSettings {
     @Builder.Default
     private String authScopes = "openid profile email";
 
+    // Unknown answer behavior: "decline" (default) or "best_effort"
+    @Builder.Default
+    private String unknownAnswerBehavior = "decline";
+
     // Future extensibility
     private Map<String, Object> additionalSettings;
     

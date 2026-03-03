@@ -49,7 +49,7 @@ class ChatService:
         - Answer based on the provided context when possible
         - When the context contains specific items (job listings, services, products, events, etc.), enumerate and list them with their details rather than giving a generic summary
         - Always cite specific details, names, requirements, and facts found in the context
-        - If you truly cannot find relevant information in the context, say so politely
+        - {fallback_instruction}
         - Be conversational and helpful
         - Never say information is unavailable if the context contains relevant details, even if partial
         """
@@ -277,13 +277,37 @@ class ChatService:
         # Convert sets to lists for JSON serialization
         categorization_metadata['content_types'] = list(categorization_metadata['content_types'])
         
+        # Determine fallback behavior from tenant settings (Redis-cached, 300s TTL)
+        company_name = tenant["name"]
+        unknown_answer_behavior = "decline"
+        try:
+            tenant_settings = await self.tenant_client.get_tenant_settings(tenant_id)
+            if tenant_settings:
+                unknown_answer_behavior = tenant_settings.get("unknownAnswerBehavior", "decline")
+        except Exception as e:
+            self.logger.warning("Failed to fetch tenant settings for fallback behavior", error=str(e))
+
+        if unknown_answer_behavior == "best_effort":
+            fallback_instruction = (
+                f"If the provided context does not contain relevant information, "
+                f"you may answer from your general knowledge. However, you MUST clearly "
+                f"prefix such answers with: '**Note: This answer is based on general knowledge, "
+                f"not {company_name}'s specific documents.**'"
+            )
+        else:
+            fallback_instruction = (
+                f"If you truly cannot find relevant information in the context, "
+                f"say so politely and suggest the user contact {company_name} directly."
+            )
+
         # Build messages for OpenAI API
         messages = [
             {
                 "role": "system",
                 "content": self.system_prompt.format(
-                    company_name=tenant["name"],
-                    context=context
+                    company_name=company_name,
+                    context=context,
+                    fallback_instruction=fallback_instruction
                 )
             }
         ]
@@ -358,7 +382,8 @@ class ChatService:
                 "answer_confidence": round(answer_confidence, 3),
                 "sources_cited": len(sources),
                 "answer_length": len(response_content),
-                "response_time_ms": int(total_duration)
+                "response_time_ms": int(total_duration),
+                "is_knowledge_gap": answer_confidence <= 0.15,
             }
 
             return {
@@ -483,6 +508,29 @@ class ChatService:
         Returns:
             Confidence score (0-1)
         """
+        response_lower = response_content.lower()
+
+        # Check for explicit "unable to answer" patterns first — these are definitive
+        # knowledge gaps and should be flagged immediately (well below 0.50 threshold)
+        unable_to_answer_patterns = [
+            "i don't have", "i do not have",
+            "i couldn't find", "i could not find",
+            "i'm unable to", "i am unable to",
+            "i don't have information", "i do not have information",
+            "not in my knowledge", "not in the knowledge base",
+            "no relevant information", "no information available",
+            "i'm not able to answer", "i cannot answer",
+            "i'm sorry, i don't", "i'm sorry, i cannot",
+            "beyond my available", "outside my available",
+            "not covered in", "not mentioned in",
+            "the provided context does not", "the context does not contain",
+            "based on the available information, i cannot",
+            "i don't see any", "i do not see any",
+        ]
+
+        if any(pattern in response_lower for pattern in unable_to_answer_patterns):
+            return 0.15  # Definitive "can't answer" — flag immediately
+
         confidence = 0.7  # Base confidence
 
         # Check for hedging language (uncertainty indicators)
@@ -492,7 +540,6 @@ class ChatService:
             "no information", "no specific", "not available"
         ]
 
-        response_lower = response_content.lower()
         hedging_count = sum(1 for word in hedging_words if word in response_lower)
 
         # Reduce confidence for each hedging phrase found

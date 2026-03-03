@@ -170,7 +170,8 @@ class RabbitMQConsumer:
                 message_id=event.message_id,
                 session_id=event.session_id,
                 metrics=metrics,
-                content=event.content_preview  # For sentiment analysis
+                content=event.content_preview,  # For sentiment analysis
+                user_question=event.user_question
             )
 
             logger.info(

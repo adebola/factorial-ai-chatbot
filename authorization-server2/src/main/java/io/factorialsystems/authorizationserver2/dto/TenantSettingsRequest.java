@@ -37,6 +37,10 @@ public class TenantSettingsRequest {
     
     private Map<String, Object> additionalSettings;
 
+    // Unknown answer behavior: "decline" or "best_effort"
+    @Pattern(regexp = "^(decline|best_effort)$", message = "Unknown answer behavior must be 'decline' or 'best_effort'")
+    private String unknownAnswerBehavior;
+
     // End-user OAuth2 PKCE authentication
     private Boolean allowAuthentication;
 

@@ -21,6 +21,7 @@ public interface TenantSettingsMapper {
             company_logo_url, allow_authentication,
             auth_authorization_endpoint, auth_token_endpoint,
             auth_client_id, auth_scopes,
+            unknown_answer_behavior,
             additional_settings, is_active, created_at
         ) VALUES (
             #{id}, #{tenantId}, #{primaryColor}, #{secondaryColor},
@@ -28,6 +29,7 @@ public interface TenantSettingsMapper {
             #{companyLogoUrl}, #{allowAuthentication},
             #{authAuthorizationEndpoint}, #{authTokenEndpoint},
             #{authClientId}, #{authScopes},
+            #{unknownAnswerBehavior},
             #{additionalSettings, typeHandler=io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler}::json,
             #{isActive}, CURRENT_TIMESTAMP
         )
@@ -43,6 +45,7 @@ public interface TenantSettingsMapper {
                company_logo_url, allow_authentication,
                auth_authorization_endpoint, auth_token_endpoint,
                auth_client_id, auth_scopes,
+               unknown_answer_behavior,
                additional_settings, is_active, created_at, updated_at
         FROM tenant_settings
         WHERE tenant_id = #{tenantId} AND is_active = true
@@ -59,6 +62,7 @@ public interface TenantSettingsMapper {
     @Result(property = "authTokenEndpoint", column = "auth_token_endpoint")
     @Result(property = "authClientId", column = "auth_client_id")
     @Result(property = "authScopes", column = "auth_scopes")
+    @Result(property = "unknownAnswerBehavior", column = "unknown_answer_behavior")
     @Result(property = "additionalSettings", column = "additional_settings",
             typeHandler = io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler.class)
     @Result(property = "isActive", column = "is_active")
@@ -75,6 +79,7 @@ public interface TenantSettingsMapper {
                company_logo_url, allow_authentication,
                auth_authorization_endpoint, auth_token_endpoint,
                auth_client_id, auth_scopes,
+               unknown_answer_behavior,
                additional_settings, is_active, created_at, updated_at
         FROM tenant_settings
         WHERE id = #{id} AND is_active = true
@@ -91,6 +96,7 @@ public interface TenantSettingsMapper {
     @Result(property = "authTokenEndpoint", column = "auth_token_endpoint")
     @Result(property = "authClientId", column = "auth_client_id")
     @Result(property = "authScopes", column = "auth_scopes")
+    @Result(property = "unknownAnswerBehavior", column = "unknown_answer_behavior")
     @Result(property = "additionalSettings", column = "additional_settings",
             typeHandler = io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler.class)
     @Result(property = "isActive", column = "is_active")
@@ -114,6 +120,7 @@ public interface TenantSettingsMapper {
             auth_token_endpoint = #{authTokenEndpoint},
             auth_client_id = #{authClientId},
             auth_scopes = #{authScopes},
+            unknown_answer_behavior = #{unknownAnswerBehavior},
             additional_settings = #{additionalSettings, typeHandler=io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler}::json,
             updated_at = CURRENT_TIMESTAMP
         WHERE tenant_id = #{tenantId} AND is_active = true
@@ -161,6 +168,7 @@ public interface TenantSettingsMapper {
                company_logo_url, allow_authentication,
                auth_authorization_endpoint, auth_token_endpoint,
                auth_client_id, auth_scopes,
+               unknown_answer_behavior,
                additional_settings, is_active, created_at, updated_at
         FROM tenant_settings
         WHERE is_active = true
@@ -178,6 +186,7 @@ public interface TenantSettingsMapper {
     @Result(property = "authTokenEndpoint", column = "auth_token_endpoint")
     @Result(property = "authClientId", column = "auth_client_id")
     @Result(property = "authScopes", column = "auth_scopes")
+    @Result(property = "unknownAnswerBehavior", column = "unknown_answer_behavior")
     @Result(property = "additionalSettings", column = "additional_settings",
             typeHandler = io.factorialsystems.authorizationserver2.typehandler.MapTypeHandler.class)
     @Result(property = "isActive", column = "is_active")

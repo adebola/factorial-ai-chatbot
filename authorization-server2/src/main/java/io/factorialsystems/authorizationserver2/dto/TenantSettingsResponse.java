@@ -43,6 +43,9 @@ public class TenantSettingsResponse {
     private String authClientId;
     private String authScopes;
 
+    // Unknown answer behavior
+    private String unknownAnswerBehavior;
+
     // Future extensibility
     private Map<String, Object> additionalSettings;
     

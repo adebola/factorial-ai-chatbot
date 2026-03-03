@@ -116,8 +116,10 @@ async def logging_middleware(request: Request, call_next):
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
         try:
-            # Validate and decode JWT token
-            payload = await jwt_validator.validate_token(token)
+            # Decode without verification — only for logging context.
+            # Real auth is handled by route-level Depends(validate_token).
+            import jwt as pyjwt
+            payload = pyjwt.decode(token, options={"verify_signature": False})
             tenant_id = payload.get("tenant_id")
             user_id = payload.get("user_id") or payload.get("sub")
         except Exception as e:

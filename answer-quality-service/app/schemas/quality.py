@@ -95,6 +95,7 @@ class ChatMessageEvent(BaseModel):
     message_id: str
     message_type: str  # 'user' or 'assistant'
     content_preview: Optional[str] = None  # First 200 chars for sentiment analysis
+    user_question: Optional[str] = None  # The user question that triggered this response
 
     quality_metrics: Optional[dict] = None  # Optional quality metrics from chat service
 

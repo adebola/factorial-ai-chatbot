@@ -140,10 +140,8 @@ class GapDetector:
         message_quality = {}
 
         for metric in low_quality_metrics:
-            # Get the user question from session
-            # For now, we'll use the content_preview which should be the question
             message_quality[metric.message_id] = {
-                'question': metric.content_preview or "",
+                'question': metric.user_question or "",
                 'confidence': metric.answer_confidence,
                 'retrieval_score': metric.retrieval_score,
                 'has_negative_feedback': False,
