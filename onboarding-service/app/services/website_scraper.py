@@ -394,6 +394,21 @@ class WebsiteScraper:
 
                 # Log progress every 5 pages for more frequent UI updates
                 if page_number % 5 == 0:
+                    # Check if ingestion was deleted while we're scraping (e.g., user cancelled)
+                    self.db.expire(ingestion)
+                    ingestion_check = self.db.query(WebsiteIngestion).filter(
+                        WebsiteIngestion.id == ingestion_id,
+                        WebsiteIngestion.tenant_id == tenant_id
+                    ).first()
+                    if not ingestion_check:
+                        logger.warning(
+                            "Ingestion was deleted during scraping - stopping early",
+                            tenant_id=tenant_id,
+                            ingestion_id=ingestion_id,
+                            pages_processed=pages_processed
+                        )
+                        return []
+
                     logger.info(
                         f"📊 Progress update",
                         tenant_id=tenant_id,

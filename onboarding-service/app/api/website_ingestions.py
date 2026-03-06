@@ -379,6 +379,35 @@ async def list_tenant_ingestions(
     }
 
 
+async def _deferred_vector_cleanup(tenant_id: str, ingestion_id: str, delay_seconds: int = 30):
+    """Re-delete vectors after a delay to catch race condition with background ingestion tasks.
+
+    When an ingestion is deleted while its background task is still running, the task may
+    commit vectors after the initial delete. This deferred cleanup catches those orphans.
+    """
+    await asyncio.sleep(delay_seconds)
+    try:
+        vector_db = next(get_vector_db())
+        try:
+            vector_service = PgVectorIngestionService(vector_db)
+            deleted = vector_service.delete_ingestion_vectors(tenant_id, ingestion_id)
+            if deleted:
+                logger.info(
+                    "Deferred cleanup caught orphaned vectors",
+                    tenant_id=tenant_id,
+                    ingestion_id=ingestion_id
+                )
+        finally:
+            vector_db.close()
+    except Exception as e:
+        logger.error(
+            "Deferred vector cleanup failed",
+            tenant_id=tenant_id,
+            ingestion_id=ingestion_id,
+            error=str(e)
+        )
+
+
 @router.delete("/ingestions/{ingestion_id}")
 async def delete_ingestion(
     ingestion_id: str,
@@ -386,7 +415,7 @@ async def delete_ingestion(
     db: Session = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a website ingestion record (requires Bearer token authentication)"""
-    
+
     try:
         scraper = WebsiteScraper(db)
 
@@ -397,7 +426,9 @@ async def delete_ingestion(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Ingestion not found or does not belong to this tenant"
             )
-        
+
+        was_in_progress = ingestion.status == IngestionStatus.IN_PROGRESS
+
         # Delete ingestion record (this could also clean up related pages)
         success = scraper.delete_ingestion(claims.tenant_id, ingestion_id)
 
@@ -405,6 +436,16 @@ async def delete_ingestion(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to delete ingestion"
+            )
+
+        # If ingestion was in-progress, schedule a deferred cleanup to catch any vectors
+        # committed by the background task after our initial delete
+        if was_in_progress:
+            asyncio.create_task(_deferred_vector_cleanup(claims.tenant_id, ingestion_id))
+            logger.info(
+                "Scheduled deferred vector cleanup for in-progress ingestion",
+                tenant_id=claims.tenant_id,
+                ingestion_id=ingestion_id
             )
 
         # Publish usage event to billing service
@@ -429,7 +470,7 @@ async def delete_ingestion(
             "base_url": ingestion.base_url,
             "tenant_id": claims.tenant_id
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -726,6 +767,27 @@ async def background_website_ingestion(
 
         # Ingest into vector store
         if documents:
+            # Check if ingestion still exists before committing vectors
+            # This prevents orphaned embeddings when ingestion is deleted during processing
+            from ..core.database import get_db as get_check_db
+            check_db = next(get_check_db())
+            try:
+                ingestion_still_exists = check_db.query(WebsiteIngestion).filter(
+                    WebsiteIngestion.id == ingestion_id,
+                    WebsiteIngestion.tenant_id == tenant_id
+                ).first()
+            finally:
+                check_db.close()
+
+            if not ingestion_still_exists:
+                logger.warning(
+                    "Ingestion was deleted during processing - skipping vector ingestion",
+                    tenant_id=tenant_id,
+                    ingestion_id=ingestion_id,
+                    document_count=len(documents)
+                )
+                return
+
             logger.info(
                 "Ingesting documents into vector store",
                 tenant_id=tenant_id,
