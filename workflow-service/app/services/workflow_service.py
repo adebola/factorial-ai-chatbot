@@ -126,6 +126,7 @@ class WorkflowService:
                         logger.warning(f"Failed to generate intent embeddings: {e}")
 
             self.db.add(workflow)
+            self.db.flush()  # Ensure workflow row exists before intent embeddings FK reference
             self.db.commit()
             self.db.refresh(workflow)
 

@@ -1,8 +1,7 @@
 """
 API Call Action Handler
 
-Makes outbound HTTP POST requests to external APIs.
-Replaces the old 'webhook' action with a simpler, POST-only interface.
+Makes outbound HTTP requests to external APIs (GET and POST supported).
 Supports opt-in forwarding of end-user OAuth2 tokens via `forward_user_token: true`.
 """
 
@@ -49,10 +48,15 @@ class ApiCallActionHandler(ActionHandler):
         if not url:
             raise ActionExecutionError("api_call", "Missing required field: url")
 
+        method = params.get("method", "POST").upper()
+        if method not in ("GET", "POST"):
+            raise ActionExecutionError("api_call", f"Unsupported HTTP method: {method}")
+
         body = self._ensure_dict(params.get("body", {}))
         headers = self._ensure_dict(params.get("headers", {}))
 
-        headers.setdefault("Content-Type", "application/json")
+        if method == "POST":
+            headers.setdefault("Content-Type", "application/json")
         headers.setdefault("User-Agent", f"ChatCraft-Workflow/{execution_id}")
 
         # Forward user token if: (a) step explicitly opts in, OR (b) workflow requires auth
@@ -77,7 +81,10 @@ class ApiCallActionHandler(ActionHandler):
 
         try:
             client = self._get_client()
-            response = await client.post(url, headers=headers, json=body)
+            if method == "GET":
+                response = await client.get(url, headers=headers, params=body if body else None)
+            else:
+                response = await client.post(url, headers=headers, json=body)
 
             logger.info(
                 "API call completed",
@@ -116,13 +123,15 @@ class ApiCallActionHandler(ActionHandler):
 
     def get_schema(self) -> Dict[str, Any]:
         return {
-            "description": "Make an outbound HTTP POST request to an external API",
+            "description": "Make an outbound HTTP request (GET or POST) to an external API",
             "required_params": ["url"],
             "optional_params": [
-                "body", "headers", "forward_user_token",
+                "method", "body", "headers", "forward_user_token",
                 "response_mode", "response_message"
             ],
             "param_descriptions": {
+                "method": "HTTP method to use: 'GET' or 'POST' (default: 'POST'). "
+                          "For GET requests, body key-value pairs are sent as query parameters.",
                 "response_mode": "How to present the API response to the user. "
                                  "'return_value' (default) shows the actual response data. "
                                  "'fire_and_forget' shows a custom or default confirmation message.",
@@ -131,9 +140,10 @@ class ApiCallActionHandler(ActionHandler):
                                     "Default: 'Request submitted successfully.'"
             },
             "example": {
-                "url": "https://api.example.com/webhook",
+                "url": "https://api.example.com/data",
+                "method": "GET",
                 "headers": {"Authorization": "Bearer token"},
-                "body": {"user_id": "{{user_id}}", "event": "workflow_completed"},
+                "body": {"user_id": "{{user_id}}"},
                 "forward_user_token": True
             }
         }
