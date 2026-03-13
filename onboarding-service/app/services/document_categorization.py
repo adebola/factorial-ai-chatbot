@@ -120,7 +120,8 @@ class DocumentCategorizationService:
         self,
         document: Document,
         tenant_id: str,
-        enable_ai: bool = True
+        enable_ai: bool = True,
+        document_id: str = None
     ) -> DocumentClassification:
         """
         Classify document using hybrid AI + rule-based approach.
@@ -129,10 +130,13 @@ class DocumentCategorizationService:
             document: LangChain document to classify
             tenant_id: Tenant ID for custom categories
             enable_ai: Whether to use AI classification (can be disabled for speed)
+            document_id: Optional document ID for token usage tracking
 
         Returns:
             DocumentClassification with categories, tags, and metadata
         """
+        self._current_tenant_id = tenant_id
+        self._current_source_id = document_id
         logger.info(
             "Starting document classification",
             tenant_id=tenant_id,
@@ -324,6 +328,22 @@ class DocumentCategorizationService:
                 temperature=0.1  # Low temperature for consistency
             )
 
+            # Record classification token usage
+            if response.usage and hasattr(self, '_current_tenant_id'):
+                try:
+                    from .token_usage_service import token_usage_service
+                    token_usage_service.record_usage(
+                        tenant_id=self._current_tenant_id,
+                        model="gpt-4o-mini",
+                        usage_type="classification",
+                        prompt_tokens=response.usage.prompt_tokens,
+                        completion_tokens=response.usage.completion_tokens,
+                        total_tokens=response.usage.total_tokens,
+                        source_id=getattr(self, '_current_source_id', None),
+                    )
+                except Exception as rec_err:
+                    logger.warning(f"Failed to record classification token usage: {rec_err}")
+
             result = json.loads(response.choices[0].message.content)
 
             # Validate and clean the response
@@ -376,6 +396,22 @@ class DocumentCategorizationService:
                 max_tokens=300,
                 temperature=0.1
             )
+
+            # Record entity extraction token usage
+            if response.usage and hasattr(self, '_current_tenant_id'):
+                try:
+                    from .token_usage_service import token_usage_service
+                    token_usage_service.record_usage(
+                        tenant_id=self._current_tenant_id,
+                        model="gpt-4o-mini",
+                        usage_type="entity_extraction",
+                        prompt_tokens=response.usage.prompt_tokens,
+                        completion_tokens=response.usage.completion_tokens,
+                        total_tokens=response.usage.total_tokens,
+                        source_id=getattr(self, '_current_source_id', None),
+                    )
+                except Exception as rec_err:
+                    logger.warning(f"Failed to record entity extraction token usage: {rec_err}")
 
             result = json.loads(response.choices[0].message.content)
             return result.get("entities", [])[:10]  # Limit to 10 entities

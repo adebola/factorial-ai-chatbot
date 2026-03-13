@@ -82,7 +82,7 @@ class PgVectorStore:
         except Exception as e:
             self.logger.warning(f"Redis embedding cache write error: {e}")
 
-    def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def _generate_embeddings(self, texts: List[str], tenant_id: str = None, session_id: str = None) -> List[List[float]]:
         """Generate embeddings using OpenAI API with Redis caching"""
         results = [None] * len(texts)
         uncached_texts = []
@@ -108,6 +108,22 @@ class PgVectorStore:
                     idx = uncached_indices[j]
                     results[idx] = item.embedding
                     self._cache_embedding(uncached_texts[j], item.embedding)
+
+                # Record embedding token usage
+                if tenant_id and response.usage:
+                    try:
+                        from .token_usage_service import token_usage_service
+                        token_usage_service.record_usage(
+                            tenant_id=tenant_id,
+                            model="text-embedding-ada-002",
+                            usage_type="embedding",
+                            prompt_tokens=response.usage.prompt_tokens,
+                            completion_tokens=0,
+                            total_tokens=response.usage.total_tokens,
+                            session_id=session_id,
+                        )
+                    except Exception as rec_err:
+                        self.logger.warning(f"Failed to record embedding token usage: {rec_err}")
             except Exception as e:
                 self.logger.error(f"Failed to generate embeddings: {e}")
                 raise
@@ -144,7 +160,7 @@ class PgVectorStore:
         """
         try:
             # Generate embedding for query
-            query_embeddings = self._generate_embeddings([query])
+            query_embeddings = self._generate_embeddings([query], tenant_id=tenant_id)
             query_embedding = query_embeddings[0]
 
             session = self.SessionLocal()
@@ -256,7 +272,7 @@ class PgVectorStore:
             List of tuples containing (Document, similarity_score)
         """
         try:
-            query_embeddings = self._generate_embeddings([query])
+            query_embeddings = self._generate_embeddings([query], tenant_id=tenant_id)
             query_embedding = query_embeddings[0]
 
             session = self.SessionLocal()

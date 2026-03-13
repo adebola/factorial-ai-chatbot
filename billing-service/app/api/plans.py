@@ -87,7 +87,7 @@ class PlanResponse(BaseModel):
         from_attributes = True
 
 
-@router.post("/plans/", response_model=Dict[str, Any])
+@router.post("/plans", response_model=Dict[str, Any])
 async def create_plan(
     plan_data: PlanCreateRequest,
     claims: TokenClaims = Depends(require_system_admin),
@@ -195,7 +195,7 @@ async def list_public_plans(
         )
 
 
-@router.get("/plans/", response_model=Dict[str, Any])
+@router.get("/plans", response_model=Dict[str, Any])
 async def list_plans(
     include_deleted: bool = False,
     active_only: bool = False,

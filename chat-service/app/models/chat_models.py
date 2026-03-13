@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Boolean, Text, JSON
+from sqlalchemy import Column, String, DateTime, Boolean, Text, JSON, Integer, Float, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 import uuid
@@ -39,3 +39,21 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     message_metadata = Column(JSON, default={})  # Store additional context, sources, etc.
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TokenUsage(Base):
+    __tablename__ = "token_usage"
+    __table_args__ = (
+        Index('ix_token_usage_tenant_created', 'tenant_id', 'created_at'),
+    )
+
+    id = Column(String(36), primary_key=True, index=True, default=generate_uuid)
+    tenant_id = Column(String(255), nullable=False, index=True)
+    session_id = Column(String(255), nullable=True)
+    model = Column(String(100), nullable=False)
+    usage_type = Column(String(20), nullable=False)  # "chat_completion" or "embedding"
+    prompt_tokens = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+    estimated_cost_usd = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

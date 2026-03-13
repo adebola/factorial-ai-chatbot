@@ -1201,6 +1201,17 @@ class WidgetService:
                 this.socket.onopen = () => {
                     this.isConnected = true;
                     this.updateConnectionStatus(true);
+                    if (this.pendingAuthMessage) {
+                        const msg = this.pendingAuthMessage;
+                        this.pendingAuthMessage = null;
+                        setTimeout(() => {
+                            this.showTypingIndicator();
+                            this.socket.send(JSON.stringify({
+                                type: 'message',
+                                message: msg
+                            }));
+                        }, 500);
+                    }
                 };
                 
                 this.socket.onmessage = (event) => {
@@ -1250,9 +1261,12 @@ class WidgetService:
                         this.hideTypingIndicator();
                         this.enableSendButton();
                         this.addMessage('bot', data.message || 'This feature requires you to log in.');
+                        this.pendingAuthMessage = this.lastUserMessage;
                         if (CONFIG.auth.enabled) {
                             this.showAuthPrompt();
                         }
+                    } else if (data.type === 'auth_confirmed') {
+                        console.log('Authentication confirmed:', data.message);
                     } else if (data.type === 'error') {
                         console.error('Chat service error:', data.message);
                         this.addMessage('bot', 'Sorry, I encountered an error. Please try again later.');
@@ -1293,7 +1307,8 @@ class WidgetService:
         sendMessage() {
             const message = this.inputField.value.trim();
             if (!message || !this.isConnected) return;
-            
+
+            this.lastUserMessage = message;
             this.addMessage('user', message);
             this.inputField.value = '';
             document.getElementById('factorial-chat-send').disabled = true;

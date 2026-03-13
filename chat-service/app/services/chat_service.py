@@ -337,13 +337,23 @@ class ChatService:
             )
             response_content = response.choices[0].message.content
             ai_duration = (time.time() - ai_start) * 1000
-            
+
+            # Extract token usage from response
+            token_usage = None
+            if response.usage:
+                token_usage = {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "completion_tokens": response.usage.completion_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                    "model": "gpt-4o-mini",
+                }
+
             # Log AI generation
             log_ai_generation(
                 tenant_id=tenant_id,
                 session_id=session_id,
                 duration_ms=ai_duration,
-                token_count=len(response_content)  # Approximate
+                token_count=response.usage.total_tokens if response.usage else len(response_content)
             )
             
             # Store conversation in Redis for memory (offloaded to avoid blocking event loop)
@@ -389,6 +399,7 @@ class ChatService:
             return {
                 "content": response_content,
                 "sources": sources,
+                "token_usage": token_usage,
                 "metadata": {
                     "tenant_id": tenant_id,
                     "session_id": session_id,

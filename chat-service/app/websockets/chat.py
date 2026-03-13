@@ -235,6 +235,105 @@ class ChatWebSocket:
                 except Exception as e:
                     logger.error(f"Failed to send chat history: {str(e)}", extra={"session_id": session_id})
 
+            # Auto-retry pending auth workflow on reconnection after login
+            if is_authenticated:
+                pending = session_auth_service.pop_pending_workflow(session_id)
+                if pending:
+                    pending_message = pending["user_message"]
+                    pending_workflow_id = pending["workflow_id"]
+                    logger.info(
+                        "Auto-retrying pending auth workflow on reconnection",
+                        session_id=session_id,
+                        tenant_id=tenant_id,
+                        workflow_id=pending_workflow_id,
+                        pending_message=pending_message[:50]
+                    )
+                    try:
+                        user_claims = self._get_user_claims(session_id)
+                        execution_result = await self.workflow_client.start_workflow_execution(
+                            tenant_id=tenant_id,
+                            workflow_id=pending_workflow_id,
+                            session_id=session_id,
+                            user_message=pending_message,
+                            user_access_token=self._get_current_access_token(session_id),
+                            user_claims=user_claims
+                        )
+
+                        first_step = execution_result.get("first_step_result", {})
+                        if not first_step.get("success", True):
+                            error_message = first_step.get("error_message", "Workflow failed to start")
+                            if first_step.get("fallback_to_ai", False):
+                                workflow_ai_response = await self.chat_service.generate_response(
+                                    tenant_id=tenant_id,
+                                    user_message=pending_message,
+                                    session_id=session_id,
+                                    tenant=tenant
+                                )
+                            else:
+                                workflow_ai_response = {
+                                    "content": first_step.get("message", f"I encountered an error: {error_message}"),
+                                    "metadata": {"workflow_step": True, "workflow_error": True, "completed": True}
+                                }
+                        else:
+                            if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
+                                workflow_ai_response = await self.chat_service.generate_response(
+                                    tenant_id=tenant_id,
+                                    user_message=pending_message,
+                                    session_id=session_id,
+                                    tenant=tenant
+                                )
+                            else:
+                                message = first_step.get("message") or "Workflow started"
+                                choices = first_step.get("choices")
+                                workflow_ai_response = {
+                                    "content": message,
+                                    "metadata": {
+                                        "workflow_triggered": True,
+                                        "workflow_id": pending_workflow_id,
+                                        "execution_id": execution_result.get("id"),
+                                        "step_type": first_step.get("step_type"),
+                                        "choices": choices,
+                                        "input_required": first_step.get("input_required")
+                                    }
+                                }
+
+                        # Save and send the workflow response
+                        if workflow_ai_response.get("content"):
+                            workflow_msg_record = ChatMessage(
+                                tenant_id=tenant_id,
+                                session_id=session_id,
+                                message_type="assistant",
+                                content=workflow_ai_response["content"],
+                                message_metadata=workflow_ai_response.get("metadata", {})
+                            )
+                            self.db.add(workflow_msg_record)
+                            await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
+
+                        wf_metadata = workflow_ai_response.get("metadata", {})
+                        if workflow_ai_response.get("content") or wf_metadata.get("choices") or wf_metadata.get("completed"):
+                            retry_response_msg = {
+                                "type": "message",
+                                "role": "assistant",
+                                "content": workflow_ai_response.get("content", ""),
+                                "message_id": workflow_msg_record.id if workflow_ai_response.get("content") else None,
+                                "session_id": session_id,
+                                "sources": workflow_ai_response.get("sources", []),
+                                "metadata": workflow_ai_response.get("metadata", {}),
+                                "timestamp": datetime.now().isoformat()
+                            }
+                            if wf_metadata.get("choices"):
+                                retry_response_msg["choices"] = wf_metadata["choices"]
+                            await websocket.send_text(json.dumps(retry_response_msg))
+
+                        logger.info("Pending auth workflow auto-retried on reconnection", session_id=session_id, tenant_id=tenant_id)
+                    except Exception as e:
+                        logger.error(f"Failed to auto-retry pending workflow on reconnection: {str(e)}", session_id=session_id, tenant_id=tenant_id)
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "message": f"Failed to resume workflow after login: {str(e)}",
+                            "timestamp": datetime.now().isoformat()
+                        }))
+
             while True:
                 # Receive a message from client
                 data = await websocket.receive_text()
@@ -349,6 +448,108 @@ class ChatWebSocket:
                             "type": "auth_confirmed",
                             "message": "Authentication successful."
                         }))
+
+                        # Auto-retry pending auth-required workflow (from Redis)
+                        pending = session_auth_service.pop_pending_workflow(session_id)
+                        if pending:
+                            pending_message = pending["user_message"]
+                            pending_workflow_id = pending["workflow_id"]
+                            logger.info(
+                                "Auto-retrying pending auth workflow after mid-session login",
+                                session_id=session_id,
+                                tenant_id=tenant_id,
+                                workflow_id=pending_workflow_id,
+                                pending_message=pending_message[:50]
+                            )
+
+                            try:
+                                user_claims = self._get_user_claims(session_id)
+                                execution_result = await self.workflow_client.start_workflow_execution(
+                                    tenant_id=tenant_id,
+                                    workflow_id=pending_workflow_id,
+                                    session_id=session_id,
+                                    user_message=pending_message,
+                                    user_access_token=self._get_current_access_token(session_id),
+                                    user_claims=user_claims
+                                )
+
+                                first_step = execution_result.get("first_step_result", {})
+                                if not first_step.get("success", True):
+                                    error_message = first_step.get("error_message", "Workflow failed to start")
+                                    if first_step.get("fallback_to_ai", False):
+                                        workflow_ai_response = await self.chat_service.generate_response(
+                                            tenant_id=tenant_id,
+                                            user_message=pending_message,
+                                            session_id=session_id,
+                                            tenant=tenant
+                                        )
+                                    else:
+                                        workflow_ai_response = {
+                                            "content": first_step.get("message", f"I encountered an error: {error_message}"),
+                                            "metadata": {"workflow_step": True, "workflow_error": True, "completed": True}
+                                        }
+                                else:
+                                    if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
+                                        workflow_ai_response = await self.chat_service.generate_response(
+                                            tenant_id=tenant_id,
+                                            user_message=pending_message,
+                                            session_id=session_id,
+                                            tenant=tenant
+                                        )
+                                    else:
+                                        message = first_step.get("message") or "Workflow started"
+                                        choices = first_step.get("choices")
+                                        workflow_ai_response = {
+                                            "content": message,
+                                            "metadata": {
+                                                "workflow_triggered": True,
+                                                "workflow_id": pending_workflow_id,
+                                                "execution_id": execution_result.get("id"),
+                                                "step_type": first_step.get("step_type"),
+                                                "choices": choices,
+                                                "input_required": first_step.get("input_required")
+                                            }
+                                        }
+
+                                # Save and send the workflow response
+                                if workflow_ai_response.get("content"):
+                                    workflow_msg_record = ChatMessage(
+                                        tenant_id=tenant_id,
+                                        session_id=session_id,
+                                        message_type="assistant",
+                                        content=workflow_ai_response["content"],
+                                        message_metadata=workflow_ai_response.get("metadata", {})
+                                    )
+                                    self.db.add(workflow_msg_record)
+                                    await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
+
+                                wf_metadata = workflow_ai_response.get("metadata", {})
+                                if workflow_ai_response.get("content") or wf_metadata.get("choices") or wf_metadata.get("completed"):
+                                    retry_response_msg = {
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": workflow_ai_response["content"],
+                                        "message_id": workflow_msg_record.id if workflow_ai_response.get("content") else None,
+                                        "session_id": session_id,
+                                        "sources": workflow_ai_response.get("sources", []),
+                                        "metadata": workflow_ai_response.get("metadata", {}),
+                                        "timestamp": datetime.now().isoformat()
+                                    }
+                                    if wf_metadata.get("choices"):
+                                        retry_response_msg["choices"] = wf_metadata["choices"]
+                                    await websocket.send_text(json.dumps(retry_response_msg))
+
+                                logger.info("Pending auth workflow auto-retried successfully", session_id=session_id, tenant_id=tenant_id)
+                                # Skip normal message processing — the current message was just the
+                                # post-auth trigger and the workflow response has already been sent
+                                continue
+
+                            except Exception as e:
+                                logger.error(
+                                    f"Failed to auto-retry pending workflow: {str(e)}",
+                                    session_id=session_id, tenant_id=tenant_id
+                                )
+                                # Fall through to normal processing
 
                 # Check if tenant has any workflows at all (Redis-cached)
                 try:
@@ -507,6 +708,10 @@ class ChatWebSocket:
 
                                 # Soft auth gate: if workflow requires auth and user is not authenticated
                                 if trigger_result.get("requires_auth") and not self._is_authenticated:
+                                    # Persist pending message in Redis so it survives WebSocket reconnection
+                                    session_auth_service.store_pending_workflow(
+                                        session_id, user_message, trigger_result.get("workflow_id")
+                                    )
                                     await websocket.send_text(json.dumps({
                                         "type": "auth_required",
                                         "message": "This feature requires you to log in first.",
@@ -632,6 +837,26 @@ class ChatWebSocket:
                         except Exception as e:
                             # Log but don't fail on event publishing errors
                             print(f"Failed to publish assistant message event: {str(e)}")
+
+                        # Record token usage (fire-and-forget)
+                        if ai_response.get("token_usage"):
+                            try:
+                                from app.services.token_usage_service import token_usage_service
+                                tu = ai_response["token_usage"]
+                                await asyncio.get_event_loop().run_in_executor(
+                                    None,
+                                    lambda: token_usage_service.record_usage(
+                                        tenant_id=tenant_id,
+                                        model=tu.get("model", "gpt-4o-mini"),
+                                        usage_type="chat_completion",
+                                        prompt_tokens=tu.get("prompt_tokens", 0),
+                                        completion_tokens=tu.get("completion_tokens", 0),
+                                        total_tokens=tu.get("total_tokens", 0),
+                                        session_id=session_id,
+                                    )
+                                )
+                            except Exception as e:
+                                print(f"Failed to record token usage: {str(e)}")
 
                     if not ai_response.get("content"):
                         # No AI content to save — commit the flushed user message

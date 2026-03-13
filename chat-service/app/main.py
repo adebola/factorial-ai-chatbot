@@ -10,6 +10,7 @@ load_dotenv()
 from .api.chat import router as chat_router
 from .api.admin_chat import router as admin_chat_router
 from .api.auth import router as auth_router
+from .api.admin_token_usage import router as admin_token_usage_router
 from .core.config import settings
 from .core.logging_config import (
     setup_logging,
@@ -223,6 +224,7 @@ async def logging_middleware(request: Request, call_next):
 app.include_router(chat_router, prefix=settings.API_V1_STR)
 app.include_router(admin_chat_router, prefix=f"{settings.API_V1_STR}/chat", tags=["admin", "chat"])
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
+app.include_router(admin_token_usage_router, prefix=f"{settings.API_V1_STR}/chat", tags=["admin", "token-usage"])
 
 # Also include WebSocket route at root level for easier client access
 app.include_router(chat_router)

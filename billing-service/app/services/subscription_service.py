@@ -28,6 +28,22 @@ class SubscriptionService:
         self.paystack = PaystackService(db)
         self.plan_service = PlanService(db)
 
+    @staticmethod
+    def get_effective_limit(subscription, plan, limit_name: str):
+        """Get the effective limit for a subscription, checking custom overrides first.
+
+        Resolution order: custom_limits override → plan default.
+
+        Args:
+            subscription: Subscription instance
+            plan: Plan instance
+            limit_name: One of document_limit, website_limit, daily_chat_limit,
+                        monthly_chat_limit, max_document_size_mb, max_pages_per_website
+        """
+        if subscription.custom_limits and limit_name in subscription.custom_limits:
+            return subscription.custom_limits[limit_name]
+        return getattr(plan, limit_name)
+
     def create_subscription(
         self,
         tenant_id: str,
@@ -753,7 +769,8 @@ class SubscriptionService:
         previous_amount: Optional[Decimal] = None,
         new_amount: Optional[Decimal] = None,
         prorated_amount: Optional[Decimal] = None,
-        reason: Optional[str] = None
+        reason: Optional[str] = None,
+        initiated_by: str = "user"
     ) -> None:
         """Log a subscription change for audit trail"""
 
@@ -767,6 +784,7 @@ class SubscriptionService:
             new_amount=new_amount,
             prorated_amount=prorated_amount,
             reason=reason,
+            initiated_by=initiated_by,
             effective_at=datetime.now(timezone.utc)
         )
 
@@ -805,6 +823,206 @@ class SubscriptionService:
 
         # Prorated amount (positive = charge more, negative = credit)
         return new_amount_needed - unused_amount
+
+    def preview_admin_plan_migration(
+        self,
+        subscription_id: str,
+        new_plan_id: str,
+        billing_cycle: Optional[BillingCycle] = None
+    ) -> Dict[str, Any]:
+        """Preview cost calculation for admin-initiated plan migration"""
+
+        subscription = self.get_subscription_by_id(subscription_id)
+        if not subscription:
+            raise ValueError("Subscription not found")
+
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]:
+            raise ValueError("Can only migrate active or trialing subscriptions")
+
+        if subscription.plan_id == new_plan_id:
+            raise ValueError("Cannot migrate to the same plan")
+
+        new_plan = self.plan_service.get_plan_by_id(new_plan_id)
+        if not new_plan or not new_plan.is_active:
+            raise ValueError("Target plan not found or inactive")
+
+        current_plan = self.plan_service.get_plan_by_id(subscription.plan_id)
+
+        if not billing_cycle:
+            billing_cycle = subscription.billing_cycle
+
+        if billing_cycle == BillingCycle.YEARLY:
+            new_amount = new_plan.yearly_plan_cost
+            old_amount = current_plan.yearly_plan_cost if current_plan else Decimal(0)
+        else:
+            new_amount = new_plan.monthly_plan_cost
+            old_amount = current_plan.monthly_plan_cost if current_plan else Decimal(0)
+
+        is_downgrade = new_amount < old_amount
+
+        # Calculate proration for active subscriptions
+        prorated_amount = Decimal(0)
+        remaining_days = 0
+        if subscription.status == SubscriptionStatus.ACTIVE and subscription.current_period_end:
+            prorated_amount = self._calculate_proration(
+                subscription, old_amount, new_amount, billing_cycle
+            )
+            now = datetime.now(timezone.utc)
+            remaining_days = max(0, (subscription.current_period_end - now).days)
+
+        recommended_payment = max(Decimal(0), prorated_amount)
+
+        return {
+            "subscription_id": subscription.id,
+            "tenant_id": subscription.tenant_id,
+            "current_plan": {
+                "id": current_plan.id if current_plan else None,
+                "name": current_plan.name if current_plan else "Unknown",
+                "monthly_cost": float(current_plan.monthly_plan_cost) if current_plan else 0,
+                "yearly_cost": float(current_plan.yearly_plan_cost) if current_plan else 0,
+            },
+            "target_plan": {
+                "id": new_plan.id,
+                "name": new_plan.name,
+                "monthly_cost": float(new_plan.monthly_plan_cost),
+                "yearly_cost": float(new_plan.yearly_plan_cost),
+            },
+            "billing_cycle": billing_cycle,
+            "is_downgrade": is_downgrade,
+            "old_amount": float(old_amount),
+            "new_amount": float(new_amount),
+            "remaining_days": remaining_days,
+            "prorated_amount": float(prorated_amount),
+            "recommended_payment": float(recommended_payment),
+            "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
+        }
+
+    def execute_admin_plan_migration(
+        self,
+        subscription_id: str,
+        new_plan_id: str,
+        payment_amount: Decimal,
+        payment_method: str,
+        reference_number: Optional[str] = None,
+        reason: str = "",
+        billing_cycle: Optional[BillingCycle] = None,
+        notes: Optional[str] = None,
+        admin_user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Execute admin-initiated plan migration (immediate, both upgrades and downgrades)"""
+
+        subscription = self.get_subscription_by_id(subscription_id)
+        if not subscription:
+            raise ValueError("Subscription not found")
+
+        if subscription.status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]:
+            raise ValueError("Can only migrate active or trialing subscriptions")
+
+        new_plan = self.plan_service.get_plan_by_id(new_plan_id)
+        if not new_plan or not new_plan.is_active:
+            raise ValueError("Target plan not found or inactive")
+
+        current_plan = self.plan_service.get_plan_by_id(subscription.plan_id)
+
+        if not billing_cycle:
+            billing_cycle = subscription.billing_cycle
+
+        if billing_cycle == BillingCycle.YEARLY:
+            new_amount = new_plan.yearly_plan_cost
+            old_amount = current_plan.yearly_plan_cost if current_plan else Decimal(0)
+        else:
+            new_amount = new_plan.monthly_plan_cost
+            old_amount = current_plan.monthly_plan_cost if current_plan else Decimal(0)
+
+        is_downgrade = new_amount < old_amount
+        old_plan_id = subscription.plan_id
+
+        # Update subscription
+        subscription.plan_id = new_plan_id
+        subscription.amount = new_amount
+        subscription.billing_cycle = billing_cycle
+
+        # If upgrading from TRIALING, transition to ACTIVE with fresh billing period
+        was_trialing = subscription.status == SubscriptionStatus.TRIALING
+        if was_trialing and new_amount > old_amount:
+            now = datetime.now(timezone.utc)
+            subscription.status = SubscriptionStatus.ACTIVE
+            subscription.trial_ends_at = None
+            subscription.starts_at = now
+            subscription.current_period_start = now
+            if billing_cycle == BillingCycle.MONTHLY:
+                subscription.current_period_end = now + timedelta(days=30)
+                subscription.ends_at = now + timedelta(days=30)
+            else:
+                subscription.current_period_end = now + timedelta(days=365)
+                subscription.ends_at = now + timedelta(days=365)
+
+        # Clear any pending plan changes
+        if subscription.pending_plan_id:
+            subscription.pending_plan_id = None
+            subscription.pending_billing_cycle = None
+            subscription.pending_plan_effective_date = None
+
+        subscription.updated_at = datetime.now(timezone.utc)
+
+        # Create payment record if amount > 0
+        payment_id = None
+        if payment_amount > 0:
+            payment_id = str(uuid.uuid4())
+            transaction_type = TransactionType.UPGRADE if not is_downgrade else TransactionType.DOWNGRADE
+            payment_ref = reference_number or f"admin_migration_{payment_id[:8]}"
+
+            payment = Payment(
+                id=payment_id,
+                subscription_id=subscription.id,
+                tenant_id=subscription.tenant_id,
+                amount=payment_amount,
+                currency=subscription.currency or "NGN",
+                status=PaymentStatus.COMPLETED,
+                payment_method=payment_method,
+                transaction_type=transaction_type,
+                paystack_reference=payment_ref,
+                description=f"Admin plan migration: {current_plan.name if current_plan else 'Unknown'} -> {new_plan.name}. {reason}",
+                created_at=datetime.now(timezone.utc),
+                processed_at=datetime.now(timezone.utc),
+                gateway_response={"admin_migration": True, "processed_by_admin": admin_user_id},
+                refunded_amount=Decimal("0.00")
+            )
+            self.db.add(payment)
+
+        # Log the change
+        change_type = "admin_upgrade" if not is_downgrade else "admin_downgrade"
+        self._log_subscription_change(
+            subscription=subscription,
+            change_type=change_type,
+            previous_plan_id=old_plan_id,
+            new_plan_id=new_plan_id,
+            previous_amount=old_amount,
+            new_amount=new_amount,
+            prorated_amount=payment_amount,
+            reason=reason,
+            initiated_by="admin"
+        )
+
+        self.db.commit()
+        self.db.refresh(subscription)
+
+        return {
+            "success": True,
+            "subscription_id": subscription.id,
+            "tenant_id": subscription.tenant_id,
+            "old_plan_id": old_plan_id,
+            "old_plan_name": current_plan.name if current_plan else "Unknown",
+            "new_plan_id": new_plan_id,
+            "new_plan_name": new_plan.name,
+            "old_amount": float(old_amount),
+            "new_amount": float(new_amount),
+            "payment_amount": float(payment_amount),
+            "payment_id": payment_id,
+            "is_downgrade": is_downgrade,
+            "effective_immediately": True,
+            "subscription_status": subscription.status,
+        }
 
     def _store_payment_method(
         self,

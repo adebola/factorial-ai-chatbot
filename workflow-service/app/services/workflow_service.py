@@ -114,6 +114,10 @@ class WorkflowService:
                         trigger_config["intent_embeddings"] = embeddings
                         workflow.trigger_config = trigger_config
 
+                        # Flush workflow first so FK reference is satisfied
+                        self.db.add(workflow)
+                        self.db.flush()
+
                         # Write embeddings to pgvector table for indexed search
                         for entry in embeddings:
                             self.db.add(WorkflowIntentEmbedding(
@@ -125,8 +129,7 @@ class WorkflowService:
                     except Exception as e:
                         logger.warning(f"Failed to generate intent embeddings: {e}")
 
-            self.db.add(workflow)
-            self.db.flush()  # Ensure workflow row exists before intent embeddings FK reference
+            self.db.add(workflow)  # no-op if already added in intent branch above
             self.db.commit()
             self.db.refresh(workflow)
 

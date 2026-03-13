@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..models.subscription import Subscription, SubscriptionStatus, UsageTracking
 from ..models.plan import Plan
+from .subscription_service import SubscriptionService
 
 logger = logging.getLogger(__name__)
 
@@ -148,10 +149,11 @@ class SubscriptionChecker:
             # No usage record yet - allow upload
             return True, None
 
-        # Check document limit
-        if plan.document_limit is not None:
-            if usage.documents_used >= plan.document_limit:
-                return False, f"Document limit reached ({plan.document_limit} documents allowed on {plan.name} plan)"
+        # Check document limit (custom override or plan default)
+        document_limit = SubscriptionService.get_effective_limit(subscription, plan, "document_limit")
+        if document_limit is not None:
+            if usage.documents_used >= document_limit:
+                return False, f"Document limit reached ({document_limit} documents allowed on {plan.name} plan)"
 
         return True, None
 
@@ -184,16 +186,20 @@ class SubscriptionChecker:
             UsageTracking.subscription_id == subscription.id
         ).first()
 
+        # Resolve effective limits (custom override or plan default)
+        max_pages = SubscriptionService.get_effective_limit(subscription, plan, "max_pages_per_website")
+
         if not usage:
             # No usage record yet - allow ingestion
-            return True, None, plan.max_pages_per_website
+            return True, None, max_pages
 
         # Check website limit
-        if plan.website_limit is not None:
-            if usage.websites_used >= plan.website_limit:
-                return False, f"Website limit reached ({plan.website_limit} websites allowed on {plan.name} plan)", plan.max_pages_per_website
+        website_limit = SubscriptionService.get_effective_limit(subscription, plan, "website_limit")
+        if website_limit is not None:
+            if usage.websites_used >= website_limit:
+                return False, f"Website limit reached ({website_limit} websites allowed on {plan.name} plan)", max_pages
 
-        return True, None, plan.max_pages_per_website
+        return True, None, max_pages
 
     def check_can_send_chat(self, tenant_id: str) -> Tuple[bool, Optional[str]]:
         """
@@ -228,10 +234,11 @@ class SubscriptionChecker:
             # No usage record yet - allow chat
             return True, None
 
-        # Check monthly chat limit
-        if plan.monthly_chat_limit is not None:
-            if usage.monthly_chats_used >= plan.monthly_chat_limit:
-                return False, f"Monthly chat limit reached ({plan.monthly_chat_limit} chats allowed on {plan.name} plan)"
+        # Check monthly chat limit (custom override or plan default)
+        monthly_chat_limit = SubscriptionService.get_effective_limit(subscription, plan, "monthly_chat_limit")
+        if monthly_chat_limit is not None:
+            if usage.monthly_chats_used >= monthly_chat_limit:
+                return False, f"Monthly chat limit reached ({monthly_chat_limit} chats allowed on {plan.name} plan)"
 
         return True, None
 
@@ -257,6 +264,11 @@ class SubscriptionChecker:
             UsageTracking.subscription_id == subscription.id
         ).first()
 
+        # Resolve effective limits (custom override or plan default)
+        doc_limit = SubscriptionService.get_effective_limit(subscription, plan, "document_limit")
+        web_limit = SubscriptionService.get_effective_limit(subscription, plan, "website_limit")
+        chat_limit = SubscriptionService.get_effective_limit(subscription, plan, "monthly_chat_limit")
+
         if not usage:
             # No usage yet - return limits only
             return {
@@ -264,18 +276,18 @@ class SubscriptionChecker:
                 "plan_name": plan.name,
                 "documents": {
                     "used": 0,
-                    "limit": plan.document_limit,
-                    "remaining": plan.document_limit
+                    "limit": doc_limit,
+                    "remaining": doc_limit
                 },
                 "websites": {
                     "used": 0,
-                    "limit": plan.website_limit,
-                    "remaining": plan.website_limit
+                    "limit": web_limit,
+                    "remaining": web_limit
                 },
                 "monthly_chats": {
                     "used": 0,
-                    "limit": plan.monthly_chat_limit,
-                    "remaining": plan.monthly_chat_limit
+                    "limit": chat_limit,
+                    "remaining": chat_limit
                 }
             }
 
@@ -284,18 +296,18 @@ class SubscriptionChecker:
             "plan_name": plan.name,
             "documents": {
                 "used": usage.documents_used,
-                "limit": plan.document_limit,
-                "remaining": max(0, plan.document_limit - usage.documents_used) if plan.document_limit else None
+                "limit": doc_limit,
+                "remaining": max(0, doc_limit - usage.documents_used) if doc_limit else None
             },
             "websites": {
                 "used": usage.websites_used,
-                "limit": plan.website_limit,
-                "remaining": max(0, plan.website_limit - usage.websites_used) if plan.website_limit else None
+                "limit": web_limit,
+                "remaining": max(0, web_limit - usage.websites_used) if web_limit else None
             },
             "monthly_chats": {
                 "used": usage.monthly_chats_used,
-                "limit": plan.monthly_chat_limit,
-                "remaining": max(0, plan.monthly_chat_limit - usage.monthly_chats_used) if plan.monthly_chat_limit else None,
+                "limit": chat_limit,
+                "remaining": max(0, chat_limit - usage.monthly_chats_used) if chat_limit else None,
                 "resets_at": usage.monthly_reset_at.isoformat() if usage.monthly_reset_at else None
             }
         }

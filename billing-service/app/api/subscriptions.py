@@ -151,42 +151,48 @@ async def get_current_usage(
                 return -1
             return max(0, limit - used)
 
+        # Resolve effective limits (custom override or plan default)
+        eff_doc_limit = SubscriptionService.get_effective_limit(subscription, plan, "document_limit") if subscription else plan.document_limit
+        eff_web_limit = SubscriptionService.get_effective_limit(subscription, plan, "website_limit") if subscription else plan.website_limit
+        eff_daily_limit = SubscriptionService.get_effective_limit(subscription, plan, "daily_chat_limit") if subscription else plan.daily_chat_limit
+        eff_monthly_limit = SubscriptionService.get_effective_limit(subscription, plan, "monthly_chat_limit") if subscription else plan.monthly_chat_limit
+
         # Calculate usage percentages and remaining values
-        doc_percentage = calc_percentage(usage.documents_used, plan.document_limit)
-        website_percentage = calc_percentage(usage.websites_used, plan.website_limit)
-        daily_chat_percentage = calc_percentage(usage.daily_chats_used, plan.daily_chat_limit)
-        monthly_chat_percentage = calc_percentage(usage.monthly_chats_used, plan.monthly_chat_limit)
+        doc_percentage = calc_percentage(usage.documents_used, eff_doc_limit)
+        website_percentage = calc_percentage(usage.websites_used, eff_web_limit)
+        daily_chat_percentage = calc_percentage(usage.daily_chats_used, eff_daily_limit)
+        monthly_chat_percentage = calc_percentage(usage.monthly_chats_used, eff_monthly_limit)
 
         return {
             "usage_statistics": {
                 "documents": {
                     "used": usage.documents_used,
-                    "limit": plan.document_limit,
-                    "unlimited": plan.document_limit == -1,
+                    "limit": eff_doc_limit,
+                    "unlimited": eff_doc_limit == -1,
                     "percentage": round(doc_percentage, 2),
-                    "remaining": calc_remaining(usage.documents_used, plan.document_limit)
+                    "remaining": calc_remaining(usage.documents_used, eff_doc_limit)
                 },
                 "websites": {
                     "used": usage.websites_used,
-                    "limit": plan.website_limit,
-                    "unlimited": plan.website_limit == -1,
+                    "limit": eff_web_limit,
+                    "unlimited": eff_web_limit == -1,
                     "percentage": round(website_percentage, 2),
-                    "remaining": calc_remaining(usage.websites_used, plan.website_limit)
+                    "remaining": calc_remaining(usage.websites_used, eff_web_limit)
                 },
                 "daily_chats": {
                     "used": usage.daily_chats_used,
-                    "limit": plan.daily_chat_limit,
-                    "unlimited": plan.daily_chat_limit == -1,
+                    "limit": eff_daily_limit,
+                    "unlimited": eff_daily_limit == -1,
                     "percentage": round(daily_chat_percentage, 2),
-                    "remaining": calc_remaining(usage.daily_chats_used, plan.daily_chat_limit),
+                    "remaining": calc_remaining(usage.daily_chats_used, eff_daily_limit),
                     "resets_at": usage.daily_reset_at.isoformat() if usage.daily_reset_at else None
                 },
                 "monthly_chats": {
                     "used": usage.monthly_chats_used,
-                    "limit": plan.monthly_chat_limit,
-                    "unlimited": plan.monthly_chat_limit == -1,
+                    "limit": eff_monthly_limit,
+                    "unlimited": eff_monthly_limit == -1,
                     "percentage": round(monthly_chat_percentage, 2),
-                    "remaining": calc_remaining(usage.monthly_chats_used, plan.monthly_chat_limit),
+                    "remaining": calc_remaining(usage.monthly_chats_used, eff_monthly_limit),
                     "resets_at": usage.monthly_reset_at.isoformat() if usage.monthly_reset_at else None
                 },
                 "api_calls": {
@@ -326,24 +332,24 @@ async def check_usage_limit(
                 UsageTracking.subscription_id == subscription.id
             ).first()
         
-        # Check limits based on usage type
+        # Check limits based on usage type (custom override or plan default)
         # Note: limit of -1 means unlimited
         if usage_type == "documents":
             current = usage.documents_used
-            limit = plan.document_limit
-            allowed = (limit == -1) or (usage.documents_used < plan.document_limit)
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "document_limit")
+            allowed = (limit == -1) or (current < limit)
         elif usage_type == "websites":
             current = usage.websites_used
-            limit = plan.website_limit
-            allowed = (limit == -1) or (usage.websites_used < plan.website_limit)
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "website_limit")
+            allowed = (limit == -1) or (current < limit)
         elif usage_type == "daily_chats":
             current = usage.daily_chats_used
-            limit = plan.daily_chat_limit
-            allowed = (limit == -1) or (usage.daily_chats_used < plan.daily_chat_limit)
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "daily_chat_limit")
+            allowed = (limit == -1) or (current < limit)
         elif usage_type == "monthly_chats":
             current = usage.monthly_chats_used
-            limit = plan.monthly_chat_limit
-            allowed = (limit == -1) or (usage.monthly_chats_used < plan.monthly_chat_limit)
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "monthly_chat_limit")
+            allowed = (limit == -1) or (current < limit)
         elif usage_type == "api_calls":
             current = usage.api_calls_made
             limit = -1  # API calls always unlimited

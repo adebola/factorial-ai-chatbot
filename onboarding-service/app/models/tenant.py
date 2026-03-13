@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, JSON, Enum, ForeignKey, Numeric
+from sqlalchemy import Column, Integer, Float, String, DateTime, Boolean, Text, JSON, Enum, ForeignKey, Numeric, Index
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -117,3 +117,21 @@ class WebsitePage(Base):
     error_message = Column(Text)
     scraped_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TokenUsage(Base):
+    __tablename__ = "token_usage"
+    __table_args__ = (
+        Index('ix_onb_token_usage_tenant_created', 'tenant_id', 'created_at'),
+    )
+
+    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String(255), nullable=False, index=True)
+    source_id = Column(String(255), nullable=True)  # document_id or ingestion_id
+    model = Column(String(100), nullable=False)
+    usage_type = Column(String(20), nullable=False)  # "embedding", "classification", "entity_extraction"
+    prompt_tokens = Column(Integer, nullable=False, default=0)
+    completion_tokens = Column(Integer, nullable=False, default=0)
+    total_tokens = Column(Integer, nullable=False, default=0)
+    estimated_cost_usd = Column(Float, nullable=False, default=0.0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)

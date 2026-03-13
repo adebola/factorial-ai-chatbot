@@ -324,6 +324,14 @@ spring:
                   - RewritePath=/api/v1/admin/analytics/(?<segment>.*),/auth/api/v1/admin/analytics/$\{segment}
                   - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
 
+              # Onboarding Service - Token Usage Admin
+              - id: admin-token-usage-onboarding
+                uri: http://localhost:8001
+                predicates:
+                    - Path=/api/v1/admin/token-usage/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
               # Quality Service - Dashboard Endpoints
               - id: admin-dashboard
                 uri: http://localhost:8005

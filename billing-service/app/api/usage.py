@@ -111,23 +111,23 @@ async def check_usage_limit(
                 UsageTracking.subscription_id == subscription.id
             ).first()
 
-        # Check limits based on usage type
+        # Check limits based on usage type (custom override or plan default)
         # Note: limit of -1 means unlimited
         if usage_type == "documents":
             current = usage.documents_used
-            limit = plan.document_limit
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "document_limit")
             allowed = (limit == -1) or (current < limit)
         elif usage_type == "websites":
             current = usage.websites_used
-            limit = plan.website_limit
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "website_limit")
             allowed = (limit == -1) or (current < limit)
         elif usage_type == "daily_chats":
             current = usage.daily_chats_used
-            limit = plan.daily_chat_limit
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "daily_chat_limit")
             allowed = (limit == -1) or (current < limit)
         elif usage_type == "monthly_chats":
             current = usage.monthly_chats_used
-            limit = plan.monthly_chat_limit
+            limit = SubscriptionService.get_effective_limit(subscription, plan, "monthly_chat_limit")
             allowed = (limit == -1) or (current < limit)
         else:
             raise HTTPException(

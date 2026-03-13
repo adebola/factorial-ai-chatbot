@@ -28,8 +28,8 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 # Service URLs for inter-service communication
-AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://localhost:9002")
-BILLING_SERVICE_URL = os.environ.get("BILLING_SERVICE_URL", "http://localhost:8004")
+AUTH_SERVICE_URL = os.environ.get("AUTH_SERVICE_URL", "http://authorization-service:9000")
+BILLING_SERVICE_URL = os.environ.get("BILLING_SERVICE_URL", "http://billing-service:8000")
 
 
 @router.get("/dashboard/quick-stats")

@@ -60,7 +60,9 @@ authorization:
     security:
       allowed-origins:
         - https://app.chatcraft.cc
+        - https://chatcraft-admin.web.app
         - https://factorai-370af.web.app
+        - https://chatcraft-admin.firebaseapp.com
         - http://gateway-service:8080
       location: https://api.chatcraft.cc/auth
 

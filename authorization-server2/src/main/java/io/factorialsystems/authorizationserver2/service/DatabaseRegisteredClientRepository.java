@@ -31,13 +31,13 @@ public class DatabaseRegisteredClientRepository implements RegisteredClientRepos
     @Override
     @Cacheable(value = "registeredClients", key = "#id")
     public RegisteredClient findById(String id) {
-        log.debug("Finding registered client by id: {}", id);
+        log.info("Finding registered client by id: {}", id);
         
         io.factorialsystems.authorizationserver2.model.RegisteredClient dbClient = 
                 registeredClientMapper.findById(id);
                 
         if (dbClient == null) {
-            log.debug("No registered client found with id: {}", id);
+            log.error("No registered client found with id: {}", id);
             return null;
         }
         
@@ -47,17 +47,17 @@ public class DatabaseRegisteredClientRepository implements RegisteredClientRepos
     @Override
     @Cacheable(value = "registeredClientsByClientId", key = "#clientId")
     public RegisteredClient findByClientId(String clientId) {
-        log.debug("Finding registered client by clientId: {}", clientId);
+        log.info("Finding registered client by clientId: {}", clientId);
         
         io.factorialsystems.authorizationserver2.model.RegisteredClient dbClient = 
                 registeredClientMapper.findByClientId(clientId);
                 
         if (dbClient == null) {
-            log.debug("No registered client found with clientId: {}", clientId);
+            log.error("No registered client found with clientId: {}", clientId);
             return null;
         }
         
-        log.debug("Found registered client: {} for clientId: {}", dbClient.getClientName(), clientId);
+        log.info("Found registered client: {} for clientId: {}", dbClient.getClientName(), clientId);
         return convertToSpringRegisteredClient(dbClient);
     }
 

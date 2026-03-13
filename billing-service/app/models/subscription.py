@@ -99,6 +99,11 @@ class Subscription(Base):
     
     # Metadata
     subscription_metadata = Column(JSON, default={})  # Additional subscription data
+
+    # Custom usage limits for enterprise overrides (set via admin API)
+    # Keys: document_limit, website_limit, daily_chat_limit, monthly_chat_limit,
+    #        max_document_size_mb, max_pages_per_website
+    custom_limits = Column(JSON, nullable=True, default=None)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())

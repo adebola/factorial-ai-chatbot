@@ -78,6 +78,23 @@ class SubscriptionOverrideRequest(BaseModel):
     reason: str = Field(..., description="Reason for override")
 
 
+class PlanMigrationPreviewRequest(BaseModel):
+    """Request schema for previewing a plan migration"""
+    new_plan_id: str = Field(..., description="Target plan ID")
+    billing_cycle: Optional[str] = Field(None, description="Billing cycle (monthly/yearly)")
+
+
+class PlanMigrationExecuteRequest(BaseModel):
+    """Request schema for executing a plan migration"""
+    new_plan_id: str = Field(..., description="Target plan ID")
+    payment_amount: Decimal = Field(..., ge=0, description="Payment amount (can be 0)")
+    payment_method: str = Field(..., description="Payment method (bank_transfer, cash, cheque, waived)")
+    reference_number: Optional[str] = Field(None, description="Payment reference number")
+    reason: str = Field(..., description="Reason for migration")
+    billing_cycle: Optional[str] = Field(None, description="Billing cycle (monthly/yearly)")
+    notes: Optional[str] = Field(None, description="Additional notes")
+
+
 # ============================================================================
 # Subscription Endpoints
 # ============================================================================
@@ -139,12 +156,20 @@ async def list_all_subscriptions(
         has_next = page < (pages - 1)
         has_prev = page > 0
 
+        # Build plan name lookup
+        plan_ids = {sub.plan_id for sub in subscriptions if sub.plan_id}
+        plans_map = {}
+        if plan_ids:
+            plans = db.query(Plan).filter(Plan.id.in_(plan_ids)).all()
+            plans_map = {p.id: p.name for p in plans}
+
         return {
             "items": [
                 {
                     "id": sub.id,
                     "tenant_id": sub.tenant_id,
                     "plan_id": sub.plan_id,
+                    "plan_name": plans_map.get(sub.plan_id),
                     "status": sub.status,
                     "billing_cycle": sub.billing_cycle,
                     "amount": float(sub.amount),
@@ -668,7 +693,8 @@ async def override_subscription(
             "plan_id": subscription.plan_id,
             "status": subscription.status,
             "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
-            "trial_end": subscription.trial_end.isoformat() if subscription.trial_end else None,
+            "trial_ends_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None,
+            "custom_limits": subscription.custom_limits,
         }
 
         # Apply overrides
@@ -680,11 +706,23 @@ async def override_subscription(
             subscription.ends_at = override_data.custom_expiration
 
         if override_data.trial_extension_days:
-            if subscription.trial_end:
-                from datetime import timedelta
-                subscription.trial_end = subscription.trial_end + timedelta(days=override_data.trial_extension_days)
+            if subscription.trial_ends_at:
+                subscription.trial_ends_at = subscription.trial_ends_at + timedelta(days=override_data.trial_extension_days)
 
-        # TODO: Implement usage_limit_overrides (requires additional metadata storage)
+        if override_data.usage_limit_overrides:
+            allowed_keys = {
+                "document_limit", "website_limit", "daily_chat_limit",
+                "monthly_chat_limit", "max_document_size_mb", "max_pages_per_website"
+            }
+            invalid_keys = set(override_data.usage_limit_overrides.keys()) - allowed_keys
+            if invalid_keys:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid limit keys: {invalid_keys}"
+                )
+            existing = subscription.custom_limits or {}
+            existing.update(override_data.usage_limit_overrides)
+            subscription.custom_limits = existing
 
         db.commit()
         db.refresh(subscription)
@@ -694,7 +732,8 @@ async def override_subscription(
             "plan_id": subscription.plan_id,
             "status": subscription.status,
             "current_period_end": subscription.current_period_end.isoformat() if subscription.current_period_end else None,
-            "trial_end": subscription.trial_end.isoformat() if subscription.trial_end else None,
+            "trial_ends_at": subscription.trial_ends_at.isoformat() if subscription.trial_ends_at else None,
+            "custom_limits": subscription.custom_limits,
         }
 
         # Log admin action
@@ -714,6 +753,7 @@ async def override_subscription(
                 "new_plan_id": override_data.new_plan_id,
                 "custom_expiration": override_data.custom_expiration.isoformat() if override_data.custom_expiration else None,
                 "trial_extension_days": override_data.trial_extension_days,
+                "usage_limit_overrides": override_data.usage_limit_overrides,
             }
         )
 
@@ -736,4 +776,280 @@ async def override_subscription(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to override subscription: {str(e)}"
+        )
+
+
+@router.get("/subscriptions/{subscription_id}/custom-limits")
+async def get_custom_limits(
+    subscription_id: str,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get custom limits for a subscription (SYSTEM_ADMIN only).
+
+    Returns plan defaults, custom overrides, and effective limits side-by-side.
+    """
+    try:
+        subscription = db.query(Subscription).filter(
+            Subscription.id == subscription_id
+        ).first()
+
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Subscription not found: {subscription_id}"
+            )
+
+        plan = db.query(Plan).filter(Plan.id == subscription.plan_id).first()
+
+        limit_keys = [
+            "document_limit", "website_limit", "daily_chat_limit",
+            "monthly_chat_limit", "max_document_size_mb", "max_pages_per_website"
+        ]
+
+        plan_limits = {}
+        effective_limits = {}
+        for key in limit_keys:
+            plan_val = getattr(plan, key, None) if plan else None
+            plan_limits[key] = plan_val
+            if subscription.custom_limits and key in subscription.custom_limits:
+                effective_limits[key] = subscription.custom_limits[key]
+            else:
+                effective_limits[key] = plan_val
+
+        return {
+            "subscription_id": subscription.id,
+            "tenant_id": subscription.tenant_id,
+            "plan_name": plan.name if plan else None,
+            "plan_limits": plan_limits,
+            "custom_limits": subscription.custom_limits,
+            "effective_limits": effective_limits,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve custom limits: {str(e)}"
+        )
+
+
+@router.delete("/subscriptions/{subscription_id}/custom-limits")
+async def clear_custom_limits(
+    subscription_id: str,
+    request: Request,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Clear all custom limit overrides for a subscription (SYSTEM_ADMIN only).
+
+    Reverts the subscription to using plan defaults for all limits.
+    """
+    try:
+        subscription = db.query(Subscription).filter(
+            Subscription.id == subscription_id
+        ).first()
+
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Subscription not found: {subscription_id}"
+            )
+
+        before_state = {"custom_limits": subscription.custom_limits}
+
+        subscription.custom_limits = None
+
+        db.commit()
+        db.refresh(subscription)
+
+        # Log admin action
+        audit_service = AuditService(db)
+        audit_service.log_action(
+            admin_claims=claims,
+            action_type="clear_custom_limits",
+            target_type="subscription",
+            target_id=subscription_id,
+            target_tenant_id=subscription.tenant_id,
+            before_state=before_state,
+            after_state={"custom_limits": None},
+            reason="Custom limits cleared - reverted to plan defaults",
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+
+        return {
+            "success": True,
+            "subscription_id": subscription_id,
+            "message": "Custom limits cleared. Subscription now uses plan defaults.",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to clear custom limits: {str(e)}"
+        )
+
+
+# ============================================================================
+# Plan Migration Endpoints
+# ============================================================================
+
+@router.post("/subscriptions/{subscription_id}/migrate/preview")
+async def preview_plan_migration(
+    subscription_id: str,
+    preview_data: PlanMigrationPreviewRequest,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Preview cost calculation for admin-initiated plan migration (SYSTEM_ADMIN only).
+
+    Returns the cost difference, recommended payment amount, and migration details
+    for admin review before executing the migration.
+    """
+    try:
+        from ..models.subscription import BillingCycle
+
+        billing_cycle = None
+        if preview_data.billing_cycle:
+            billing_cycle = BillingCycle(preview_data.billing_cycle)
+
+        subscription_service = SubscriptionService(db)
+        result = subscription_service.preview_admin_plan_migration(
+            subscription_id=subscription_id,
+            new_plan_id=preview_data.new_plan_id,
+            billing_cycle=billing_cycle
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Failed to preview plan migration: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to preview plan migration: {str(e)}"
+        )
+
+
+@router.post("/subscriptions/{subscription_id}/migrate/execute")
+async def execute_plan_migration(
+    subscription_id: str,
+    migration_data: PlanMigrationExecuteRequest,
+    request: Request,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Execute admin-initiated plan migration (SYSTEM_ADMIN only).
+
+    Both upgrades and downgrades apply immediately. Admin specifies the payment
+    amount (can be 0 for downgrades or waived payments).
+    """
+    try:
+        from ..models.subscription import BillingCycle
+        from ..services.rabbitmq_service import rabbitmq_service
+
+        billing_cycle = None
+        if migration_data.billing_cycle:
+            billing_cycle = BillingCycle(migration_data.billing_cycle)
+
+        # Get subscription before state for audit
+        subscription = db.query(Subscription).filter(
+            Subscription.id == subscription_id
+        ).first()
+
+        if not subscription:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Subscription not found: {subscription_id}"
+            )
+
+        before_state = {
+            "plan_id": subscription.plan_id,
+            "status": subscription.status,
+            "amount": float(subscription.amount),
+            "billing_cycle": subscription.billing_cycle,
+        }
+
+        subscription_service = SubscriptionService(db)
+        result = subscription_service.execute_admin_plan_migration(
+            subscription_id=subscription_id,
+            new_plan_id=migration_data.new_plan_id,
+            payment_amount=migration_data.payment_amount,
+            payment_method=migration_data.payment_method,
+            reference_number=migration_data.reference_number,
+            reason=migration_data.reason,
+            billing_cycle=billing_cycle,
+            notes=migration_data.notes,
+            admin_user_id=claims.user_id
+        )
+
+        # Publish plan switch to auth server via RabbitMQ
+        try:
+            await rabbitmq_service.publish_plan_switch(
+                tenant_id=result["tenant_id"],
+                subscription_id=subscription_id,
+                old_plan_id=result["old_plan_id"],
+                new_plan_id=result["new_plan_id"]
+            )
+        except Exception as rmq_err:
+            logger.warning(f"Failed to publish plan switch to RabbitMQ: {rmq_err}")
+
+        # Log admin action
+        after_state = {
+            "plan_id": result["new_plan_id"],
+            "status": result["subscription_status"],
+            "amount": result["new_amount"],
+            "billing_cycle": billing_cycle or before_state["billing_cycle"],
+        }
+
+        audit_service = AuditService(db)
+        audit_service.log_action(
+            admin_claims=claims,
+            action_type="admin_plan_migration",
+            target_type="subscription",
+            target_id=subscription_id,
+            target_tenant_id=result["tenant_id"],
+            before_state=before_state,
+            after_state=after_state,
+            reason=migration_data.reason,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+            metadata={
+                "old_plan_name": result.get("old_plan_name"),
+                "new_plan_name": result.get("new_plan_name"),
+                "payment_amount": float(migration_data.payment_amount),
+                "payment_method": migration_data.payment_method,
+                "is_downgrade": result.get("is_downgrade"),
+                "notes": migration_data.notes,
+            }
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to execute plan migration: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to execute plan migration: {str(e)}"
         )

@@ -143,7 +143,7 @@ public class SecurityConfig {
         log.info("Configuring CORS for authorization server");
 
         CorsConfiguration configuration = new CorsConfiguration();
-        
+
         // Allow requests from frontend and gateway
         configuration.setAllowedOriginPatterns(authorizationProperties.getAllowedOrigins());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
@@ -187,10 +187,17 @@ public class SecurityConfig {
 				if (principal.getPrincipal() instanceof DatabaseUserDetailsService.CustomUserPrincipal userPrincipal) {
 
                     context.getClaims().claim("user_id", userPrincipal.getUserId());
-					context.getClaims().claim("tenant_id", userPrincipal.getTenantId());
 					context.getClaims().claim("email", userPrincipal.getEmail());
-					context.getClaims().claim("full_name", userPrincipal.getFullName());
-                    context.getClaims().claim("api_key", userPrincipal.getApiKey());
+
+					if (userPrincipal.getTenantId() != null) {
+						context.getClaims().claim("tenant_id", userPrincipal.getTenantId());
+					}
+					if (userPrincipal.getFullName() != null) {
+						context.getClaims().claim("full_name", userPrincipal.getFullName());
+					}
+					if (userPrincipal.getApiKey() != null) {
+						context.getClaims().claim("api_key", userPrincipal.getApiKey());
+					}
 
 					log.debug("Enhanced JWT token with user claims for: {}", userPrincipal.getUsername());
 				}

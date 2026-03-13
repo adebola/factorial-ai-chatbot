@@ -42,7 +42,7 @@ class PgVectorIngestionService:
         """Generate a hash for content deduplication"""
         return hashlib.sha256(content.encode()).hexdigest()
     
-    def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def _generate_embeddings(self, texts: List[str], tenant_id: str = None, source_id: str = None) -> List[List[float]]:
         """Generate embeddings using OpenAI API"""
         try:
             self.logger.info(f"Generating embeddings for {len(texts)} text chunks")
@@ -52,6 +52,23 @@ class PgVectorIngestionService:
             )
             embeddings = [item.embedding for item in response.data]
             self.logger.info(f"Successfully generated {len(embeddings)} embeddings")
+
+            # Record embedding token usage
+            if tenant_id and response.usage:
+                try:
+                    from .token_usage_service import token_usage_service
+                    token_usage_service.record_usage(
+                        tenant_id=tenant_id,
+                        model="text-embedding-ada-002",
+                        usage_type="embedding",
+                        prompt_tokens=response.usage.prompt_tokens,
+                        completion_tokens=0,
+                        total_tokens=response.usage.total_tokens,
+                        source_id=source_id,
+                    )
+                except Exception as rec_err:
+                    self.logger.warning(f"Failed to record embedding token usage: {rec_err}")
+
             return embeddings
         except Exception as e:
             self.logger.error(f"Failed to generate embeddings: {e}")
@@ -92,7 +109,7 @@ class PgVectorIngestionService:
                 
                 # Generate embeddings for this batch
                 texts = [doc.page_content for doc in batch]
-                embeddings = self._generate_embeddings(texts)
+                embeddings = self._generate_embeddings(texts, tenant_id=tenant_id, source_id=document_id or ingestion_id)
                 
                 # Prepare batch insert data
                 insert_data = []
