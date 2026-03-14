@@ -76,6 +76,7 @@ public class SecurityConfig {
 			.csrf(AbstractHttpConfigurer::disable) // Disable CSRF for API endpoints
 			.authorizeHttpRequests((authorize) -> authorize
 				.requestMatchers("/api/v1/tenants/lookup-by-api-key").permitAll() // Public tenant lookup for chat widget
+				.requestMatchers("/api/v1/tenants/{id}").permitAll() // Public tenant lookup by ID for inter-service calls
 				.anyRequest().authenticated() // All other API endpoints require authentication
 			)
 			.oauth2ResourceServer((resourceServer) -> resourceServer

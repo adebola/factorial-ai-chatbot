@@ -338,6 +338,14 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            # Chat Service - Chat Monitoring Admin
+            - id: admin-chat-monitoring
+              uri: http://chat-service:8000
+              predicates:
+                - Path=/api/v1/admin/chat-monitoring/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             # Quality Service - Dashboard Endpoints
             - id: admin-dashboard
               uri: http://answer-quality-service:8000

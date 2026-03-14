@@ -1,5 +1,6 @@
 .env
 ./.venv
+venv/
 target/
 
 # IntelliJ IDEA
