@@ -23,6 +23,7 @@ from ..models.subscription import (
 )
 from ..models.plan import Plan
 
+from ..services.dependencies import get_full_tenant_details
 from ..core.logging_config import get_logger
 
 router = APIRouter(prefix="/admin/billing", tags=["Admin - Billing"])
@@ -75,6 +76,9 @@ class SubscriptionOverrideRequest(BaseModel):
     custom_expiration: Optional[datetime] = Field(None, description="Set custom expiration date")
     trial_extension_days: Optional[int] = Field(None, description="Extend trial by N days")
     usage_limit_overrides: Optional[Dict[str, int]] = Field(None, description="Override usage limits")
+    user_email: Optional[str] = Field(None, description="Set or update user email")
+    user_full_name: Optional[str] = Field(None, description="Set or update user full name")
+    tenant_name: Optional[str] = Field(None, description="Set or update tenant name")
     reason: str = Field(..., description="Reason for override")
 
 
@@ -178,6 +182,7 @@ async def list_all_subscriptions(
                     "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
                     "user_email": sub.user_email,
                     "user_full_name": sub.user_full_name,
+                    "tenant_name": sub.tenant_name,
                     "created_at": sub.created_at.isoformat(),
                 }
                 for sub in subscriptions
@@ -255,6 +260,7 @@ async def get_subscription_by_tenant(
             "auto_renew": subscription.auto_renew,
             "user_email": subscription.user_email,
             "user_full_name": subscription.user_full_name,
+            "tenant_name": subscription.tenant_name,
             "created_at": subscription.created_at.isoformat(),
             "updated_at": subscription.updated_at.isoformat() if subscription.updated_at else None,
         }
@@ -440,6 +446,7 @@ async def get_payment_by_id(
                 "status": subscription.status,
                 "user_email": subscription.user_email,
                 "user_full_name": subscription.user_full_name,
+                "tenant_name": subscription.tenant_name,
             }
 
         # Add invoice details if available
@@ -515,6 +522,17 @@ async def create_manual_payment(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Subscription does not belong to specified tenant"
             )
+
+        # Backfill tenant_name if empty
+        if not subscription.tenant_name:
+            try:
+                tenant_data = await get_full_tenant_details(
+                    subscription.tenant_id, access_token=claims.access_token
+                )
+                if tenant_data.get("name"):
+                    subscription.tenant_name = tenant_data["name"]
+            except Exception as e:
+                logger.warning(f"Could not backfill tenant_name for subscription {subscription.id}: {e}")
 
         before_state = {
             "status": subscription.status,
@@ -723,6 +741,15 @@ async def override_subscription(
             existing = subscription.custom_limits or {}
             existing.update(override_data.usage_limit_overrides)
             subscription.custom_limits = existing
+
+        if override_data.user_email is not None:
+            subscription.user_email = override_data.user_email
+
+        if override_data.user_full_name is not None:
+            subscription.user_full_name = override_data.user_full_name
+
+        if override_data.tenant_name is not None:
+            subscription.tenant_name = override_data.tenant_name
 
         db.commit()
         db.refresh(subscription)

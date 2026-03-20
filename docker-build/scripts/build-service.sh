@@ -22,6 +22,7 @@ if [ -z "$SERVICE" ]; then
     echo "  - communications-service"
     echo "  - billing-service"
     echo "  - workflow-service"
+    echo "  - observability-service"
     echo ""
     exit 1
 fi
@@ -45,6 +46,9 @@ case $SERVICE in
         ;;
     workflow-service)
         DOCKERFILE="dockerfiles/workflow-service.Dockerfile"
+        ;;
+    observability-service)
+        DOCKERFILE="dockerfiles/observability-service.Dockerfile"
         ;;
     *)
         echo "❌ Error: Unknown service '$SERVICE'"

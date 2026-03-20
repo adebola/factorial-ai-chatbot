@@ -94,12 +94,12 @@ sleep 10
 
 # Step 7: Run database migrations
 info "Running database migrations..."
-docker-compose -f "$COMPOSE_FILE" up chat-migration onboarding-migration billing-migration
+docker-compose -f "$COMPOSE_FILE" up chat-migration onboarding-migration billing-migration observability-migration
 success "Database migrations completed"
 
 # Step 8: Start application services
 info "Starting application services..."
-docker-compose -f "$COMPOSE_FILE" up -d chat-service onboarding-service communications-service billing-service workflow-service
+docker-compose -f "$COMPOSE_FILE" up -d chat-service onboarding-service communications-service billing-service workflow-service observability-service
 success "Application services started"
 
 # Wait for services to be ready
@@ -175,6 +175,13 @@ else
     services_healthy=false
 fi
 
+# Check Observability Service
+if curl -f -s http://localhost:8006/health > /dev/null 2>&1; then
+    success "Observability Service is healthy"
+else
+    warning "Observability Service health check failed"
+fi
+
 # Check Gateway Service
 if curl -f -s http://localhost:8080/actuator/health > /dev/null 2>&1; then
     success "Gateway Service is healthy"
@@ -192,6 +199,7 @@ if [ "$services_healthy" = true ]; then
     echo "   🔄 Workflow Service: http://localhost:8002"
     echo "   📧 Communications Service: http://localhost:8003"
     echo "   💳 Billing Service: http://localhost:8004"
+    echo "   🔭 Observability Service: http://localhost:8006"
     echo "   🔐 Authorization Server: http://localhost:9000"
     echo "   📁 MinIO Console: http://localhost:9001"
     echo ""

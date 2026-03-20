@@ -37,6 +37,7 @@ class Plan(Base):
     has_api_access = Column(Boolean, default=False, nullable=False)
     has_custom_integrations = Column(Boolean, default=False, nullable=False)
     has_on_premise = Column(Boolean, default=False, nullable=False)
+    has_observability_agent = Column(Boolean, default=False, nullable=False)
 
     # Analytics Level
     analytics_level = Column(String(20), default="basic", nullable=False)  # "basic", "full"

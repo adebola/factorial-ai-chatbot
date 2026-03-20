@@ -163,6 +163,9 @@ class UserEventConsumer:
         """
         tenant_id = message.get("tenant_id")
         created_at_str = message.get("created_at")
+        user_email = message.get("user_email")
+        user_full_name = message.get("full_name")
+        tenant_name = message.get("tenant_name")
 
         if not tenant_id or not created_at_str:
             logger.error(f"Invalid message: missing tenant_id or created_at - {message}")
@@ -213,7 +216,10 @@ class UserEventConsumer:
                     "created_via": "user_event_consumer",
                     "registration_date": registration_date.isoformat(),
                     "initial_subscription": True
-                }
+                },
+                user_email=user_email,
+                user_full_name=user_full_name,
+                tenant_name=tenant_name
             )
 
             logger.info(

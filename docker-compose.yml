@@ -80,6 +80,26 @@ services:
     volumes:
       - ./communications-service:/app
 
+  observability-service:
+    build:
+      context: ./observability-service
+      dockerfile: Dockerfile
+    ports:
+      - "8006:8006"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@postgres:5432/observability_db
+      - REDIS_URL=redis://redis:6379
+      - CREDENTIALS_ENCRYPTION_KEY=${CREDENTIALS_ENCRYPTION_KEY:-dev-encryption-key}
+      - AUTHORIZATION_SERVER_URL=http://authorization-server:9002/auth
+      - JWKS_URL=http://authorization-server:9002/auth/oauth2/jwks
+      - JWT_ISSUER=http://authorization-server:9002/auth
+      - K8S_IN_CLUSTER=false
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./observability-service:/app
+
   gateway-service:
     build:
       context: ./gateway-service
@@ -91,10 +111,12 @@ services:
       - CHAT_SERVICE_URL=http://chat-service:8000
       - ONBOARDING_SERVICE_URL=http://onboarding-service:8000
       - COMMUNICATIONS_SERVICE_URL=http://communications-service:8003
+      - OBSERVABILITY_SERVICE_URL=http://observability-service:8006
     depends_on:
       - chat-service
       - onboarding-service
       - communications-service
+      - observability-service
     restart: unless-stopped
 
 volumes:

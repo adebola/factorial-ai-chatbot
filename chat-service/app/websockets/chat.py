@@ -12,6 +12,7 @@ from ..models.chat_models import ChatSession, ChatMessage
 from ..services.chat_service import ChatService
 from ..services.tenant_client import TenantClient
 from ..services.workflow_client import WorkflowClient
+from ..services.observability_client import ObservabilityClient
 from ..services.event_publisher import event_publisher
 from ..services.usage_cache import usage_cache
 from ..services.session_auth_service import session_auth_service
@@ -76,6 +77,7 @@ class ChatWebSocket:
         self.tenant_client = TenantClient()
         self.chat_service = ChatService(db)
         self.workflow_client = None  # Will be initialized with API key after tenant is identified
+        self.observability_client = None  # Will be initialized alongside workflow client
     
     def _get_current_access_token(self, session_id: str) -> Optional[str]:
         """Read access token from Redis per-use (not cached) so refreshed tokens are picked up."""
@@ -111,6 +113,7 @@ class ChatWebSocket:
         # Initialize workflow client with tenant's API key
         tenant_api_key = tenant.get("api_key") or api_key  # Use tenant's API key from the tenant object, or the one provided
         self.workflow_client = WorkflowClient(api_key=tenant_api_key)
+        self.observability_client = ObservabilityClient(api_key=tenant_api_key)
 
         tenant_id = tenant["id"]  # tenant is now a dict from HTTP API
 
@@ -551,17 +554,64 @@ class ChatWebSocket:
                                 )
                                 # Fall through to normal processing
 
-                # Check if tenant has any workflows at all (Redis-cached)
+                # === Observability mode check (before workflow/RAG) ===
+                is_observability = False
                 try:
-                    tenant_has_workflows = await self.workflow_client.has_workflows(tenant_id)
+                    is_observability = await self.observability_client.is_observability_tenant(tenant_id)
                 except Exception:
-                    tenant_has_workflows = True  # Fail open
+                    is_observability = False
+
+                if is_observability:
+                    try:
+                        obs_result = await self.observability_client.query(
+                            tenant_id=tenant_id,
+                            session_id=session_id,
+                            message=user_message,
+                            access_token=self._get_current_access_token(session_id) if self._is_authenticated else None
+                        )
+                        ai_response = {
+                            "content": obs_result.get("response", ""),
+                            "metadata": {
+                                "observability_query": True,
+                                "tool_calls": obs_result.get("tool_calls", []),
+                                "query_id": obs_result.get("query_id"),
+                                "total_duration_ms": obs_result.get("total_duration_ms")
+                            }
+                        }
+                        # Save message and send response using existing patterns below
+                        t_workflow_state = time.time()
+                        t_trigger_or_step = t_workflow_state
+                        t_ai = t_workflow_state
+                        timing_path = "observability"
+                    except Exception as e:
+                        logger.error("Observability query failed, falling back to RAG", error=str(e), tenant_id=tenant_id)
+                        is_observability = False
+
+                if not is_observability:
+                    # === Normal path: workflow check + RAG ===
+                    pass
+
+                # Check if tenant has any workflows at all (Redis-cached)
+                if not is_observability:
+                    try:
+                        tenant_has_workflows = await self.workflow_client.has_workflows(tenant_id)
+                    except Exception:
+                        tenant_has_workflows = True  # Fail open
+                else:
+                    tenant_has_workflows = False  # Skip workflow check for observability tenants
 
                 try:
                     response_msg = None
-                    ai_response = None
+                    if not is_observability:
+                        ai_response = None
 
-                    if not tenant_has_workflows:
+                    if is_observability:
+                        # Observability response already set above
+                        t_workflow_state = time.time()
+                        t_trigger_or_step = t_workflow_state
+                        t_ai = t_workflow_state
+                        timing_path = "observability"
+                    elif not tenant_has_workflows:
                         # Fast path: skip both workflow HTTP calls, go straight to AI
                         t_workflow_state = time.time()
                         t_trigger_or_step = t_workflow_state

@@ -51,7 +51,10 @@ class SubscriptionService:
         billing_cycle: BillingCycle = BillingCycle.MONTHLY,
         start_trial: bool = False,
         custom_trial_end: Optional[datetime] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
+        user_email: Optional[str] = None,
+        user_full_name: Optional[str] = None,
+        tenant_name: Optional[str] = None
     ) -> Subscription:
         """Create a new subscription for a tenant
 
@@ -130,7 +133,10 @@ class SubscriptionService:
             current_period_end=current_period_end,
             trial_starts_at=trial_starts_at,
             trial_ends_at=trial_ends_at,
-            subscription_metadata=metadata or {}
+            subscription_metadata=metadata or {},
+            user_email=user_email,
+            user_full_name=user_full_name,
+            tenant_name=tenant_name
         )
 
         self.db.add(subscription)

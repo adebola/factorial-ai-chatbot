@@ -888,7 +888,10 @@ async def switch_tenant_plan(
                     "initial_plan": True,
                     "trial_skipped": not use_trial,
                     "trial_skipped_reason": "trial_period_expired" if not use_trial else None
-                }
+                },
+                user_email=claims.email,
+                user_full_name=claims.full_name,
+                tenant_name=target_tenant.get("name")
             )
 
             # Publish to RabbitMQ for auth server to update tenant

@@ -34,13 +34,17 @@ public class UserCreationPublisher {
      * Publish a user creation event to RabbitMQ for billing service consumption.
      *
      * The billing service will listen for this event and automatically create
-     * a Basic plan subscription with a 14-day trial.
+     * a Basic plan subscription with a 30-day trial.
      *
      * @param tenantId    The UUID of the tenant/user
      * @param createdAt   The timestamp when the user was created
+     * @param userEmail   The user's email address
+     * @param fullName    The user's full name
+     * @param tenantName  The tenant/organization name
      * @return true if successfully published, false otherwise
      */
-    public boolean publishUserCreated(String tenantId, OffsetDateTime createdAt) {
+    public boolean publishUserCreated(String tenantId, OffsetDateTime createdAt,
+                                       String userEmail, String fullName, String tenantName) {
         try {
             // Create message payload
             Map<String, Object> message = new HashMap<>();
@@ -48,6 +52,9 @@ public class UserCreationPublisher {
             message.put("created_at", createdAt.toString());
             message.put("event_type", "user_created");
             message.put("timestamp", OffsetDateTime.now().toString());
+            message.put("user_email", userEmail);
+            message.put("full_name", fullName);
+            message.put("tenant_name", tenantName);
 
             // Publish to RabbitMQ - pass Map directly, Jackson2JsonMessageConverter handles serialization
             rabbitTemplate.convertAndSend(exchange, routingKey, message);

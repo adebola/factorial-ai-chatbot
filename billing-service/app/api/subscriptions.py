@@ -15,6 +15,7 @@ from ..services.dependencies import TokenClaims, validate_token
 from ..services.plan_service import PlanService
 from ..services.subscription_service import SubscriptionService
 from ..services.rabbitmq_service import rabbitmq_service
+from ..services.dependencies import get_full_tenant_details
 from ..middleware.feature_flags import get_tenant_features
 
 router = APIRouter()
@@ -459,13 +460,24 @@ async def create_subscription(
                 detail="Tenant already has an active subscription"
             )
         
+        # Fetch tenant name for subscription record
+        tenant_name = None
+        try:
+            tenant_data = await get_full_tenant_details(claims.tenant_id, access_token=claims.access_token)
+            tenant_name = tenant_data.get("name")
+        except Exception:
+            pass  # Non-critical - proceed without tenant name
+
         # Create subscription
         subscription = subscription_service.create_subscription(
             tenant_id=claims.tenant_id,
             plan_id=subscription_data.plan_id,
             billing_cycle=subscription_data.billing_cycle,
             start_trial=subscription_data.start_trial,
-            metadata=subscription_data.metadata
+            metadata=subscription_data.metadata,
+            user_email=claims.email,
+            user_full_name=claims.full_name,
+            tenant_name=tenant_name
         )
         
         # Send message to auth server to update tenant's plan_id and subscription_id
@@ -731,6 +743,24 @@ async def renew_subscription(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You can only renew your own subscriptions"
             )
+
+        # Backfill user/tenant fields if empty (for pre-existing subscriptions)
+        needs_backfill = False
+        if not subscription.user_email and claims.email:
+            subscription.user_email = claims.email
+            needs_backfill = True
+        if not subscription.user_full_name and claims.full_name:
+            subscription.user_full_name = claims.full_name
+            needs_backfill = True
+        if not subscription.tenant_name:
+            try:
+                tenant_data = await get_full_tenant_details(claims.tenant_id, access_token=claims.access_token)
+                subscription.tenant_name = tenant_data.get("name")
+                needs_backfill = True
+            except Exception:
+                pass
+        if needs_backfill:
+            db.commit()
 
         # Renew subscription (initializes payment)
         result = await subscription_service.renew_subscription(

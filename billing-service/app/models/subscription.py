@@ -62,6 +62,7 @@ class Subscription(Base):
     # Used by scheduled jobs for sending emails (no token available in background jobs)
     user_email = Column(String(255), nullable=True, index=True)
     user_full_name = Column(String(255), nullable=True)
+    tenant_name = Column(String(255), nullable=True)
 
     # Subscription details
     status = Column(String(20), default=SubscriptionStatus.PENDING.value, nullable=False)

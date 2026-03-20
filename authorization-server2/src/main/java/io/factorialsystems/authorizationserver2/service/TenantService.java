@@ -209,7 +209,9 @@ public class TenantService {
 
         // Publish user creation event to billing service for automatic subscription creation
         try {
-            boolean published = userCreationPublisher.publishUserCreated(tenant.getId(), tenant.getCreatedAt());
+            boolean published = userCreationPublisher.publishUserCreated(
+                    tenant.getId(), tenant.getCreatedAt(), null, null, tenant.getName()
+            );
             if (!published) {
                 log.warn("Failed to publish user.created event for tenant {} - subscription may need to be created manually", tenant.getId());
             }

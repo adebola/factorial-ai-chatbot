@@ -250,6 +250,14 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+              # Observability Service Routes
+              - id: observability-api
+                uri: http://localhost:8006
+                predicates:
+                    - Path=/api/v1/observe/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
               # Answer Quality Service Routes
               - id: quality-feedback
                 uri: http://localhost:8005
@@ -444,6 +452,13 @@ spring:
                     - Path=/health/quality
                 filters:
                     - RewritePath=/health/quality,/api/v1/health
+
+              - id: observability-health
+                uri: http://localhost:8006
+                predicates:
+                    - Path=/health/observability
+                filters:
+                    - RewritePath=/health/observability,/health
 
               - id: auth-health
                 uri: http://localhost:8000

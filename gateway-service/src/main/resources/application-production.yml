@@ -400,6 +400,14 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            # Observability Service Routes
+            - id: observability-api
+              uri: http://observability-service:8006
+              predicates:
+                - Path=/api/v1/observe/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             # Auth Service Routes
             - id: auth-api
               uri: http://authorization-service:9000
@@ -450,6 +458,13 @@ spring:
                 - Path=/health/quality
               filters:
                 - RewritePath=/health/quality,/api/v1/health
+
+            - id: observability-health
+              uri: http://observability-service:8006
+              predicates:
+                - Path=/health/observability
+              filters:
+                - RewritePath=/health/observability,/health
 
             - id: auth-health
               uri: http://authorization-service:9000
