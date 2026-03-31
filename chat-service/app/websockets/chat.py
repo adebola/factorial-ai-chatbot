@@ -647,7 +647,11 @@ class ChatWebSocket:
                         workflow_completed = False
                         if workflow_state:
                             variables = workflow_state.get("variables", {})
-                            workflow_completed = variables.get("__workflow_completed", False)
+                            execution_status = workflow_state.get("status", "")
+                            workflow_completed = (
+                                variables.get("__workflow_completed", False)
+                                or execution_status in ("completed", "failed", "cancelled")
+                            )
 
                         if workflow_state and workflow_state.get("workflow_id") and not workflow_completed:
                             # Cancel pre_search — we're going down the workflow path

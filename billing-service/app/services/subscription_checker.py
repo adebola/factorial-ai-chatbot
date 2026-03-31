@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from ..models.subscription import Subscription, SubscriptionStatus, UsageTracking
 from ..models.plan import Plan
+from ..models.agentic_service import AgenticService, TenantServiceAssignment
 from .subscription_service import SubscriptionService
 
 logger = logging.getLogger(__name__)
@@ -383,3 +384,36 @@ class SubscriptionChecker:
                 restriction_type="chat_limit_exceeded",
                 details={"tenant_id": tenant_id}
             )
+
+    def check_service_access(
+        self, tenant_id: str, service_key: str
+    ) -> Tuple[bool, Optional[dict], Optional[str]]:
+        """
+        Check if a tenant has access to an agentic service via the registry.
+
+        Args:
+            tenant_id: Tenant ID
+            service_key: Machine-readable service identifier (e.g. "observability")
+
+        Returns:
+            Tuple of (allowed, config_dict_or_none, reason_if_denied)
+        """
+        service = self.db.query(AgenticService).filter(
+            AgenticService.service_key == service_key,
+            AgenticService.is_active == True,
+            AgenticService.is_deleted == False,
+        ).first()
+
+        if not service:
+            return False, None, f"Service '{service_key}' not found or inactive"
+
+        assignment = self.db.query(TenantServiceAssignment).filter(
+            TenantServiceAssignment.tenant_id == tenant_id,
+            TenantServiceAssignment.service_id == service.id,
+            TenantServiceAssignment.is_active == True,
+        ).first()
+
+        if not assignment:
+            return False, None, f"Service '{service_key}' not assigned to this tenant"
+
+        return True, assignment.config, None

@@ -15,6 +15,7 @@ from .subscription import (
     PaymentMethod,
     TransactionType
 )
+from .agentic_service import AgenticService, TenantServiceAssignment
 
 __all__ = [
     "Plan",
@@ -30,5 +31,7 @@ __all__ = [
     "BillingCycle",
     "PaymentStatus",
     "PaymentMethod",
-    "TransactionType"
+    "TransactionType",
+    "AgenticService",
+    "TenantServiceAssignment"
 ]

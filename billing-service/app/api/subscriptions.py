@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
 from ..core.database import get_db
+from ..models.agentic_service import AgenticService, TenantServiceAssignment
 from ..models.subscription import (
     Subscription, SubscriptionStatus, BillingCycle, UsageTracking,
     SubscriptionChange, Payment, PaymentStatus
@@ -1011,3 +1012,40 @@ async def list_all_subscriptions(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve subscriptions: {str(e)}"
         )
+
+
+@router.get("/services", response_model=list)
+async def list_tenant_services(
+    claims: TokenClaims = Depends(validate_token),
+    db: Session = Depends(get_db),
+):
+    """List agentic services available to the current tenant."""
+    assignments = db.query(TenantServiceAssignment).filter(
+        TenantServiceAssignment.tenant_id == claims.tenant_id,
+        TenantServiceAssignment.is_active == True,
+    ).all()
+
+    service_ids = [a.service_id for a in assignments]
+    if not service_ids:
+        return []
+
+    services = db.query(AgenticService).filter(
+        AgenticService.id.in_(service_ids),
+        AgenticService.is_active == True,
+        AgenticService.is_deleted == False,
+    ).all()
+
+    # Build a config lookup from assignments
+    config_map = {a.service_id: a.config for a in assignments}
+
+    return [
+        {
+            "id": s.id,
+            "name": s.name,
+            "service_key": s.service_key,
+            "description": s.description,
+            "category": s.category,
+            "config": config_map.get(s.id),
+        }
+        for s in services
+    ]

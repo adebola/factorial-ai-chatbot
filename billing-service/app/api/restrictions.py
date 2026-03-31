@@ -12,6 +12,7 @@ from typing import Optional
 
 from ..core.database import get_db
 from ..services.subscription_checker import SubscriptionChecker, SubscriptionRestrictionError
+from ..schemas.agentic_service import ServiceAccessResponse
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,31 @@ async def check_can_send_chat(
 
     return PermissionCheckResponse(
         allowed=can_chat,
+        reason=reason
+    )
+
+
+@router.get("/check/service-access/{tenant_id}/{service_key}", response_model=ServiceAccessResponse)
+async def check_service_access(
+    tenant_id: str,
+    service_key: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Check if a tenant has access to an agentic service.
+
+    Called by agentic services (e.g., observability-service) before processing requests.
+    This is an internal service-to-service endpoint — no authentication required.
+    """
+    logger.info(f"Checking service access for tenant {tenant_id}, service {service_key}")
+
+    checker = SubscriptionChecker(db)
+    allowed, config, reason = checker.check_service_access(tenant_id, service_key)
+
+    return ServiceAccessResponse(
+        allowed=allowed,
+        service_key=service_key,
+        config=config,
         reason=reason
     )
 

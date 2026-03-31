@@ -294,6 +294,30 @@ spring:
                 - RewritePath=/api/v1/admin/users/(?<segment>.*),/auth/api/v1/admin/users/$\{segment}
                 - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials Access-Control-Allow-Headers Access-Control-Allow-Methods Access-Control-Expose-Headers
 
+            # Billing Service - Agentic Services Admin (root)
+            - id: admin-services-root
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/api/v1/admin/services
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Billing Service - Agentic Services Admin (sub-paths)
+            - id: admin-services
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/api/v1/admin/services/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Billing Service - Tenant Services Admin (for /admin/tenants/{id}/services)
+            - id: admin-tenant-services
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/api/v1/admin/tenants/*/services
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             # Authorization Server - Tenant Management (root path)
             - id: admin-tenants-root
               uri: http://authorization-service:9000
@@ -386,6 +410,40 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            # Observability Service - Backend Management Admin
+            - id: admin-observability-root
+              uri: http://observability-service:8006
+              predicates:
+                - Path=/api/v1/admin/observability
+              filters:
+                - RewritePath=/api/v1/admin/observability,/api/v1/observe/backends
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: admin-observability
+              uri: http://observability-service:8006
+              predicates:
+                - Path=/api/v1/admin/observability/**
+              filters:
+                - RewritePath=/api/v1/admin/observability/(?<segment>.*),/api/v1/observe/backends/$\{segment}
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Observability Service - LLM Provider Catalog Admin
+            - id: admin-llm-providers-root
+              uri: http://observability-service:8006
+              predicates:
+                - Path=/api/v1/admin/llm-providers
+              filters:
+                - RewritePath=/api/v1/admin/llm-providers,/api/v1/observe/llm-providers
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            - id: admin-llm-providers
+              uri: http://observability-service:8006
+              predicates:
+                - Path=/api/v1/admin/llm-providers/**
+              filters:
+                - RewritePath=/api/v1/admin/llm-providers/(?<segment>.*),/api/v1/observe/llm-providers/$\{segment}
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             - id: quality-alerts
               uri: http://answer-quality-service:8000
               predicates:
@@ -407,6 +465,9 @@ spring:
                 - Path=/api/v1/observe/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+              metadata:
+                response-timeout: 120000
+                connect-timeout: 5000
 
             # Auth Service Routes
             - id: auth-api
