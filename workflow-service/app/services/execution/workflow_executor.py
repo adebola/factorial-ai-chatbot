@@ -98,12 +98,30 @@ class WorkflowExecutor:
                 is_interactive=StepExecutorFactory.is_interactive(step.type)
             )
 
-            result = await self.execute_step(
-                execution=execution,
-                step=step,
-                definition=definition,
-                variables=variables
-            )
+            try:
+                result = await self.execute_step(
+                    execution=execution,
+                    step=step,
+                    definition=definition,
+                    variables=variables
+                )
+            except StepExecutionError as e:
+                # If a step fails and we have a previous successful result
+                # (e.g., a greeting message), return it with the error info
+                # so the user at least sees the earlier message.
+                logger.error(
+                    "Step failed during auto-execution, returning last successful result",
+                    execution_id=execution.id,
+                    failed_step_id=step.id,
+                    error=str(e),
+                    has_previous_result=final_result is not None
+                )
+                if final_result and final_result.message:
+                    final_result.error_message = str(e)
+                    final_result.workflow_completed = True
+                    return final_result
+                # No previous result to return — re-raise
+                raise
 
             # CRITICAL: Increment counter ONCE per step (not 3+ times!)
             steps_executed += 1

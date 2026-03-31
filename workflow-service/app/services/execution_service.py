@@ -775,15 +775,19 @@ class ExecutionService:
         if result.workflow_completed:
             execution.status = ExecutionStatus.COMPLETED.value
             execution.completed_at = datetime.utcnow()
+            # Clean up Redis state so the session isn't stuck in a stale workflow
+            await self.state_manager.delete_state(execution.session_id)
         elif result.input_required:
-            await self.state_manager.advance_step(
+            # Combined: advance step + update variables in one read-modify-write
+            await self.state_manager.advance_step_with_variables(
                 execution.session_id,
                 result.step_id,
+                variables=variables,
                 waiting_for_input=result.input_required
             )
-
-        # Save updated variables to state
-        await self.state_manager.update_variables(request.session_id, variables)
+        else:
+            # No completion, no input required — just save variables
+            await self.state_manager.update_variables(request.session_id, variables)
 
         # Commit all changes
         self.db.commit()
@@ -881,15 +885,19 @@ class ExecutionService:
         if result.workflow_completed:
             execution.status = ExecutionStatus.COMPLETED.value
             execution.completed_at = datetime.utcnow()
+            # Clean up Redis state so the session isn't stuck in a stale workflow
+            await self.state_manager.delete_state(execution.session_id)
         elif result.input_required:
-            await self.state_manager.advance_step(
+            # Combined: advance step + update variables in one read-modify-write
+            await self.state_manager.advance_step_with_variables(
                 execution.session_id,
                 result.step_id,
+                variables=variables,
                 waiting_for_input=result.input_required
             )
-
-        # Save updated variables
-        await self.state_manager.update_variables(request.session_id, variables)
+        else:
+            # No completion, no input required — just save variables
+            await self.state_manager.update_variables(request.session_id, variables)
 
         # Commit all changes
         self.db.commit()

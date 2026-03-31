@@ -150,9 +150,9 @@ class SubscriptionChecker:
             # No usage record yet - allow upload
             return True, None
 
-        # Check document limit (custom override or plan default)
+        # Check document limit (custom override or plan default). -1 = unlimited.
         document_limit = SubscriptionService.get_effective_limit(subscription, plan, "document_limit")
-        if document_limit is not None:
+        if document_limit is not None and document_limit != -1:
             if usage.documents_used >= document_limit:
                 return False, f"Document limit reached ({document_limit} documents allowed on {plan.name} plan)"
 
@@ -194,9 +194,9 @@ class SubscriptionChecker:
             # No usage record yet - allow ingestion
             return True, None, max_pages
 
-        # Check website limit
+        # Check website limit. -1 = unlimited.
         website_limit = SubscriptionService.get_effective_limit(subscription, plan, "website_limit")
-        if website_limit is not None:
+        if website_limit is not None and website_limit != -1:
             if usage.websites_used >= website_limit:
                 return False, f"Website limit reached ({website_limit} websites allowed on {plan.name} plan)", max_pages
 
@@ -235,9 +235,9 @@ class SubscriptionChecker:
             # No usage record yet - allow chat
             return True, None
 
-        # Check monthly chat limit (custom override or plan default)
+        # Check monthly chat limit (custom override or plan default). -1 = unlimited.
         monthly_chat_limit = SubscriptionService.get_effective_limit(subscription, plan, "monthly_chat_limit")
-        if monthly_chat_limit is not None:
+        if monthly_chat_limit is not None and monthly_chat_limit != -1:
             if usage.monthly_chats_used >= monthly_chat_limit:
                 return False, f"Monthly chat limit reached ({monthly_chat_limit} chats allowed on {plan.name} plan)"
 
@@ -270,6 +270,12 @@ class SubscriptionChecker:
         web_limit = SubscriptionService.get_effective_limit(subscription, plan, "website_limit")
         chat_limit = SubscriptionService.get_effective_limit(subscription, plan, "monthly_chat_limit")
 
+        def _remaining(limit, used):
+            """Calculate remaining usage. -1 = unlimited → None."""
+            if limit is None or limit == -1:
+                return None
+            return max(0, limit - used)
+
         if not usage:
             # No usage yet - return limits only
             return {
@@ -278,17 +284,17 @@ class SubscriptionChecker:
                 "documents": {
                     "used": 0,
                     "limit": doc_limit,
-                    "remaining": doc_limit
+                    "remaining": _remaining(doc_limit, 0)
                 },
                 "websites": {
                     "used": 0,
                     "limit": web_limit,
-                    "remaining": web_limit
+                    "remaining": _remaining(web_limit, 0)
                 },
                 "monthly_chats": {
                     "used": 0,
                     "limit": chat_limit,
-                    "remaining": chat_limit
+                    "remaining": _remaining(chat_limit, 0)
                 }
             }
 
@@ -298,17 +304,17 @@ class SubscriptionChecker:
             "documents": {
                 "used": usage.documents_used,
                 "limit": doc_limit,
-                "remaining": max(0, doc_limit - usage.documents_used) if doc_limit else None
+                "remaining": _remaining(doc_limit, usage.documents_used)
             },
             "websites": {
                 "used": usage.websites_used,
                 "limit": web_limit,
-                "remaining": max(0, web_limit - usage.websites_used) if web_limit else None
+                "remaining": _remaining(web_limit, usage.websites_used)
             },
             "monthly_chats": {
                 "used": usage.monthly_chats_used,
                 "limit": chat_limit,
-                "remaining": max(0, chat_limit - usage.monthly_chats_used) if chat_limit else None,
+                "remaining": _remaining(chat_limit, usage.monthly_chats_used),
                 "resets_at": usage.monthly_reset_at.isoformat() if usage.monthly_reset_at else None
             }
         }

@@ -95,6 +95,125 @@ class ChatWebSocket:
         info = auth_data["user_info"]
         return {"email": info.get("email"), "name": info.get("name"), "sub": info.get("sub")}
 
+    async def _handle_workflow_result(
+        self,
+        execution_result: dict,
+        user_message: str,
+        tenant_id: str,
+        session_id: str,
+        tenant: dict,
+        workflow_state: dict = None,
+        workflow_id: str = None,
+        workflow_name: str = None,
+        source: str = "trigger",
+    ) -> dict:
+        """Process a workflow execution/step result and return an ai_response dict.
+
+        Handles: success, failure with AI fallback, failure with error,
+        and completion with AI fallback.
+
+        Args:
+            execution_result: Result from start_workflow_execution or execute_workflow_step
+            user_message: Current user message (used for AI fallback)
+            workflow_state: Active workflow state (for last_user_message lookup)
+            workflow_id: Workflow ID (for metadata)
+            workflow_name: Workflow name (for metadata)
+            source: Logging source label ("trigger", "workflow", "retry")
+
+        Returns:
+            ai_response dict with 'content' and 'metadata' keys
+        """
+        first_step = execution_result.get("first_step_result", execution_result)
+
+        if not first_step.get("success", True):
+            error_message = first_step.get("error_message", "Workflow failed")
+            if first_step.get("fallback_to_ai", False):
+                logger.warning("Workflow failed, falling back to AI",
+                               tenant_id=tenant_id, source=source, error=str(error_message))
+                original = (workflow_state.get("last_user_message") if workflow_state else None) or user_message
+                return await self.chat_service.generate_response(
+                    tenant_id=tenant_id, user_message=original,
+                    session_id=session_id, tenant=tenant
+                )
+            else:
+                logger.error("Workflow failed", tenant_id=tenant_id, source=source, error=str(error_message))
+                return {
+                    "content": first_step.get("message", f"I encountered an error: {error_message}"),
+                    "metadata": {
+                        "workflow_step": True, "workflow_error": True,
+                        "error_message": error_message,
+                        "workflow_id": first_step.get("workflow_id") or workflow_id,
+                        "completed": True
+                    }
+                }
+
+        # Success path
+        if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
+            logger.info("Workflow completed with fallback to AI",
+                        tenant_id=tenant_id, session_id=session_id, source=source)
+            original = (workflow_state.get("last_user_message") if workflow_state else None) or user_message
+            return await self.chat_service.generate_response(
+                tenant_id=tenant_id, user_message=original,
+                session_id=session_id, tenant=tenant
+            )
+
+        # Normal workflow response (message, choices, etc.)
+        message = first_step.get("message") or ""
+        choices = first_step.get("choices")
+        return {
+            "content": message or "Workflow started",
+            "metadata": {
+                "workflow_triggered": source == "trigger",
+                "workflow_step": source == "workflow",
+                "workflow_id": first_step.get("workflow_id") or workflow_id,
+                "workflow_name": workflow_name,
+                "execution_id": execution_result.get("id"),
+                "step_type": first_step.get("step_type"),
+                "completed": first_step.get("workflow_completed", False),
+                "choices": choices,
+                "input_required": first_step.get("input_required")
+            }
+        }
+
+    async def _send_workflow_response(
+        self,
+        ai_response: dict,
+        tenant_id: str,
+        session_id: str,
+        websocket: WebSocket,
+    ):
+        """Save and send a workflow response to the client.
+
+        Used by the reconnection/mid-session-login retry paths that operate
+        outside the normal message loop response handling.
+        """
+        if ai_response.get("content"):
+            msg_record = ChatMessage(
+                tenant_id=tenant_id,
+                session_id=session_id,
+                message_type="assistant",
+                content=ai_response["content"],
+                message_metadata=ai_response.get("metadata", {})
+            )
+            self.db.add(msg_record)
+            await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
+
+        metadata = ai_response.get("metadata", {})
+        if ai_response.get("content") or metadata.get("choices") or metadata.get("completed"):
+            response_msg = {
+                "type": "message",
+                "role": "assistant",
+                "content": ai_response.get("content", ""),
+                "message_id": msg_record.id if ai_response.get("content") else None,
+                "session_id": session_id,
+                "sources": ai_response.get("sources", []),
+                "metadata": ai_response.get("metadata", {}),
+                "timestamp": datetime.now().isoformat()
+            }
+            if metadata.get("choices"):
+                response_msg["choices"] = metadata["choices"]
+            await websocket.send_text(json.dumps(response_msg))
+
     async def handle_connection(self, websocket: WebSocket, api_key: str = None, tenant_id: str = None, user_identifier: str = None, session_id: str = None):
         # Identify tenant (no authentication required)
         tenant = None
@@ -189,7 +308,7 @@ class ChatWebSocket:
             await usage_cache.prefetch_for_tenant(tenant_id, tenant_api_key)
         except Exception as e:
             # Log but don't fail connection on cache warming error
-            print(f"Failed to prefetch usage limits: {str(e)}")
+            logger.warning("Failed to prefetch usage limits", error=str(e))
 
         try:
             # Send a welcome message
@@ -261,76 +380,14 @@ class ChatWebSocket:
                             user_access_token=self._get_current_access_token(session_id),
                             user_claims=user_claims
                         )
-
-                        first_step = execution_result.get("first_step_result", {})
-                        if not first_step.get("success", True):
-                            error_message = first_step.get("error_message", "Workflow failed to start")
-                            if first_step.get("fallback_to_ai", False):
-                                workflow_ai_response = await self.chat_service.generate_response(
-                                    tenant_id=tenant_id,
-                                    user_message=pending_message,
-                                    session_id=session_id,
-                                    tenant=tenant
-                                )
-                            else:
-                                workflow_ai_response = {
-                                    "content": first_step.get("message", f"I encountered an error: {error_message}"),
-                                    "metadata": {"workflow_step": True, "workflow_error": True, "completed": True}
-                                }
-                        else:
-                            if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
-                                workflow_ai_response = await self.chat_service.generate_response(
-                                    tenant_id=tenant_id,
-                                    user_message=pending_message,
-                                    session_id=session_id,
-                                    tenant=tenant
-                                )
-                            else:
-                                message = first_step.get("message") or "Workflow started"
-                                choices = first_step.get("choices")
-                                workflow_ai_response = {
-                                    "content": message,
-                                    "metadata": {
-                                        "workflow_triggered": True,
-                                        "workflow_id": pending_workflow_id,
-                                        "execution_id": execution_result.get("id"),
-                                        "step_type": first_step.get("step_type"),
-                                        "choices": choices,
-                                        "input_required": first_step.get("input_required")
-                                    }
-                                }
-
-                        # Save and send the workflow response
-                        if workflow_ai_response.get("content"):
-                            workflow_msg_record = ChatMessage(
-                                tenant_id=tenant_id,
-                                session_id=session_id,
-                                message_type="assistant",
-                                content=workflow_ai_response["content"],
-                                message_metadata=workflow_ai_response.get("metadata", {})
-                            )
-                            self.db.add(workflow_msg_record)
-                            await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
-
-                        wf_metadata = workflow_ai_response.get("metadata", {})
-                        if workflow_ai_response.get("content") or wf_metadata.get("choices") or wf_metadata.get("completed"):
-                            retry_response_msg = {
-                                "type": "message",
-                                "role": "assistant",
-                                "content": workflow_ai_response.get("content", ""),
-                                "message_id": workflow_msg_record.id if workflow_ai_response.get("content") else None,
-                                "session_id": session_id,
-                                "sources": workflow_ai_response.get("sources", []),
-                                "metadata": workflow_ai_response.get("metadata", {}),
-                                "timestamp": datetime.now().isoformat()
-                            }
-                            if wf_metadata.get("choices"):
-                                retry_response_msg["choices"] = wf_metadata["choices"]
-                            await websocket.send_text(json.dumps(retry_response_msg))
-
+                        workflow_ai_response = await self._handle_workflow_result(
+                            execution_result, pending_message, tenant_id, session_id, tenant,
+                            workflow_id=pending_workflow_id, source="retry"
+                        )
+                        await self._send_workflow_response(workflow_ai_response, tenant_id, session_id, websocket)
                         logger.info("Pending auth workflow auto-retried on reconnection", session_id=session_id, tenant_id=tenant_id)
                     except Exception as e:
-                        logger.error(f"Failed to auto-retry pending workflow on reconnection: {str(e)}", session_id=session_id, tenant_id=tenant_id)
+                        logger.error("Failed to auto-retry pending workflow on reconnection: " + str(e), session_id=session_id, tenant_id=tenant_id)
                         await websocket.send_text(json.dumps({
                             "type": "error",
                             "message": f"Failed to resume workflow after login: {str(e)}",
@@ -408,7 +465,7 @@ class ChatWebSocket:
                     ))
                 except Exception as e:
                     # Log but don't fail on event publishing errors
-                    print(f"Failed to publish user message event: {str(e)}")
+                    logger.warning("Failed to publish user message event", error=str(e))
 
                 # Publish usage event and increment local cache (fire-and-forget)
                 try:
@@ -475,73 +532,11 @@ class ChatWebSocket:
                                     user_access_token=self._get_current_access_token(session_id),
                                     user_claims=user_claims
                                 )
-
-                                first_step = execution_result.get("first_step_result", {})
-                                if not first_step.get("success", True):
-                                    error_message = first_step.get("error_message", "Workflow failed to start")
-                                    if first_step.get("fallback_to_ai", False):
-                                        workflow_ai_response = await self.chat_service.generate_response(
-                                            tenant_id=tenant_id,
-                                            user_message=pending_message,
-                                            session_id=session_id,
-                                            tenant=tenant
-                                        )
-                                    else:
-                                        workflow_ai_response = {
-                                            "content": first_step.get("message", f"I encountered an error: {error_message}"),
-                                            "metadata": {"workflow_step": True, "workflow_error": True, "completed": True}
-                                        }
-                                else:
-                                    if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
-                                        workflow_ai_response = await self.chat_service.generate_response(
-                                            tenant_id=tenant_id,
-                                            user_message=pending_message,
-                                            session_id=session_id,
-                                            tenant=tenant
-                                        )
-                                    else:
-                                        message = first_step.get("message") or "Workflow started"
-                                        choices = first_step.get("choices")
-                                        workflow_ai_response = {
-                                            "content": message,
-                                            "metadata": {
-                                                "workflow_triggered": True,
-                                                "workflow_id": pending_workflow_id,
-                                                "execution_id": execution_result.get("id"),
-                                                "step_type": first_step.get("step_type"),
-                                                "choices": choices,
-                                                "input_required": first_step.get("input_required")
-                                            }
-                                        }
-
-                                # Save and send the workflow response
-                                if workflow_ai_response.get("content"):
-                                    workflow_msg_record = ChatMessage(
-                                        tenant_id=tenant_id,
-                                        session_id=session_id,
-                                        message_type="assistant",
-                                        content=workflow_ai_response["content"],
-                                        message_metadata=workflow_ai_response.get("metadata", {})
-                                    )
-                                    self.db.add(workflow_msg_record)
-                                    await asyncio.get_event_loop().run_in_executor(None, self.db.commit)
-
-                                wf_metadata = workflow_ai_response.get("metadata", {})
-                                if workflow_ai_response.get("content") or wf_metadata.get("choices") or wf_metadata.get("completed"):
-                                    retry_response_msg = {
-                                        "type": "message",
-                                        "role": "assistant",
-                                        "content": workflow_ai_response["content"],
-                                        "message_id": workflow_msg_record.id if workflow_ai_response.get("content") else None,
-                                        "session_id": session_id,
-                                        "sources": workflow_ai_response.get("sources", []),
-                                        "metadata": workflow_ai_response.get("metadata", {}),
-                                        "timestamp": datetime.now().isoformat()
-                                    }
-                                    if wf_metadata.get("choices"):
-                                        retry_response_msg["choices"] = wf_metadata["choices"]
-                                    await websocket.send_text(json.dumps(retry_response_msg))
-
+                                workflow_ai_response = await self._handle_workflow_result(
+                                    execution_result, pending_message, tenant_id, session_id, tenant,
+                                    workflow_id=pending_workflow_id, source="retry"
+                                )
+                                await self._send_workflow_response(workflow_ai_response, tenant_id, session_id, websocket)
                                 logger.info("Pending auth workflow auto-retried successfully", session_id=session_id, tenant_id=tenant_id)
                                 # Skip normal message processing — the current message was just the
                                 # post-auth trigger and the workflow response has already been sent
@@ -549,7 +544,7 @@ class ChatWebSocket:
 
                             except Exception as e:
                                 logger.error(
-                                    f"Failed to auto-retry pending workflow: {str(e)}",
+                                    "Failed to auto-retry pending workflow: " + str(e),
                                     session_id=session_id, tenant_id=tenant_id
                                 )
                                 # Fall through to normal processing
@@ -686,61 +681,13 @@ class ChatWebSocket:
                             t_ai = t_trigger_or_step
                             timing_path = "workflow"
 
-                            if not workflow_result.get("success", True):
-                                error_message = workflow_result.get("error_message", "Workflow step failed")
-
-                                if workflow_result.get("fallback_to_ai", False):
-                                    logger.warning(f"Workflow step failed, falling back to AI: {error_message}", tenant_id=tenant_id)
-                                    original_message = workflow_state.get("last_user_message") or user_message
-                                    ai_response = await self.chat_service.generate_response(
-                                        tenant_id=tenant_id,
-                                        user_message=original_message,
-                                        session_id=session_id,
-                                        tenant=tenant
-                                    )
-                                    t_ai = time.time()
-                                else:
-                                    logger.error(f"Workflow step failed: {error_message}", tenant_id=tenant_id)
-                                    ai_response = {
-                                        "content": workflow_result.get("message", f"I encountered an error: {error_message}"),
-                                        "metadata": {
-                                            "workflow_step": True,
-                                            "workflow_error": True,
-                                            "error_message": error_message,
-                                            "workflow_id": workflow_result.get("workflow_id"),
-                                            "completed": True
-                                        }
-                                    }
-                            else:
-                                # Check if workflow completed with fallback to AI
-                                if workflow_result.get("workflow_completed") and workflow_result.get("fallback_to_ai"):
-                                    logger.info("Workflow completed with fallback to AI", tenant_id=tenant_id, session_id=session_id)
-                                    # Use the original triggering message stored in workflow state,
-                                    # not the current user_message (which is the choice text like "No thanks")
-                                    original_message = workflow_state.get("last_user_message") or user_message
-                                    ai_response = await self.chat_service.generate_response(
-                                        tenant_id=tenant_id,
-                                        user_message=original_message,
-                                        session_id=session_id,
-                                        tenant=tenant
-                                    )
-                                    t_ai = time.time()
-                                    timing_path = "workflow->ai"
-                                else:
-                                    message = workflow_result.get("message") or ""
-                                    choices = workflow_result.get("choices")
-
-                                    ai_response = {
-                                        "content": message,
-                                        "metadata": {
-                                            "workflow_step": True,
-                                            "step_type": workflow_result.get("step_type"),
-                                            "workflow_id": workflow_result.get("workflow_id"),
-                                            "completed": workflow_result.get("workflow_completed", False),
-                                            "choices": choices,
-                                            "input_required": workflow_result.get("input_required")
-                                        }
-                                    }
+                            ai_response = await self._handle_workflow_result(
+                                workflow_result, user_message, tenant_id, session_id, tenant,
+                                workflow_state=workflow_state, source="workflow"
+                            )
+                            if ai_response.get("sources"):
+                                t_ai = time.time()
+                                timing_path = "workflow->ai"
 
                         else:
                             # No active workflow — check triggers
@@ -793,63 +740,18 @@ class ChatWebSocket:
 
                                     t_trigger_or_step = time.time()
 
-                                    first_step = execution_result.get("first_step_result", {})
-                                    if not first_step.get("success", True):
-                                        error_message = first_step.get("error_message", "Workflow failed to start")
-
-                                        if first_step.get("fallback_to_ai", False):
-                                            logger.warning(f"Workflow start failed, falling back to AI: {error_message}", tenant_id=tenant_id)
-                                            ai_response = await self.chat_service.generate_response(
-                                                tenant_id=tenant_id,
-                                                user_message=user_message,
-                                                session_id=session_id,
-                                                tenant=tenant
-                                            )
-                                            t_ai = time.time()
-                                            timing_path = "trigger->ai"
-                                        else:
-                                            logger.error(f"Workflow start failed: {error_message}", tenant_id=tenant_id)
-                                            ai_response = {
-                                                "content": first_step.get("message", f"I encountered an error: {error_message}"),
-                                                "metadata": {
-                                                    "workflow_step": True,
-                                                    "workflow_error": True,
-                                                    "error_message": error_message,
-                                                    "completed": True
-                                                }
-                                            }
-                                            t_ai = t_trigger_or_step
-                                            timing_path = "trigger->workflow"
+                                    ai_response = await self._handle_workflow_result(
+                                        execution_result, user_message, tenant_id, session_id, tenant,
+                                        workflow_id=trigger_result["workflow_id"],
+                                        workflow_name=trigger_result.get("workflow_name"),
+                                        source="trigger"
+                                    )
+                                    if ai_response.get("sources"):
+                                        t_ai = time.time()
+                                        timing_path = "trigger->ai"
                                     else:
-                                        # Check if first step completed workflow with fallback to AI
-                                        if first_step.get("workflow_completed") and first_step.get("fallback_to_ai"):
-                                            logger.info("Workflow start completed with fallback to AI", tenant_id=tenant_id, session_id=session_id)
-                                            ai_response = await self.chat_service.generate_response(
-                                                tenant_id=tenant_id,
-                                                user_message=user_message,
-                                                session_id=session_id,
-                                                tenant=tenant
-                                            )
-                                            t_ai = time.time()
-                                            timing_path = "trigger->ai"
-                                        else:
-                                            message = first_step.get("message") or "Workflow started"
-                                            choices = first_step.get("choices")
-
-                                            ai_response = {
-                                                "content": message,
-                                                "metadata": {
-                                                    "workflow_triggered": True,
-                                                    "workflow_id": trigger_result["workflow_id"],
-                                                    "workflow_name": trigger_result.get("workflow_name"),
-                                                    "execution_id": execution_result.get("id"),
-                                                    "step_type": first_step.get("step_type"),
-                                                    "choices": choices,
-                                                    "input_required": first_step.get("input_required")
-                                                }
-                                            }
-                                            t_ai = t_trigger_or_step
-                                            timing_path = "trigger->workflow"
+                                        t_ai = t_trigger_or_step
+                                        timing_path = "trigger->workflow"
                             else:
                                 # No workflow triggered — use pre-computed search results for AI
                                 t_trigger_or_step = time.time()
@@ -890,7 +792,7 @@ class ChatWebSocket:
                             ))
                         except Exception as e:
                             # Log but don't fail on event publishing errors
-                            print(f"Failed to publish assistant message event: {str(e)}")
+                            logger.warning("Failed to publish assistant message event", error=str(e))
 
                         # Record token usage (fire-and-forget)
                         if ai_response.get("token_usage"):
@@ -910,7 +812,7 @@ class ChatWebSocket:
                                     )
                                 )
                             except Exception as e:
-                                print(f"Failed to record token usage: {str(e)}")
+                                logger.warning("Failed to record token usage", error=str(e))
 
                     if not ai_response.get("content"):
                         # No AI content to save — commit the flushed user message
@@ -939,7 +841,7 @@ class ChatWebSocket:
 
                         await websocket.send_text(json.dumps(response_msg))
                     else:
-                        print(f"DEBUG: Skipping empty message - no content or choices to display")
+                        logger.debug("Skipping empty message - no content or choices to display")
 
                     t_end = time.time()
                     logger.info(
@@ -959,7 +861,7 @@ class ChatWebSocket:
                     )
 
                 except Exception as e:
-                    print(f"Error generating AI response: {str(e)}")  # Debug logging
+                    logger.error("Error generating AI response", error=str(e))
                     import traceback
                     traceback.print_exc()  # Print full traceback for debugging
                     

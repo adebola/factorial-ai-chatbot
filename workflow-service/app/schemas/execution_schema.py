@@ -95,6 +95,7 @@ class WorkflowStateResponse(BaseModel):
     waiting_for_input: Optional[str]
     last_user_message: Optional[str]
     last_bot_message: Optional[str]
+    status: Optional[str] = None  # Execution status from DB (completed, running, etc.)
     created_at: datetime
     updated_at: datetime
     expires_at: Optional[datetime]

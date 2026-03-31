@@ -195,6 +195,49 @@ class StateManager:
             logger.error(f"Failed to update variables for session {session_id}: {e}")
             return False
 
+    async def advance_step_with_variables(
+        self,
+        session_id: str,
+        new_step_id: str,
+        variables: Dict[str, Any],
+        step_context: Optional[Dict[str, Any]] = None,
+        waiting_for_input: Optional[str] = None,
+    ) -> bool:
+        """
+        Advance workflow to next step AND update variables in a single read-modify-write.
+
+        Combines advance_step + update_variables into one state fetch + one save,
+        eliminating redundant Redis/DB reads.
+        """
+        try:
+            current_state = await self.get_state(session_id)
+            if not current_state:
+                raise WorkflowStateError(f"No state found for session {session_id}")
+
+            # Merge variables
+            current_variables = current_state.get("variables", {})
+            current_variables.update(variables)
+
+            await self.save_state(
+                session_id=session_id,
+                execution_id=current_state["execution_id"],
+                workflow_id=current_state["workflow_id"],
+                tenant_id=current_state["tenant_id"],
+                current_step_id=new_step_id,
+                variables=current_variables,
+                step_context=step_context or {},
+                waiting_for_input=waiting_for_input,
+                last_user_message=current_state.get("last_user_message"),
+                last_bot_message=current_state.get("last_bot_message")
+            )
+
+            logger.debug(f"Advanced to step {new_step_id} with variables for session {session_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to advance step with variables for session {session_id}: {e}")
+            return False
+
     async def advance_step(
         self,
         session_id: str,

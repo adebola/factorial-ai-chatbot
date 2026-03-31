@@ -1,16 +1,15 @@
 import asyncio
-import time
-from sqlalchemy.orm import Session
-from typing import Dict, List, Any, Optional
-import redis
 import json
 import os
-from openai import OpenAI
+from typing import Dict, List, Any, Optional
 
-from ..core.config import settings
-from ..models.chat_models import ChatMessage
-from .vector_store import TenantVectorStore
+import time
+
+import redis
+from openai import OpenAI
+from sqlalchemy.orm import Session
 from .tenant_client import TenantClient
+from .vector_store import TenantVectorStore
 from ..core.logging_config import (
     get_logger,
     log_chat_message,
@@ -18,7 +17,6 @@ from ..core.logging_config import (
     log_vector_search,
     log_tenant_operation
 )
-from .event_publisher import event_publisher
 
 
 class ChatService:
@@ -155,8 +153,11 @@ class ChatService:
             lambda: self._get_conversation_history(session_id)
         )
 
-        relevant_docs, conversation_history = await asyncio.gather(
-            relevant_docs_future, history_future
+        # Fetch tenant settings in parallel with search + history
+        settings_future = self.tenant_client.get_tenant_settings(tenant_id)
+
+        relevant_docs, conversation_history, tenant_settings = await asyncio.gather(
+            relevant_docs_future, history_future, settings_future
         )
         search_duration = (time.time() - search_start) * 1000
 
@@ -164,6 +165,7 @@ class ChatService:
             "relevant_docs": relevant_docs,
             "conversation_history": conversation_history,
             "tenant": tenant,
+            "tenant_settings": tenant_settings,
             "content_type_filter": content_type_filter,
             "search_duration_ms": search_duration
         }
@@ -277,15 +279,18 @@ class ChatService:
         # Convert sets to lists for JSON serialization
         categorization_metadata['content_types'] = list(categorization_metadata['content_types'])
         
-        # Determine fallback behavior from tenant settings (Redis-cached, 300s TTL)
+        # Determine fallback behaviour from tenant settings
+        # Use pre-fetched settings from pre_search when available, otherwise fetch now
         company_name = tenant["name"]
         unknown_answer_behavior = "decline"
-        try:
-            tenant_settings = await self.tenant_client.get_tenant_settings(tenant_id)
-            if tenant_settings:
-                unknown_answer_behavior = tenant_settings.get("unknownAnswerBehavior", "decline")
-        except Exception as e:
-            self.logger.warning("Failed to fetch tenant settings for fallback behavior", error=str(e))
+        tenant_settings = pre_search_result.get("tenant_settings") if pre_search_result else None
+        if tenant_settings is None:
+            try:
+                tenant_settings = await self.tenant_client.get_tenant_settings(tenant_id)
+            except Exception as e:
+                self.logger.warning("Failed to fetch tenant settings for fallback behavior", error=str(e))
+        if tenant_settings:
+            unknown_answer_behavior = tenant_settings.get("unknownAnswerBehavior", "decline")
 
         if unknown_answer_behavior == "best_effort":
             fallback_instruction = (

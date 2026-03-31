@@ -236,15 +236,25 @@ class WorkflowClient:
 
                     return result
                 else:
+                    response_text = await response.text()
                     logger.error(
                         "Failed to start workflow execution",
                         tenant_id=tenant_id,
                         workflow_id=workflow_id,
                         session_id=session_id,
                         status_code=response.status,
-                        response_text=await response.text()
+                        response_text=response_text
                     )
-                    return {"error": "Failed to start workflow execution"}
+                    # Return a structure the chat handler recognises as a failed
+                    # first step so it falls back to AI instead of showing
+                    # "Workflow started" with no further response.
+                    return {
+                        "first_step_result": {
+                            "success": False,
+                            "error_message": f"Workflow failed to start: {response_text[:200]}",
+                            "fallback_to_ai": True,
+                        }
+                    }
 
         except Exception as e:
             logger.error(
@@ -253,7 +263,13 @@ class WorkflowClient:
                 workflow_id=workflow_id,
                 session_id=session_id,
                 error=str(e))
-            return {"error": str(e)}
+            return {
+                "first_step_result": {
+                    "success": False,
+                    "error_message": f"Workflow failed to start: {str(e)[:200]}",
+                    "fallback_to_ai": True,
+                }
+            }
 
     async def execute_workflow_step(
         self,
@@ -303,13 +319,30 @@ class WorkflowClient:
 
                     return result
                 else:
+                    response_text = await response.text()
                     logger.error(
                         "Failed to execute workflow step",
                         tenant_id=tenant_id,
                         session_id=session_id,
                         status_code=response.status,
-                        response_text=await response.text()
+                        response_text=response_text
                     )
+
+                    # If the execution already completed (race condition between
+                    # state fetch and step execution), treat as workflow completed
+                    # and fall back to AI so the user still gets a response.
+                    if response.status == 400 and "not running" in response_text.lower():
+                        logger.warning(
+                            "Workflow execution already completed (race condition), falling back to AI",
+                            tenant_id=tenant_id,
+                            session_id=session_id
+                        )
+                        return {
+                            "workflow_completed": True,
+                            "fallback_to_ai": True,
+                            "message": "",
+                        }
+
                     return {"error": "Failed to execute workflow step"}
 
         except Exception as e:

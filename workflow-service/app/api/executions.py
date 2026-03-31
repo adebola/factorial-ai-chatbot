@@ -97,10 +97,18 @@ async def start_execution(
         )
     except WorkflowNotFoundError:
         raise HTTPException(status_code=404, detail="Workflow not found")
-    except WorkflowExecutionError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except (WorkflowExecutionError, StepExecutionError, Exception) as e:
+        # Clean up any Redis state that was created before the failure,
+        # otherwise the session gets stuck with a stale workflow state.
+        if request.session_id:
+            try:
+                from ..services.state_manager import StateManager
+                state_manager = StateManager(db)
+                await state_manager.delete_state(request.session_id)
+            except Exception:
+                pass  # Best-effort cleanup
+        status_code = 400 if isinstance(e, (WorkflowExecutionError, StepExecutionError)) else 500
+        raise HTTPException(status_code=status_code, detail=str(e))
 
 
 @router.post("/step", response_model=StepExecutionResult)
@@ -156,6 +164,16 @@ async def get_session_state(
             logger.warning(f"Access denied for session_id={session_id}, tenant_id mismatch")
             raise HTTPException(status_code=403, detail="Access denied")
 
+        # Fetch execution status from DB (defense-in-depth: even if state
+        # wasn't cleaned up on completion, the caller can detect it via status)
+        from ..models.execution_model import WorkflowExecution
+        execution_status = None
+        execution = db.query(WorkflowExecution).filter(
+            WorkflowExecution.id == state["execution_id"]
+        ).first()
+        if execution:
+            execution_status = execution.status
+
         # Parse datetime strings to datetime objects
         from datetime import datetime
         created_at = datetime.fromisoformat(state["created_at"]) if state.get("created_at") else datetime.utcnow()
@@ -172,6 +190,7 @@ async def get_session_state(
             waiting_for_input=state.get("waiting_for_input"),
             last_user_message=state.get("last_user_message"),
             last_bot_message=state.get("last_bot_message"),
+            status=execution_status,
             created_at=created_at,
             updated_at=updated_at,
             expires_at=expires_at
