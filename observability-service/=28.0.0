@@ -1,0 +1,30 @@
+Collecting kubernetes
+  Downloading kubernetes-35.0.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Requirement already satisfied: certifi>=14.05.14 in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from kubernetes) (2025.10.5)
+Requirement already satisfied: six>=1.9.0 in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from kubernetes) (1.17.0)
+Requirement already satisfied: python-dateutil>=2.5.3 in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from kubernetes) (2.8.2)
+Requirement already satisfied: pyyaml>=5.4.1 in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from kubernetes) (6.0.3)
+Collecting websocket-client!=0.40.0,!=0.41.*,!=0.42.*,>=0.32.0 (from kubernetes)
+  Downloading websocket_client-1.9.0-py3-none-any.whl.metadata (8.3 kB)
+Requirement already satisfied: requests in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from kubernetes) (2.32.5)
+Collecting requests-oauthlib (from kubernetes)
+  Downloading requests_oauthlib-2.0.0-py2.py3-none-any.whl.metadata (11 kB)
+Requirement already satisfied: urllib3!=2.6.0,>=1.24.2 in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from kubernetes) (2.5.0)
+Collecting durationpy>=0.7 (from kubernetes)
+  Downloading durationpy-0.10-py3-none-any.whl.metadata (340 bytes)
+Requirement already satisfied: charset_normalizer<4,>=2 in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from requests->kubernetes) (3.4.3)
+Requirement already satisfied: idna<4,>=2.5 in /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/chat-service/venv/lib/python3.11/site-packages (from requests->kubernetes) (3.10)
+Collecting oauthlib>=3.0.0 (from requests-oauthlib->kubernetes)
+  Downloading oauthlib-3.3.1-py3-none-any.whl.metadata (7.9 kB)
+Downloading kubernetes-35.0.0-py2.py3-none-any.whl (2.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 2.8 MB/s  0:00:01
+Downloading durationpy-0.10-py3-none-any.whl (3.9 kB)
+Downloading websocket_client-1.9.0-py3-none-any.whl (82 kB)
+Downloading requests_oauthlib-2.0.0-py2.py3-none-any.whl (24 kB)
+Downloading oauthlib-3.3.1-py3-none-any.whl (160 kB)
+Installing collected packages: durationpy, websocket-client, oauthlib, requests-oauthlib, kubernetes
+
+Successfully installed durationpy-0.10 kubernetes-35.0.0 oauthlib-3.3.1 requests-oauthlib-2.0.0 websocket-client-1.9.0
+
+[notice] A new release of pip is available: 25.2 -> 26.0.1
+[notice] To update, run: pip install --upgrade pip
