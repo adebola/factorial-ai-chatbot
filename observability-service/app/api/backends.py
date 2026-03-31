@@ -1,6 +1,7 @@
 """
 Backend configuration CRUD API.
 """
+import os
 import time
 import logging
 from typing import List
@@ -14,27 +15,80 @@ from ..models.backend_config import ObservabilityBackend
 from ..schemas.backend import (
     BackendCreateRequest, BackendUpdateRequest, BackendResponse, BackendTestResult
 )
-from ..services.dependencies import TokenClaims, validate_token, require_admin
+from ..services.dependencies import TokenClaims, validate_token_or_api_key, require_system_admin
 from ..services.credential_service import credential_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _test_k8s_connectivity(backend) -> BackendTestResult:
+    """Test Kubernetes cluster connectivity using the Python client.
+
+    Uses the same auth logic as K8sResourcesTool: in-cluster → service_account → kubeconfig.
+    """
+
+    logger.info("Testing Kubernetes connectivity")
+
+    start_time = time.time()
+    try:
+        from kubernetes import client, config as k8s_config
+
+        in_cluster = os.environ.get("K8S_IN_CLUSTER", "false").lower() == "true"
+
+        if in_cluster:
+            k8s_config.load_incluster_config()
+        elif backend.auth_type == "service_account" and backend.credentials_encrypted:
+            creds = credential_service.decrypt(backend.credentials_encrypted)
+            configuration = client.Configuration()
+            configuration.host = backend.url
+            configuration.api_key = {
+                "authorization": f"Bearer {creds.get('token', '')}"
+            }
+            if not backend.verify_ssl:
+                configuration.verify_ssl = False
+            client.Configuration.set_default(configuration)
+        else:
+            try:
+                k8s_config.load_kube_config()
+            except Exception:
+                k8s_config.load_incluster_config()
+
+        v1 = client.CoreV1Api()
+        namespaces = v1.list_namespace(timeout_seconds=10)
+        ns_names = [ns.metadata.name for ns in namespaces.items]
+
+        response_time_ms = (time.time() - start_time) * 1000
+
+        return BackendTestResult(
+            backend_type="kubernetes",
+            url=backend.url,
+            reachable=True,
+            response_time_ms=round(response_time_ms, 1),
+            details={
+                "namespaces": ns_names,
+                "namespace_count": len(ns_names),
+                "chatcraft_namespace": "chatcraft" in ns_names,
+            }
+        )
+    except Exception as e:
+        response_time_ms = (time.time() - start_time) * 1000
+        return BackendTestResult(
+            backend_type="kubernetes",
+            url=backend.url,
+            reachable=False,
+            response_time_ms=round(response_time_ms, 1),
+            error=str(e)
+        )
+
+
 @router.post("/backends", response_model=BackendResponse, status_code=201)
 async def create_backend(
     request: BackendCreateRequest,
-    claims: TokenClaims = Depends(require_admin),
+    claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db)
 ):
-    """Create a backend configuration for a tenant."""
-    # Only allow admin to configure their own tenant (unless system admin)
-    if not claims.is_system_admin and request.tenant_id != claims.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot configure backends for other tenants"
-        )
-
+    """Create a backend configuration for a tenant (system admin only)."""
     # Check for existing backend of same type
     existing = db.query(ObservabilityBackend).filter(
         ObservabilityBackend.tenant_id == request.tenant_id,
@@ -73,7 +127,7 @@ async def create_backend(
 @router.get("/backends", response_model=List[BackendResponse])
 async def list_backends(
     tenant_id: str = None,
-    claims: TokenClaims = Depends(validate_token),
+    claims: TokenClaims = Depends(validate_token_or_api_key),
     db: Session = Depends(get_db)
 ):
     """List backend configurations for a tenant."""
@@ -97,16 +151,10 @@ async def update_backend(
     tenant_id: str,
     backend_type: str,
     request: BackendUpdateRequest,
-    claims: TokenClaims = Depends(require_admin),
+    claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db)
 ):
-    """Update a backend configuration."""
-    if not claims.is_system_admin and tenant_id != claims.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot update backends for other tenants"
-        )
-
+    """Update a backend configuration (system admin only)."""
     backend = db.query(ObservabilityBackend).filter(
         ObservabilityBackend.tenant_id == tenant_id,
         ObservabilityBackend.backend_type == backend_type
@@ -140,16 +188,10 @@ async def update_backend(
 async def delete_backend(
     tenant_id: str,
     backend_type: str,
-    claims: TokenClaims = Depends(require_admin),
+    claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db)
 ):
-    """Delete a backend configuration."""
-    if not claims.is_system_admin and tenant_id != claims.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot delete backends for other tenants"
-        )
-
+    """Delete a backend configuration (system admin only)."""
     backend = db.query(ObservabilityBackend).filter(
         ObservabilityBackend.tenant_id == tenant_id,
         ObservabilityBackend.backend_type == backend_type
@@ -169,26 +211,27 @@ async def delete_backend(
 async def test_backend(
     tenant_id: str,
     backend_type: str,
-    claims: TokenClaims = Depends(require_admin),
+    claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db)
 ):
-    """Test connectivity to a backend."""
-    if not claims.is_system_admin and tenant_id != claims.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Cannot test backends for other tenants"
-        )
-
+    """Test connectivity to a backend (system admin only)."""
     backend = db.query(ObservabilityBackend).filter(
         ObservabilityBackend.tenant_id == tenant_id,
         ObservabilityBackend.backend_type == backend_type
     ).first()
+
+    logger.info(f"Testing connectivity to {backend_type} backend for tenant {tenant_id}")
+    logger.debug(backend)
 
     if not backend:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Backend '{backend_type}' not found for tenant"
         )
+
+    # K8s backend — test via Kubernetes Python client, not HTTP
+    if backend_type == "kubernetes":
+        return _test_k8s_connectivity(backend)
 
     if not backend.url:
         return BackendTestResult(
@@ -201,7 +244,7 @@ async def test_backend(
     # Test connectivity based on backend type
     test_paths = {
         "prometheus": "/api/v1/status/config",
-        "alertmanager": "/api/v1/status",
+        "alertmanager": "/api/v2/status",
         "elasticsearch": "/",
         "jaeger": "/api/services",
         "otel_collector": "/metrics",
@@ -230,6 +273,7 @@ async def test_backend(
             elif creds and backend.auth_type == "basic":
                 auth = (creds.get("username", ""), creds.get("password", ""))
 
+        logger.info(f"Testing connectivity to {backend.url}{test_path}")
         async with httpx.AsyncClient(verify=backend.verify_ssl, timeout=backend.timeout_seconds) as client:
             response = await client.get(
                 f"{backend.url}{test_path}",

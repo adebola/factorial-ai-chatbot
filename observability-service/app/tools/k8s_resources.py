@@ -17,7 +17,7 @@ class K8sResourcesInput(BaseModel):
     """Input for Kubernetes resources tool."""
     resource_type: str = Field(description="Type of resource: 'pods', 'deployments', 'services', 'events', 'nodes', 'statefulsets', 'jobs'")
     namespace: Optional[str] = Field(default=None, description="Kubernetes namespace to query. Leave empty for all namespaces.")
-    name: Optional[str] = Field(default=None, description="Resource name or name pattern to filter by")
+    name: Optional[str] = Field(default=None, description="Resource name prefix or substring to filter by. Does NOT need to be the full pod name - e.g. 'order-service' will match 'order-service-7f8b9c6d4-x2k9m'.")
     action: str = Field(default="list", description="Action: 'list', 'get', 'events', 'logs', 'describe'")
 
 
@@ -31,7 +31,8 @@ class K8sResourcesTool(BaseTool):
     description: str = (
         "Query Kubernetes cluster resources including pods, deployments, events, "
         "and container logs. Use this to check pod health, restart counts, "
-        "OOMKill events, resource usage, and recent cluster events."
+        "OOMKill events, resource usage, and recent cluster events. "
+        "The name parameter supports prefix/substring matching - you don't need the full pod name."
     )
     args_schema: Type[BaseModel] = K8sResourcesInput
     config: BackendConfig
@@ -294,6 +295,27 @@ class K8sResourcesTool(BaseTool):
 
         return "\n".join(output_lines)
 
+    def _resolve_pod_name(self, v1, namespace: str, name: str) -> Optional[str]:
+        """Resolve a pod name prefix/substring to an actual pod name.
+
+        K8s pods typically have random suffixes (e.g. order-service-7f8b9c6d4-x2k9m).
+        This method finds the first matching pod by substring match.
+        Returns the actual pod name, or None if no match found.
+        """
+        try:
+            if namespace:
+                pods = v1.list_namespaced_pod(namespace=namespace)
+            else:
+                pods = v1.list_pod_for_all_namespaces()
+
+            name_lower = name.lower()
+            for pod in pods.items:
+                if name_lower in pod.metadata.name.lower():
+                    return pod.metadata.name
+        except Exception as e:
+            logger.debug(f"Pod name resolution failed: {e}")
+        return None
+
     def _get_events(self, k8s, namespace: str = None, name: str = None) -> str:
         """Get Kubernetes events."""
         v1 = k8s.CoreV1Api()
@@ -333,7 +355,7 @@ class K8sResourcesTool(BaseTool):
         return "\n".join(output_lines)
 
     def _get_logs(self, k8s, namespace: str = None, name: str = None) -> str:
-        """Get pod logs."""
+        """Get pod logs. Supports name prefix/substring matching."""
         if not name:
             return "Pod name is required for log retrieval"
 
@@ -360,12 +382,17 @@ class K8sResourcesTool(BaseTool):
 
         except Exception as e:
             if "not found" in str(e).lower():
+                # Try prefix/substring resolution
+                resolved = self._resolve_pod_name(v1, ns, name)
+                if resolved and resolved != name:
+                    logger.info(f"Resolved pod name '{name}' to '{resolved}'")
+                    return self._get_logs(k8s, ns, resolved)
                 return f"Pod {ns}/{name} not found"
             return f"Failed to get logs for {ns}/{name}: {str(e)}"
 
     def _describe_resource(self, k8s, resource_type: str,
                            namespace: str = None, name: str = None) -> str:
-        """Describe a specific resource."""
+        """Describe a specific resource. Supports name prefix/substring matching."""
         if not name:
             return "Resource name is required for describe"
 
@@ -378,6 +405,16 @@ class K8sResourcesTool(BaseTool):
                     pod = v1.read_namespaced_pod(name=name, namespace=ns)
                     return self._format_pod_describe(pod)
                 except Exception as e:
+                    if "not found" in str(e).lower():
+                        # Try prefix/substring resolution
+                        resolved = self._resolve_pod_name(v1, ns, name)
+                        if resolved and resolved != name:
+                            logger.info(f"Resolved pod name '{name}' to '{resolved}'")
+                            try:
+                                pod = v1.read_namespaced_pod(name=resolved, namespace=ns)
+                                return self._format_pod_describe(pod)
+                            except Exception as e2:
+                                return f"Failed to describe pod {ns}/{resolved}: {str(e2)}"
                     return f"Failed to describe pod {ns}/{name}: {str(e)}"
             case _:
                 return self._list_resources(k8s, resource_type, namespace, name)

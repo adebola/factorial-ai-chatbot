@@ -85,7 +85,7 @@ class TenantClient:
         if cached:
             return cached
         return await self._fetch_tenant_from_auth_server(
-            "/api/v1/tenants/by-api-key", params={"api_key": api_key}
+            "/api/v1/tenants/lookup-by-api-key", params={"apiKey": api_key}
         )
 
     async def get_tenant_by_token(self, token: str) -> Optional[Dict[str, Any]]:

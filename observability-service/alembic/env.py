@@ -13,6 +13,7 @@ from alembic import context
 from app.models.backend_config import ObservabilityBackend
 from app.models.observation_session import ObservationSession
 from app.models.observation_query import ObservationQuery
+from app.models.llm_provider import LLMProvider, TenantLLMSelection
 from app.core.database import Base
 
 config = context.config

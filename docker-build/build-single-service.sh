@@ -33,7 +33,7 @@ while [[ $# -gt 0 ]]; do
             NO_CACHE=true
             shift
             ;;
-        chat-service|onboarding-service|communications-service|answer-quality-service|billing-service|workflow-service|authorization-service|gateway-service|ai-authorization-service|ai-gateway-service)
+        chat-service|onboarding-service|communications-service|answer-quality-service|billing-service|workflow-service|observability-service|authorization-service|gateway-service|ai-authorization-service|ai-gateway-service)
             SERVICE_NAME="$1"
             shift
             ;;
@@ -71,6 +71,7 @@ if [[ -z "$SERVICE_NAME" ]]; then
     echo "  - answer-quality-service"
     echo "  - billing-service"
     echo "  - workflow-service"
+    echo "  - observability-service"
     echo "  - authorization-service (or ai-authorization-service)"
     echo "  - gateway-service (or ai-gateway-service)"
     exit 1
@@ -102,6 +103,10 @@ case "$SERVICE_NAME" in
         DOCKERFILE="docker-build/dockerfiles/workflow-service.Dockerfile"
         IMAGE_NAME="${DOCKER_REGISTRY}/workflow-service:${VERSION}"
         ;;
+    observability-service)
+        DOCKERFILE="docker-build/dockerfiles/observability-service.Dockerfile"
+        IMAGE_NAME="${DOCKER_REGISTRY}/observability-service:${VERSION}"
+        ;;
     authorization-service|ai-authorization-service)
         DOCKERFILE="docker-build/dockerfiles/authorization-service.Dockerfile"
         IMAGE_NAME="${DOCKER_REGISTRY}/ai-authorization-service:${VERSION}"
@@ -112,7 +117,7 @@ case "$SERVICE_NAME" in
         ;;
     *)
         echo -e "${RED}Error: Unknown service: $SERVICE_NAME${NC}"
-        echo "Available services: chat-service, onboarding-service, communications-service, answer-quality-service, billing-service, workflow-service, authorization-service, gateway-service"
+        echo "Available services: chat-service, onboarding-service, communications-service, answer-quality-service, billing-service, workflow-service, observability-service, authorization-service, gateway-service"
         exit 1
         ;;
 esac

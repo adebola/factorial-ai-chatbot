@@ -31,8 +31,10 @@ class TestBuildTools:
             "prometheus": BackendConfig(url="http://prometheus:9090")
         }
         tools = _build_tools(configs)
-        assert len(tools) == 1
-        assert tools[0].name == "prometheus_query"
+        assert len(tools) == 2
+        tool_names = {t.name for t in tools}
+        assert "prometheus_metric_discovery" in tool_names
+        assert "prometheus_query" in tool_names
 
     def test_build_tools_with_all_backends(self):
         configs = {
@@ -44,8 +46,9 @@ class TestBuildTools:
             "otel_collector": BackendConfig(url="http://otel:8888"),
         }
         tools = _build_tools(configs)
-        assert len(tools) == 6
+        assert len(tools) == 7
         tool_names = {t.name for t in tools}
+        assert "prometheus_metric_discovery" in tool_names
         assert "prometheus_query" in tool_names
         assert "prometheus_alerts" in tool_names
         assert "elasticsearch_search" in tool_names

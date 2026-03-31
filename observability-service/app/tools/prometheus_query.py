@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 class PrometheusQueryInput(BaseModel):
     """Input for Prometheus query tool."""
-    description: str = Field(description="Natural language description of the metric to query, e.g. 'CPU usage for payments service over last hour'")
-    time_range: str = Field(default="1h", description="Time range to query, e.g. '15m', '1h', '6h', '24h', '7d'")
+    promql: str = Field(description="A valid PromQL expression to execute, e.g. 'rate(process_cpu_usage[5m])' or 'jvm_memory_used_bytes{area=\"heap\"}'")
+    time_range: str = Field(default="1h", description="Time range for range queries: '15m', '1h', '6h', '24h', '7d'")
 
 
 def _parse_time_range(time_range: str) -> timedelta:
@@ -43,87 +43,18 @@ class PrometheusQueryTool(BaseTool):
     """
     name: str = "prometheus_query"
     description: str = (
-        "Query Prometheus metrics. Use this to check CPU usage, memory, request rates, "
-        "error rates, latency percentiles, and other time-series metrics. "
-        "Provide a natural language description of what metric you want."
+        "Execute a PromQL query against Prometheus and return time-series results. "
+        "REQUIRES valid PromQL syntax - do NOT pass natural language. "
+        "You MUST call prometheus_metric_discovery first to find the correct metric names, "
+        "then construct PromQL using those exact names."
     )
     args_schema: Type[BaseModel] = PrometheusQueryInput
     config: BackendConfig
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    def _build_promql(self, description: str, time_range: str) -> str:
-        """Build a PromQL query from the description.
-
-        Uses heuristics to map common descriptions to PromQL patterns.
-        For production, this would use an LLM to generate the PromQL.
-        """
-        # Check for raw PromQL first (contains query syntax characters)
-        if any(op in description for op in ['{', '}', '(', ')', 'histogram']):
-            return description
-
-        desc_lower = description.lower()
-
-        if "cpu" in desc_lower:
-            if "node" in desc_lower:
-                return f'100 - (avg by(instance) (rate(node_cpu_seconds_total{{mode="idle"}}[{time_range}])) * 100)'
-            service = self._extract_service(desc_lower)
-            if service:
-                return f'rate(container_cpu_usage_seconds_total{{pod=~"{service}.*"}}[{time_range}])'
-            return f'rate(container_cpu_usage_seconds_total[{time_range}])'
-
-        if "memory" in desc_lower or "mem" in desc_lower:
-            service = self._extract_service(desc_lower)
-            if service:
-                return f'container_memory_usage_bytes{{pod=~"{service}.*"}}'
-            return 'container_memory_usage_bytes'
-
-        if "latency" in desc_lower or "p99" in desc_lower or "p95" in desc_lower:
-            service = self._extract_service(desc_lower)
-            percentile = "0.99" if "p99" in desc_lower else "0.95"
-            if service:
-                return f'histogram_quantile({percentile}, rate(http_request_duration_seconds_bucket{{service="{service}"}}[{time_range}]))'
-            return f'histogram_quantile({percentile}, rate(http_request_duration_seconds_bucket[{time_range}]))'
-
-        if "error" in desc_lower or "5xx" in desc_lower or "500" in desc_lower:
-            service = self._extract_service(desc_lower)
-            if service:
-                return f'rate(http_requests_total{{service="{service}",status=~"5.."}}[{time_range}])'
-            return f'rate(http_requests_total{{status=~"5.."}}[{time_range}])'
-
-        if "request" in desc_lower and ("rate" in desc_lower or "rps" in desc_lower or "throughput" in desc_lower):
-            service = self._extract_service(desc_lower)
-            if service:
-                return f'rate(http_requests_total{{service="{service}"}}[{time_range}])'
-            return f'rate(http_requests_total[{time_range}])'
-
-        if "restart" in desc_lower:
-            service = self._extract_service(desc_lower)
-            if service:
-                return f'kube_pod_container_status_restarts_total{{pod=~"{service}.*"}}'
-            return 'kube_pod_container_status_restarts_total'
-
-        if "disk" in desc_lower or "storage" in desc_lower:
-            return 'node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}'
-
-        # Generic: try to use it as a metric name pattern
-        return f'{{__name__=~".*{description.replace(" ", ".*")}.*"}}'
-
-    def _extract_service(self, desc_lower: str) -> str:
-        """Extract service name from description."""
-        # Look for common patterns like "for <service>" or "<service> service"
-        for keyword in ["for ", "of ", "on ", "from "]:
-            if keyword in desc_lower:
-                parts = desc_lower.split(keyword)
-                if len(parts) > 1:
-                    service = parts[-1].strip().split()[0].rstrip('.,;')
-                    if service and service not in ("the", "all", "each", "every", "last"):
-                        return service
-        return ""
-
-    def _run(self, description: str, time_range: str = "1h") -> str:
-        """Execute the Prometheus query synchronously."""
+    def _run(self, promql: str, time_range: str = "1h") -> str:
+        """Execute a PromQL query against Prometheus."""
         try:
-            promql = self._build_promql(description, time_range)
             td = _parse_time_range(time_range)
             end = datetime.now(timezone.utc)
             start = end - td

@@ -7,7 +7,7 @@ load_dotenv()
 
 from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
-from .api import observe, sessions, backends, health
+from .api import observe, sessions, backends, llm_config, health
 
 
 @asynccontextmanager
@@ -51,6 +51,12 @@ def create_app() -> FastAPI:
         backends.router,
         prefix=f"{settings.API_V1_STR}/observe",
         tags=["backends"]
+    )
+
+    app.include_router(
+        llm_config.router,
+        prefix=f"{settings.API_V1_STR}/observe",
+        tags=["llm-config"]
     )
 
     app.include_router(

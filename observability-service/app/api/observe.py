@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..models.backend_config import ObservabilityBackend
+from ..models.llm_provider import LLMProvider, TenantLLMSelection
 from ..models.observation_session import ObservationSession
 from ..models.observation_query import ObservationQuery
 from ..schemas.observe import ObserveRequest, ObserveResponse, ObserveErrorResponse
@@ -21,6 +22,62 @@ from ..services.agent_service import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _load_llm_config(tenant_id: str, db: Session) -> LLMConfig:
+    """Load LLM config for a tenant.
+
+    Priority:
+    1. tenant_llm_selections → llm_providers (new tables)
+    2. observability_backends with backend_type='llm' (legacy)
+    3. Default OpenAI config
+    """
+    # 1. Check new tenant LLM selection
+    selection = db.query(TenantLLMSelection).filter(
+        TenantLLMSelection.tenant_id == tenant_id,
+        TenantLLMSelection.is_active == True,
+    ).first()
+
+    if selection and selection.llm_provider:
+        provider = selection.llm_provider
+        if provider.is_active:
+            # Resolve API key: tenant override → system-level → None
+            api_key = None
+            if selection.api_key_encrypted:
+                creds = credential_service.decrypt(selection.api_key_encrypted)
+                api_key = creds.get("api_key") if creds else None
+            elif provider.api_key_encrypted:
+                creds = credential_service.decrypt(provider.api_key_encrypted)
+                api_key = creds.get("api_key") if creds else None
+
+            return LLMConfig(
+                provider=provider.provider,
+                model=provider.model_id,
+                api_key=api_key,
+                base_url=provider.base_url,
+                temperature=selection.temperature,
+            )
+
+    # 2. Legacy: observability_backends with backend_type='llm'
+    legacy = db.query(ObservabilityBackend).filter(
+        ObservabilityBackend.tenant_id == tenant_id,
+        ObservabilityBackend.backend_type == "llm",
+        ObservabilityBackend.is_active == True,
+    ).first()
+
+    if legacy and legacy.credentials_encrypted:
+        creds = credential_service.decrypt(legacy.credentials_encrypted)
+        if creds:
+            return LLMConfig(
+                provider=creds.get("provider", "openai"),
+                model=creds.get("model", "gpt-4o"),
+                api_key=creds.get("api_key"),
+                base_url=creds.get("base_url") or legacy.url,
+                temperature=creds.get("temperature", 0),
+            )
+
+    # 3. Default
+    return LLMConfig()
 
 
 def _load_backend_configs(
@@ -39,33 +96,23 @@ def _load_backend_configs(
         )
 
     backend_configs = {}
-    llm_config = LLMConfig()  # Default to OpenAI
-
     for backend in backends:
-        # Decrypt credentials
+        if backend.backend_type == "llm":
+            continue  # LLM config loaded separately
+
         creds = None
         if backend.credentials_encrypted:
             creds = credential_service.decrypt(backend.credentials_encrypted)
 
-        if backend.backend_type == "llm":
-            # LLM provider config
-            if creds:
-                llm_config = LLMConfig(
-                    provider=creds.get("provider", "openai"),
-                    model=creds.get("model", "gpt-4o"),
-                    api_key=creds.get("api_key"),
-                    base_url=creds.get("base_url") or backend.url,
-                    temperature=creds.get("temperature", 0)
-                )
-        else:
-            backend_configs[backend.backend_type] = BackendConfig(
-                url=backend.url,
-                auth_type=backend.auth_type,
-                credentials=creds,
-                verify_ssl=backend.verify_ssl,
-                timeout_seconds=backend.timeout_seconds
-            )
+        backend_configs[backend.backend_type] = BackendConfig(
+            url=backend.url,
+            auth_type=backend.auth_type,
+            credentials=creds,
+            verify_ssl=backend.verify_ssl,
+            timeout_seconds=backend.timeout_seconds,
+        )
 
+    llm_config = _load_llm_config(tenant_id, db)
     return backend_configs, llm_config
 
 
@@ -90,7 +137,10 @@ async def query_observability(
             detail="Cannot query observability for other tenants"
         )
 
-    # Get or create session
+    # Get or create observability session
+    # Note: the caller (e.g. chat service) may pass its own session_id which won't
+    # exist in the observability DB. In that case, create a new observability session
+    # and link it via chat_session_id for correlation.
     session_id = request.session_id
     if session_id:
         session = db.query(ObservationSession).filter(
@@ -98,10 +148,15 @@ async def query_observability(
             ObservationSession.tenant_id == tenant_id
         ).first()
         if not session:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session {session_id} not found"
+            # Session ID is from another service (e.g. chat) — create a new
+            # observability session linked to it
+            session = ObservationSession(
+                tenant_id=tenant_id,
+                chat_session_id=session_id
             )
+            db.add(session)
+            db.flush()
+            session_id = session.id
     else:
         session = ObservationSession(
             tenant_id=tenant_id
@@ -122,6 +177,12 @@ async def query_observability(
         conversation_history=request.conversation_history
     )
 
+    logger.info(
+        f"Agent finished for tenant {tenant_id}: status={result.status}, "
+        f"response_length={len(result.response)}, tool_calls={len(result.tool_calls)}, "
+        f"duration={result.total_duration_ms:.0f}ms"
+    )
+
     # Save query record
     query_record = ObservationQuery(
         id=query_id,
@@ -137,6 +198,7 @@ async def query_observability(
     )
     db.add(query_record)
     db.commit()
+    logger.info(f"Query record saved: {query_id}")
 
     if result.status == "error":
         logger.error(
@@ -148,6 +210,7 @@ async def query_observability(
             detail=result.error_message or "Agent query failed"
         )
 
+    logger.info(f"Returning response for query {query_id}")
     return ObserveResponse(
         response=result.response,
         tool_calls=[

@@ -43,7 +43,7 @@ class PrometheusAlertsTool(BaseTool):
                 params["filter"] = filter
 
             response = httpx.get(
-                f"{self.config.url}/api/v1/alerts",
+                f"{self.config.url}/api/v2/alerts",
                 params=params,
                 headers=self.config.get_headers(),
                 verify=self.config.verify_ssl,
@@ -55,11 +55,9 @@ class PrometheusAlertsTool(BaseTool):
                 return f"AlertManager returned status {response.status_code}: {response.text[:500]}"
 
             data = response.json()
-            alerts = data.get("data", data) if isinstance(data, dict) else data
 
-            # Handle both AlertManager v1 and v2 response formats
-            if isinstance(alerts, dict):
-                alerts = alerts.get("alerts", alerts.get("data", []))
+            # v2 API returns a flat list of alert objects directly
+            alerts = data if isinstance(data, list) else data.get("data", data.get("alerts", []))
             if not isinstance(alerts, list):
                 alerts = [alerts]
 

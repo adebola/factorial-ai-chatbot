@@ -220,3 +220,21 @@ async def validate_token_or_api_key(
         detail="Authentication required: provide Bearer token or X-API-Key header",
         headers={"WWW-Authenticate": "Bearer, ApiKey"}
     )
+
+
+async def require_service_access(
+    claims: TokenClaims = Depends(validate_token_or_api_key),
+) -> TokenClaims:
+    """
+    Ensure the tenant has the 'observability' agentic service assigned.
+    Fail-closed: denies access if billing service is unreachable and cache is empty.
+    """
+    from .billing_client import check_service_access
+
+    allowed, config, reason = await check_service_access(claims.tenant_id, "observability")
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=reason or "Service not assigned to tenant",
+        )
+    return claims

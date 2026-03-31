@@ -13,6 +13,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, Tool
 
 from ..tools.base import BackendConfig
 from ..tools.prometheus_query import PrometheusQueryTool
+from ..tools.prometheus_discovery import PrometheusMetricDiscoveryTool
 from ..tools.prometheus_alerts import PrometheusAlertsTool
 from ..tools.elasticsearch_search import ElasticsearchSearchTool
 from ..tools.jaeger_traces import JaegerTracesTool
@@ -22,7 +23,33 @@ from ..tools.otel_metrics import OtelMetricsTool
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are an expert SRE assistant with access to observability tools for monitoring \
-Kubernetes infrastructure and microservices.
+infrastructure and microservices.
+
+IMPORTANT - Prometheus metrics workflow (follow these steps in order):
+1. ALWAYS call prometheus_metric_discovery FIRST to find metric names. Do NOT guess metric names.
+2. Before adding label filters, call prometheus_metric_discovery with metric_name="<exact_metric>" to discover \
+available labels and their values. Do NOT guess label names like "pod" or "namespace" - different exporters use \
+different labels (e.g. Spring Boot uses "application", "instance"; node_exporter uses "job", "instance").
+3. The prometheus_query tool requires valid PromQL syntax - never pass natural language to it.
+4. Use the exact metric names and label keys/values from discovery to construct PromQL:
+   - Counters (ending in _total or _count): wrap with rate() or increase(), e.g. rate(http_requests_total[5m])
+   - Gauges (e.g. process_cpu_usage, jvm_memory_used_bytes): query directly or use avg_over_time()
+   - Histograms (_bucket suffix): use histogram_quantile() with rate()
+5. If a query returns no results, re-check labels with discovery (metric_name=...) and retry with corrected filters
+
+Efficiency tips (to minimize tool calls):
+- Once you discover labels for one metric from a service, REUSE those same label keys/values for other \
+metrics from the same service. For example, if process_cpu_usage has {application="order-service"}, then \
+jvm_memory_used_bytes from the same service will also use {application="order-service"}.
+- When asked about multiple metric types (e.g. CPU AND memory), discover ALL metric names in one call \
+(without category filter or use name_pattern), then reuse labels across queries.
+- JVM memory metrics (jvm_memory_used_bytes, jvm_memory_committed_bytes, jvm_memory_max_bytes) often have \
+an "area" label with values "heap" and "nonheap". Query with area="heap" for main application memory.
+
+IMPORTANT - Kubernetes resource lookups:
+- Pod names in Kubernetes include random suffixes (e.g. order-service-7f8b9c6d4-x2k9m)
+- The k8s_resources tool supports prefix/substring matching - pass the service name (e.g. "order-service") and it will match the full pod name
+- Use action="list" with the name filter to see all matching pods before using "describe" or "logs"
 
 When investigating issues:
 1. Start with metrics and alerts for the big picture
@@ -77,7 +104,7 @@ def _create_llm(config: LLMConfig):
                 temperature=config.temperature
             )
         case "ollama":
-            from langchain_community.chat_models import ChatOllama
+            from langchain_ollama import ChatOllama
             return ChatOllama(
                 model=config.model,
                 base_url=config.base_url or os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434"),
@@ -101,6 +128,7 @@ def _build_tools(backend_configs: Dict[str, BackendConfig]) -> list:
     tools = []
 
     if "prometheus" in backend_configs:
+        tools.append(PrometheusMetricDiscoveryTool(config=backend_configs["prometheus"]))
         tools.append(PrometheusQueryTool(config=backend_configs["prometheus"]))
 
     if "alertmanager" in backend_configs:
@@ -167,15 +195,30 @@ async def execute_agent_query(
         messages.append(HumanMessage(content=message))
 
         # Execute the agent with recursion limit (controls max tool iterations)
+        # Each tool call uses ~2 graph steps (LLM node + tool node).
+        # Complex queries (K8s + multiple metrics) need 7+ tool calls.
         result = await agent.ainvoke(
             {"messages": messages},
-            config={"recursion_limit": 16}
+            config={"recursion_limit": 40}
         )
 
-        # Extract tool call details from message history
-        for msg in result.get("messages", []):
+        # Extract tool call details and log LLM reasoning chain
+        all_messages = result.get("messages", [])
+        step = 0
+        for msg in all_messages:
             if isinstance(msg, AIMessage) and msg.tool_calls:
+                step += 1
+                # Log the LLM's reasoning before tool invocation
+                if msg.content:
+                    logger.debug(
+                        f"[Step {step}] LLM reasoning: {msg.content}",
+                        extra={"step": step, "tool_count": len(msg.tool_calls)}
+                    )
                 for tc in msg.tool_calls:
+                    logger.debug(
+                        f"[Step {step}] LLM decided to call: {tc['name']}({tc['args']})",
+                        extra={"step": step, "tool": tc["name"], "tool_args": tc["args"]}
+                    )
                     tool_calls.append({
                         "tool": tc["name"],
                         "input": tc["args"] if isinstance(tc["args"], dict) else {"query": tc["args"]},
@@ -183,6 +226,12 @@ async def execute_agent_query(
                         "duration_ms": 0
                     })
             elif isinstance(msg, ToolMessage):
+                # Log tool result preview
+                result_preview = str(msg.content)[:300]
+                logger.debug(
+                    f"[Step {step}] Tool result [{msg.name}]: {result_preview}",
+                    extra={"step": step, "tool": msg.name, "result_length": len(str(msg.content))}
+                )
                 # Match tool message to the last tool call with empty output
                 for tc_detail in reversed(tool_calls):
                     if tc_detail["output"] == "" and tc_detail["tool"] == msg.name:
@@ -191,12 +240,38 @@ async def execute_agent_query(
 
         # Get the final AI response (last AIMessage without tool calls)
         response_text = ""
-        for msg in reversed(result.get("messages", [])):
-            if isinstance(msg, AIMessage) and not msg.tool_calls:
+        for msg in reversed(all_messages):
+            if isinstance(msg, AIMessage) and not msg.tool_calls and msg.content:
                 response_text = msg.content
                 break
 
+        # Fallback: if the LLM didn't produce a final summary (common with smaller
+        # local models), synthesise a response from tool call outputs so the user
+        # still gets useful information.
+        if not response_text and tool_calls:
+            logger.warning(f"The LLM did produce a final summary Provider: {llm_config.provider}, Model {llm_config.model}")
+            parts = []
+            for tc in tool_calls:
+                output = tc.get("output", "")
+                if output:
+                    parts.append(f"**{tc['tool']}** ({', '.join(f'{k}={v}' for k, v in tc['input'].items())}):\n{output}")
+            if parts:
+                response_text = "Here are the results from the observability tools:\n\n" + "\n\n".join(parts)
+
         total_duration_ms = (time.time() - start_time) * 1000
+
+        # Log agent loop summary
+        tool_names = [tc["tool"] for tc in tool_calls]
+        logger.debug(
+            f"Agent completed: {len(all_messages)} messages, {len(tool_calls)} tool calls "
+            f"{tool_names}, {total_duration_ms:.0f}ms",
+            extra={
+                "message_count": len(all_messages),
+                "tool_count": len(tool_calls),
+                "tools_used": tool_names,
+                "duration_ms": total_duration_ms
+            }
+        )
 
         return AgentResult(
             response=response_text,
