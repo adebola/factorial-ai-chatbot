@@ -12,7 +12,7 @@ from ..models.chat_models import ChatSession, ChatMessage
 from ..services.chat_service import ChatService
 from ..services.tenant_client import TenantClient
 from ..services.workflow_client import WorkflowClient
-from ..services.observability_client import ObservabilityClient
+from ..services.agentic_client import AgenticServiceClient
 from ..services.event_publisher import event_publisher
 from ..services.usage_cache import usage_cache
 from ..services.session_auth_service import session_auth_service
@@ -77,7 +77,7 @@ class ChatWebSocket:
         self.tenant_client = TenantClient()
         self.chat_service = ChatService(db)
         self.workflow_client = None  # Will be initialized with API key after tenant is identified
-        self.observability_client = None  # Will be initialized alongside workflow client
+        self.agentic_client = None  # Will be initialized alongside workflow client
     
     def _get_current_access_token(self, session_id: str) -> Optional[str]:
         """Read access token from Redis per-use (not cached) so refreshed tokens are picked up."""
@@ -232,7 +232,7 @@ class ChatWebSocket:
         # Initialize workflow client with tenant's API key
         tenant_api_key = tenant.get("api_key") or api_key  # Use tenant's API key from the tenant object, or the one provided
         self.workflow_client = WorkflowClient(api_key=tenant_api_key)
-        self.observability_client = ObservabilityClient(api_key=tenant_api_key)
+        self.agentic_client = AgenticServiceClient(api_key=tenant_api_key)
 
         tenant_id = tenant["id"]  # tenant is now a dict from HTTP API
 
@@ -549,63 +549,60 @@ class ChatWebSocket:
                                 )
                                 # Fall through to normal processing
 
-                # === Observability mode check (before workflow/RAG) ===
-                is_observability = False
+                # === Agentic service check (before workflow/RAG) ===
+                agentic_handled = False
+                agentic_service = None
                 try:
-                    is_observability = await self.observability_client.is_observability_tenant(tenant_id)
+                    agentic_service = await self.agentic_client.get_active_service(tenant_id)
                 except Exception:
-                    is_observability = False
+                    pass  # Fail-open
 
-                if is_observability:
+                if agentic_service and self.agentic_client.matches_triggers(user_message, agentic_service):
                     try:
-                        obs_result = await self.observability_client.query(
+                        agentic_result = await self.agentic_client.query_service(
+                            service_info=agentic_service,
                             tenant_id=tenant_id,
                             session_id=session_id,
                             message=user_message,
                             access_token=self._get_current_access_token(session_id) if self._is_authenticated else None
                         )
                         ai_response = {
-                            "content": obs_result.get("response", ""),
+                            "content": agentic_result.get("response", ""),
                             "metadata": {
-                                "observability_query": True,
-                                "tool_calls": obs_result.get("tool_calls", []),
-                                "query_id": obs_result.get("query_id"),
-                                "total_duration_ms": obs_result.get("total_duration_ms")
+                                "agentic_service": agentic_service["service_key"],
+                                "service_name": agentic_service.get("service_name"),
+                                "tool_calls": agentic_result.get("tool_calls", []),
+                                "query_id": agentic_result.get("query_id"),
+                                "total_duration_ms": agentic_result.get("total_duration_ms")
                             }
                         }
-                        # Save message and send response using existing patterns below
                         t_workflow_state = time.time()
                         t_trigger_or_step = t_workflow_state
                         t_ai = t_workflow_state
-                        timing_path = "observability"
+                        timing_path = "agentic"
+                        agentic_handled = True
                     except Exception as e:
-                        logger.error("Observability query failed, falling back to RAG", error=str(e), tenant_id=tenant_id)
-                        is_observability = False
-
-                if not is_observability:
-                    # === Normal path: workflow check + RAG ===
-                    pass
+                        logger.error("Agentic service query failed, falling back to RAG",
+                                     error=str(e), tenant_id=tenant_id,
+                                     service_key=agentic_service.get("service_key"))
 
                 # Check if tenant has any workflows at all (Redis-cached)
-                if not is_observability:
+                if not agentic_handled:
                     try:
                         tenant_has_workflows = await self.workflow_client.has_workflows(tenant_id)
                     except Exception:
                         tenant_has_workflows = True  # Fail open
                 else:
-                    tenant_has_workflows = False  # Skip workflow check for observability tenants
+                    tenant_has_workflows = False
 
                 try:
                     response_msg = None
-                    if not is_observability:
+                    if not agentic_handled:
                         ai_response = None
 
-                    if is_observability:
-                        # Observability response already set above
-                        t_workflow_state = time.time()
-                        t_trigger_or_step = t_workflow_state
-                        t_ai = t_workflow_state
-                        timing_path = "observability"
+                    if agentic_handled:
+                        # Agentic response already set above
+                        pass
                     elif not tenant_has_workflows:
                         # Fast path: skip both workflow HTTP calls, go straight to AI
                         t_workflow_state = time.time()
@@ -744,8 +741,7 @@ class ChatWebSocket:
                                         execution_result, user_message, tenant_id, session_id, tenant,
                                         workflow_id=trigger_result["workflow_id"],
                                         workflow_name=trigger_result.get("workflow_name"),
-                                        source="trigger"
-                                    )
+                                        source="trigger"                                    )
                                     if ai_response.get("sources"):
                                         t_ai = time.time()
                                         timing_path = "trigger->ai"

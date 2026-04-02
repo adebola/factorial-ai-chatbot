@@ -83,6 +83,17 @@ class ServiceAccessResponse(BaseModel):
     reason: Optional[str] = None
 
 
+# ── Active Agentic Service Check ──
+
+class ActiveAgenticServiceResponse(BaseModel):
+    """Response for checking a tenant's active agentic service."""
+    has_service: bool
+    service_key: Optional[str] = None
+    service_name: Optional[str] = None
+    base_url: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+
+
 # ── Tenant-Facing ──
 
 class TenantServiceResponse(BaseModel):

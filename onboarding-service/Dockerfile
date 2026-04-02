@@ -38,6 +38,9 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Install Playwright Chromium browser binary
+RUN playwright install chromium
+
 # Copy application code
 COPY app /app/app
 COPY onboarding_migrations /app/onborading_migrations

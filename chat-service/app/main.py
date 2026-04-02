@@ -129,13 +129,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception(f"Error closing WorkflowClient session: {e}")
 
-    # Close ObservabilityClient shared session
-    from .services.observability_client import ObservabilityClient
+    # Close AgenticServiceClient shared session
+    from .services.agentic_client import AgenticServiceClient
     try:
-        await ObservabilityClient.close()
-        logger.info("ObservabilityClient session closed successfully")
+        await AgenticServiceClient.close()
+        logger.info("AgenticServiceClient session closed successfully")
     except Exception as e:
-        logger.exception(f"Error closing ObservabilityClient session: {e}")
+        logger.exception(f"Error closing AgenticServiceClient session: {e}")
 
     # Close event publisher
     try:

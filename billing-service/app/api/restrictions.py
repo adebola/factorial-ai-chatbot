@@ -12,7 +12,8 @@ from typing import Optional
 
 from ..core.database import get_db
 from ..services.subscription_checker import SubscriptionChecker, SubscriptionRestrictionError
-from ..schemas.agentic_service import ServiceAccessResponse
+from ..schemas.agentic_service import ServiceAccessResponse, ActiveAgenticServiceResponse
+from ..models.agentic_service import AgenticService, TenantServiceAssignment
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +180,42 @@ async def check_service_access(
         service_key=service_key,
         config=config,
         reason=reason
+    )
+
+
+@router.get("/check/active-agentic/{tenant_id}", response_model=ActiveAgenticServiceResponse)
+async def get_active_agentic_service(
+    tenant_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the active agentic service for a tenant (if any).
+
+    Called by the chat service to determine if a tenant has an agentic service
+    and how to route messages to it. Returns the service details and per-tenant config.
+    This is an internal service-to-service endpoint — no authentication required.
+    """
+    logger.info(f"Checking active agentic service for tenant {tenant_id}")
+
+    result = db.query(TenantServiceAssignment, AgenticService).join(
+        AgenticService, TenantServiceAssignment.service_id == AgenticService.id
+    ).filter(
+        TenantServiceAssignment.tenant_id == tenant_id,
+        TenantServiceAssignment.is_active == True,
+        AgenticService.is_active == True,
+        AgenticService.is_deleted == False,
+    ).first()
+
+    if not result:
+        return ActiveAgenticServiceResponse(has_service=False)
+
+    assignment, service = result
+    return ActiveAgenticServiceResponse(
+        has_service=True,
+        service_key=service.service_key,
+        service_name=service.name,
+        base_url=service.base_url,
+        config=assignment.config,
     )
 
 
