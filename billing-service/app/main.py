@@ -20,7 +20,7 @@ load_dotenv(dotenv_path=env_path, override=True)
 
 from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
-from .api import plans, subscriptions, payments, usage, restrictions, plan_management, invoices, analytics, admin, agentic_services
+from .api import plans, subscriptions, payments, usage, restrictions, plan_management, invoices, analytics, admin, agentic_services, llm_providers
 from .services.usage_consumer import usage_consumer
 from .messaging.user_consumer import user_consumer
 from .services.scheduler import start_scheduler, stop_scheduler
@@ -204,6 +204,12 @@ app.include_router(
     agentic_services.router,
     prefix=f"{settings.API_V1_STR}/admin",
     tags=["agentic-services"]
+)
+
+app.include_router(
+    llm_providers.router,
+    prefix=f"{settings.API_V1_STR}/admin/model-registry",
+    tags=["model-registry"]
 )
 
 

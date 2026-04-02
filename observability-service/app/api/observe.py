@@ -16,6 +16,7 @@ from ..models.observation_query import ObservationQuery
 from ..schemas.observe import ObserveRequest, ObserveResponse, ObserveErrorResponse
 from ..services.dependencies import TokenClaims, validate_token_or_api_key
 from ..services.credential_service import credential_service
+from ..services.response_formatter import format_full_response
 from ..services.agent_service import (
     execute_agent_query, LLMConfig, BackendConfig
 )
@@ -211,17 +212,38 @@ async def query_observability(
         )
 
     logger.info(f"Returning response for query {query_id}")
+
+    # Format tool calls for response
+    formatted_tool_calls = [
+        {
+            "tool": tc["tool"],
+            "input": tc["input"],
+            "output": tc["output"],
+            "duration_ms": tc.get("duration_ms", 0)
+        }
+        for tc in result.tool_calls
+    ]
+
+    # Generate structured content blocks from the response and tool results
+    blocks = format_full_response(result.response, result.tool_calls)
+
+    # Suggest actions based on what was found
+    suggested_actions = []
+    if result.tool_calls:
+        suggested_actions.append("Export as PDF")
+    if any(tc["tool"] in ("prometheus_query", "otel_metrics") for tc in result.tool_calls):
+        suggested_actions.append("View metrics dashboard")
+    if any(tc["tool"] in ("prometheus_alerts",) for tc in result.tool_calls):
+        suggested_actions.append("View all alerts")
+    if any(tc["tool"] in ("search_logs", "elasticsearch_search") for tc in result.tool_calls):
+        suggested_actions.append("Search more logs")
+
     return ObserveResponse(
         response=result.response,
-        tool_calls=[
-            {
-                "tool": tc["tool"],
-                "input": tc["input"],
-                "output": tc["output"],
-                "duration_ms": tc.get("duration_ms", 0)
-            }
-            for tc in result.tool_calls
-        ],
+        response_type="rich",
+        blocks=blocks,
+        tool_calls=formatted_tool_calls,
+        suggested_actions=suggested_actions,
         session_id=session_id,
         query_id=query_id,
         total_duration_ms=result.total_duration_ms,

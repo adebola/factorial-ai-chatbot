@@ -12,7 +12,12 @@ from typing import Optional
 
 from ..core.database import get_db
 from ..services.subscription_checker import SubscriptionChecker, SubscriptionRestrictionError
-from ..schemas.agentic_service import ServiceAccessResponse, ActiveAgenticServiceResponse
+from ..schemas.agentic_service import (
+    ServiceAccessResponse,
+    ActiveAgenticServiceResponse,
+    ActiveAgenticServicesResponse,
+    ActiveAgenticServiceDetail,
+)
 from ..models.agentic_service import AgenticService, TenantServiceAssignment
 
 logger = logging.getLogger(__name__)
@@ -217,6 +222,49 @@ async def get_active_agentic_service(
         base_url=service.base_url,
         config=assignment.config,
     )
+
+
+@router.get("/check/active-agentics/{tenant_id}", response_model=ActiveAgenticServicesResponse)
+async def get_active_agentic_services(
+    tenant_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get ALL active agentic services for a tenant.
+
+    Called by the agent gateway to populate the agent catalog for a tenant.
+    Returns a list of services with their details and per-tenant config.
+    This is an internal service-to-service endpoint — no authentication required.
+    """
+    logger.info(f"Checking active agentic services for tenant {tenant_id}")
+
+    results = db.query(TenantServiceAssignment, AgenticService).join(
+        AgenticService, TenantServiceAssignment.service_id == AgenticService.id
+    ).filter(
+        TenantServiceAssignment.tenant_id == tenant_id,
+        TenantServiceAssignment.is_active == True,
+        AgenticService.is_active == True,
+        AgenticService.is_deleted == False,
+    ).all()
+
+    if not results:
+        return ActiveAgenticServicesResponse(has_services=False)
+
+    services = []
+    for assignment, service in results:
+        services.append(ActiveAgenticServiceDetail(
+            service_key=service.service_key,
+            service_name=service.name,
+            base_url=service.base_url,
+            description=service.description,
+            category=service.category,
+            icon_url=service.icon_url,
+            capabilities=service.capabilities,
+            ui_hints=service.ui_hints,
+            config=assignment.config,
+        ))
+
+    return ActiveAgenticServicesResponse(has_services=True, services=services)
 
 
 @router.get("/usage/{tenant_id}", response_model=UsageSummaryResponse)

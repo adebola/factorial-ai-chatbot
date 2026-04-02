@@ -14,6 +14,9 @@ class ServiceCreateRequest(BaseModel):
     base_url: Optional[str] = None
     health_check_url: Optional[str] = None
     category: str = Field(default="agentic", max_length=50)
+    icon_url: Optional[str] = None
+    capabilities: Optional[Dict[str, Any]] = None
+    ui_hints: Optional[Dict[str, Any]] = None
 
 
 class ServiceUpdateRequest(BaseModel):
@@ -23,6 +26,9 @@ class ServiceUpdateRequest(BaseModel):
     health_check_url: Optional[str] = None
     category: Optional[str] = Field(None, max_length=50)
     is_active: Optional[bool] = None
+    icon_url: Optional[str] = None
+    capabilities: Optional[Dict[str, Any]] = None
+    ui_hints: Optional[Dict[str, Any]] = None
 
 
 class ServiceResponse(BaseModel):
@@ -33,6 +39,9 @@ class ServiceResponse(BaseModel):
     base_url: Optional[str] = None
     health_check_url: Optional[str] = None
     category: str
+    icon_url: Optional[str] = None
+    capabilities: Optional[Dict[str, Any]] = None
+    ui_hints: Optional[Dict[str, Any]] = None
     is_active: bool
     tenant_count: int = 0
     created_at: datetime
@@ -106,3 +115,24 @@ class TenantServiceResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ── Multi-Agent Tenant Lookup ──
+
+class ActiveAgenticServiceDetail(BaseModel):
+    """Detail for a single active agentic service assigned to a tenant."""
+    service_key: str
+    service_name: str
+    base_url: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    icon_url: Optional[str] = None
+    capabilities: Optional[Dict[str, Any]] = None
+    ui_hints: Optional[Dict[str, Any]] = None
+    config: Optional[Dict[str, Any]] = None
+
+
+class ActiveAgenticServicesResponse(BaseModel):
+    """Response for checking all active agentic services for a tenant."""
+    has_services: bool
+    services: List[ActiveAgenticServiceDetail] = []

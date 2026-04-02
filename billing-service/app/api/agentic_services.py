@@ -44,6 +44,9 @@ def _service_to_response(service: AgenticService, db: Session) -> ServiceRespons
         base_url=service.base_url,
         health_check_url=service.health_check_url,
         category=service.category,
+        icon_url=service.icon_url,
+        capabilities=service.capabilities,
+        ui_hints=service.ui_hints,
         is_active=service.is_active,
         tenant_count=tenant_count,
         created_at=service.created_at,
@@ -106,6 +109,9 @@ async def create_service(
         base_url=request.base_url,
         health_check_url=request.health_check_url,
         category=request.category,
+        icon_url=request.icon_url,
+        capabilities=request.capabilities,
+        ui_hints=request.ui_hints,
     )
     db.add(service)
     db.commit()

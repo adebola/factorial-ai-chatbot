@@ -198,6 +198,19 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            # Agent Chat Routes (WebSocket + REST)
+            - id: agent-chat-websocket
+              uri: ws://chat-service:8000
+              predicates:
+                - Path=/ws/agent/**
+
+            - id: agent-chat-api
+              uri: http://chat-service:8000
+              predicates:
+                - Path=/api/v1/agent/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             # Communications Service Routes
             - id: communications-email
               uri: http://communications-service:8000
@@ -318,6 +331,22 @@ spring:
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+            # Billing Service - Model Registry Admin (root)
+            - id: admin-model-registry-root
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/api/v1/admin/model-registry
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Billing Service - Model Registry Admin (sub-paths)
+            - id: admin-model-registry
+              uri: http://billing-service:8000
+              predicates:
+                - Path=/api/v1/admin/model-registry/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             # Authorization Server - Tenant Management (root path)
             - id: admin-tenants-root
               uri: http://authorization-service:9000
@@ -367,6 +396,14 @@ spring:
               uri: http://chat-service:8000
               predicates:
                 - Path=/api/v1/admin/chat-monitoring/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+            # Chat Service - Agent Session Admin
+            - id: admin-agent-sessions
+              uri: http://chat-service:8000
+              predicates:
+                - Path=/api/v1/admin/agent-sessions/**,/api/v1/admin/agent-stats/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 

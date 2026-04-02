@@ -19,10 +19,26 @@ class ToolCallDetail(BaseModel):
     duration_ms: float
 
 
+class ContentBlock(BaseModel):
+    """A single renderable content block in a rich agent response."""
+    type: str                                      # text, table, chart, diagram, code, image, alert
+    content: Optional[str] = None
+    data: Optional[Dict[str, Any]] = None
+    language: Optional[str] = None
+    format: Optional[str] = None
+    chart_type: Optional[str] = None
+    url: Optional[str] = None
+    alt: Optional[str] = None
+    severity: Optional[str] = None
+
+
 class ObserveResponse(BaseModel):
     """Response from the observability agent."""
     response: str
+    response_type: str = "rich"
+    blocks: List[ContentBlock] = []
     tool_calls: List[ToolCallDetail] = []
+    suggested_actions: List[str] = []
     session_id: str
     query_id: str
     total_duration_ms: float

@@ -12,6 +12,8 @@ from .api.admin_chat import router as admin_chat_router
 from .api.auth import router as auth_router
 from .api.admin_token_usage import router as admin_token_usage_router
 from .api.admin_chat_monitoring import router as admin_chat_monitoring_router
+from .websockets.agent_chat import agent_websocket_endpoint, agent_chat_router
+from .api.agent_admin import router as agent_admin_router
 from .core.config import settings
 from .core.logging_config import (
     setup_logging,
@@ -137,6 +139,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception(f"Error closing AgenticServiceClient session: {e}")
 
+    # Close agent session service Redis connection
+    from .services.agent_session_service import agent_session_service
+    try:
+        await agent_session_service.close()
+        logger.info("AgentSessionService Redis closed successfully")
+    except Exception as e:
+        logger.exception(f"Error closing AgentSessionService: {e}")
+
     # Close event publisher
     try:
         await event_publisher.close()
@@ -238,6 +248,11 @@ app.include_router(admin_chat_monitoring_router, prefix=f"{settings.API_V1_STR}/
 
 # Also include WebSocket route at root level for easier client access
 app.include_router(chat_router)
+
+# Agent chat: WebSocket + REST API
+app.add_api_websocket_route("/ws/agent/{service_key}", agent_websocket_endpoint)
+app.include_router(agent_chat_router, prefix=f"{settings.API_V1_STR}/agent", tags=["agent-chat"])
+app.include_router(agent_admin_router, prefix=f"{settings.API_V1_STR}/admin", tags=["agent-admin"])
 
 
 @app.get("/")
