@@ -2,6 +2,7 @@ package io.factorialsystems.authorizationserver2.config;
 
 import io.factorialsystems.authorizationserver2.model.Role;
 import io.factorialsystems.authorizationserver2.security.CustomAuthenticationFailureHandler;
+import io.factorialsystems.authorizationserver2.security.CustomAuthenticationSuccessHandler;
 import io.factorialsystems.authorizationserver2.service.DatabaseUserDetailsService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -98,7 +99,8 @@ public class SecurityConfig {
 	SecurityFilterChain defaultSecurityFilterChain(
 			HttpSecurity http,
 			AuthenticationManager authenticationManager,
-			CustomAuthenticationFailureHandler customAuthenticationFailureHandler)
+			CustomAuthenticationFailureHandler customAuthenticationFailureHandler,
+			CustomAuthenticationSuccessHandler customAuthenticationSuccessHandler)
 			throws Exception {
 		http
 			.cors(withDefaults()) // Enable CORS for default endpoints
@@ -108,7 +110,8 @@ public class SecurityConfig {
 			.authenticationManager(authenticationManager) // Use configured AuthenticationManager
 			.formLogin(formLogin -> formLogin
 				.loginPage("/login")
-				.failureHandler(customAuthenticationFailureHandler) // Use custom failure handler
+				.successHandler(customAuthenticationSuccessHandler) // Publish login.success audit event
+				.failureHandler(customAuthenticationFailureHandler) // Publish login.failed audit event
 				.permitAll()
 			);
 		return http.build();

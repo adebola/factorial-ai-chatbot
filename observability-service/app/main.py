@@ -7,6 +7,8 @@ load_dotenv()
 
 from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
+from .core.telemetry import setup_telemetry
+from .services.audit_publisher import audit_publisher
 from .api import observe, sessions, backends, llm_config, health
 
 
@@ -15,7 +17,20 @@ async def lifespan(app: FastAPI):
     logger = get_logger("main")
     logger.info("Starting Observability Service", version="1.0.0")
 
+    # Connect audit publisher
+    try:
+        await audit_publisher.connect()
+        logger.info("Audit publisher connected")
+    except Exception as e:
+        logger.warning(f"Audit publisher connection failed (non-critical): {e}")
+
     yield
+
+    # Close audit publisher
+    try:
+        await audit_publisher.close()
+    except Exception:
+        pass
 
     logger.info("Shutting down Observability Service")
 
@@ -33,6 +48,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         redirect_slashes=True
     )
+
+    # OpenTelemetry instrumentation
+    setup_telemetry(app, service_name="observability-service")
 
     # Include routers
     app.include_router(

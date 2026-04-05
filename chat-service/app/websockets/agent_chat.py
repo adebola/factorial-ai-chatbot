@@ -26,6 +26,7 @@ from ..models.agent_models import AgentSession, AgentMessage
 from ..services.agent_session_service import agent_session_service
 from ..services.context_builder import count_tokens, build_context
 from ..services.dependencies import TokenClaims, validate_token
+from ..services.audit_publisher import audit_publisher
 from ..services.jwt_validator import jwt_validator
 
 logger = get_logger("agent_ws")
@@ -108,6 +109,23 @@ class AgentChatHandler:
             model_name=service_info.get("config", {}).get("model_name"),
             context_limit_tokens=context_limit,
         )
+
+        # Audit: new session created
+        if is_new:
+            try:
+                await audit_publisher.publish(
+                    action_type="agent.session.created",
+                    tier="data",
+                    source_service="chat-service",
+                    tenant_id=tenant_id,
+                    actor_user_id=user_id,
+                    actor_email=claims.email,
+                    resource_type="agent_session",
+                    resource_id=session.id,
+                    after_state={"service_key": service_key},
+                )
+            except Exception:
+                pass  # Never break business logic
 
         # 4. Connect
         await agent_manager.connect(websocket, session.id)
@@ -219,6 +237,22 @@ class AgentChatHandler:
                 "has_context_summary": context_summary is not None,
                 "message": "Context limit reached. Continuing in new session.",
             }))
+
+            # Audit: session overflow
+            try:
+                await audit_publisher.publish(
+                    action_type="agent.session.overflow",
+                    tier="data",
+                    source_service="chat-service",
+                    tenant_id=session.tenant_id,
+                    actor_user_id=session.user_id,
+                    resource_type="agent_session",
+                    resource_id=new_session.id,
+                    before_state={"old_session_id": session.id},
+                    after_state={"has_context_summary": context_summary is not None},
+                )
+            except Exception:
+                pass  # Never break business logic
 
             # Update local reference
             agent_manager.disconnect(session.id)
@@ -659,6 +693,22 @@ async def export_session(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Export failed: {str(e)}",
         )
+
+    # Audit: export requested
+    try:
+        await audit_publisher.publish(
+            action_type="agent.export.requested",
+            tier="data",
+            source_service="chat-service",
+            tenant_id=claims.tenant_id,
+            actor_user_id=claims.user_id,
+            actor_email=claims.email,
+            resource_type="agent_session",
+            resource_id=session_id,
+            after_state={"format": format},
+        )
+    except Exception:
+        pass  # Never break business logic
 
     filename = f"session-{session_id[:8]}.{format}"
     return StreamingResponse(

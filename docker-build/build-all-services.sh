@@ -175,6 +175,11 @@ build_service "observability-service" \
     "docker-build/dockerfiles/observability-service.Dockerfile" \
     "."
 
+# Audit Service
+build_service "audit-service" \
+    "docker-build/dockerfiles/audit-service.Dockerfile" \
+    "."
+
 # Build Java services
 echo -e "\n${YELLOW}=== Building Java Services ===${NC}"
 
@@ -211,6 +216,7 @@ if $SAVE_IMAGES; then
     docker save -o docker-images/billing-service.tar ${DOCKER_REGISTRY}/billing-service:${VERSION}
     docker save -o docker-images/workflow-service.tar ${DOCKER_REGISTRY}/workflow-service:${VERSION}
     docker save -o docker-images/observability-service.tar ${DOCKER_REGISTRY}/observability-service:${VERSION}
+    docker save -o docker-images/audit-service.tar ${DOCKER_REGISTRY}/audit-service:${VERSION}
     docker save -o docker-images/authorization-server.tar ${DOCKER_REGISTRY}/ai-authorization-server:${VERSION}
 
     echo -e "${GREEN}Images saved to docker-images/ directory${NC}"

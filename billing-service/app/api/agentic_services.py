@@ -23,6 +23,7 @@ from ..schemas.agentic_service import (
     AssignmentResponse,
     TenantServiceResponse,
 )
+from ..services.audit_publisher import audit_publisher
 from ..services.dependencies import TokenClaims, require_system_admin
 
 logger = logging.getLogger(__name__)
@@ -254,6 +255,20 @@ async def assign_service_to_tenant(
         db.refresh(existing)
         _invalidate_service_cache(request.tenant_id, service.service_key)
         logger.info(f"Service '{service.service_key}' re-assigned to tenant {request.tenant_id} by {claims.email}")
+        try:
+            await audit_publisher.publish(
+                action_type="service.assigned",
+                tier="data",
+                source_service="billing-service",
+                tenant_id=request.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="tenant_service_assignment",
+                resource_id=existing.id,
+                after_state={"service_key": service.service_key, "reactivated": True},
+            )
+        except Exception:
+            pass
         return AssignmentResponse.from_orm(existing)
 
     assignment = TenantServiceAssignment(
@@ -270,6 +285,20 @@ async def assign_service_to_tenant(
 
     _invalidate_service_cache(request.tenant_id, service.service_key)
     logger.info(f"Service '{service.service_key}' assigned to tenant {request.tenant_id} by {claims.email}")
+    try:
+        await audit_publisher.publish(
+            action_type="service.assigned",
+            tier="data",
+            source_service="billing-service",
+            tenant_id=request.tenant_id,
+            actor_user_id=claims.user_id,
+            actor_email=claims.email,
+            resource_type="tenant_service_assignment",
+            resource_id=assignment.id,
+            after_state={"service_key": service.service_key, "reactivated": False},
+        )
+    except Exception:
+        pass
     return AssignmentResponse.from_orm(assignment)
 
 
@@ -299,6 +328,20 @@ async def revoke_service_from_tenant(
 
     _invalidate_service_cache(tenant_id, service.service_key)
     logger.info(f"Service '{service.service_key}' revoked from tenant {tenant_id} by {claims.email}")
+    try:
+        await audit_publisher.publish(
+            action_type="service.revoked",
+            tier="data",
+            source_service="billing-service",
+            tenant_id=tenant_id,
+            actor_user_id=claims.user_id,
+            actor_email=claims.email,
+            resource_type="tenant_service_assignment",
+            resource_id=assignment.id,
+            after_state={"service_key": service.service_key, "is_active": False},
+        )
+    except Exception:
+        pass
 
 
 @router.put("/services/{service_id}/assign/{tenant_id}", response_model=AssignmentResponse)

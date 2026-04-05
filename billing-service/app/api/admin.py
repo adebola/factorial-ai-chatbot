@@ -23,6 +23,7 @@ from ..models.subscription import (
 )
 from ..models.plan import Plan
 
+from ..services.audit_publisher import audit_publisher
 from ..services.dependencies import get_full_tenant_details
 from ..core.logging_config import get_logger
 
@@ -643,6 +644,31 @@ async def create_manual_payment(
             }
         )
 
+        try:
+            await audit_publisher.publish(
+                action_type="admin.action",
+                tier="security",
+                source_service="billing-service",
+                tenant_id=payment_data.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="payment",
+                resource_id=result["payment_id"],
+                before_state=before_state,
+                after_state=after_state,
+                event_metadata={
+                    "admin_action": "manual_payment",
+                    "amount": float(payment_data.amount),
+                    "payment_method": payment_data.payment_method,
+                    "reference_number": payment_data.reference_number,
+                    "extension_days": payment_data.extension_days,
+                },
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        except Exception:
+            pass
+
         # TODO: Send confirmation email if requested
         # if payment_data.send_confirmation_email:
         #     email_publisher.publish_manual_payment_confirmation(...)
@@ -783,6 +809,31 @@ async def override_subscription(
                 "usage_limit_overrides": override_data.usage_limit_overrides,
             }
         )
+
+        try:
+            await audit_publisher.publish(
+                action_type="admin.action",
+                tier="security",
+                source_service="billing-service",
+                tenant_id=subscription.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="subscription",
+                resource_id=subscription_id,
+                before_state=before_state,
+                after_state=after_state,
+                event_metadata={
+                    "admin_action": "subscription_override",
+                    "new_plan_id": override_data.new_plan_id,
+                    "custom_expiration": override_data.custom_expiration.isoformat() if override_data.custom_expiration else None,
+                    "trial_extension_days": override_data.trial_extension_days,
+                    "usage_limit_overrides": override_data.usage_limit_overrides,
+                },
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        except Exception:
+            pass
 
         return {
             "success": True,
@@ -1063,6 +1114,32 @@ async def execute_plan_migration(
                 "notes": migration_data.notes,
             }
         )
+
+        try:
+            await audit_publisher.publish(
+                action_type="admin.action",
+                tier="security",
+                source_service="billing-service",
+                tenant_id=result["tenant_id"],
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="subscription",
+                resource_id=subscription_id,
+                before_state=before_state,
+                after_state=after_state,
+                event_metadata={
+                    "admin_action": "admin_plan_migration",
+                    "old_plan_name": result.get("old_plan_name"),
+                    "new_plan_name": result.get("new_plan_name"),
+                    "payment_amount": float(migration_data.payment_amount),
+                    "payment_method": migration_data.payment_method,
+                    "is_downgrade": result.get("is_downgrade"),
+                },
+                ip_address=request.client.host if request.client else None,
+                user_agent=request.headers.get("user-agent"),
+            )
+        except Exception:
+            pass
 
         return result
 

@@ -13,9 +13,21 @@ logging:
     org.springframework.cloud.gateway: DEBUG
     reactor.netty: DEBUG
 
+otel:
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
+  logs:
+    exporter: none
+  metrics:
+    exporter: none
+  resource:
+    attributes:
+      service.name: ${OTEL_SERVICE_NAME:authorization-server}
+
 spring:
   application:
-    name: authorization-server2
+    name: authorization-server
   thymeleaf:
     cache: false
   data:

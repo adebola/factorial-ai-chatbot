@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from ..core.database import get_db
 from ..models.plan import Plan
+from ..services.audit_publisher import audit_publisher
 from ..services.dependencies import TokenClaims, validate_token, require_system_admin, logger
 from ..services.plan_service import PlanService
 
@@ -117,7 +118,26 @@ async def create_plan(
             logger.info("Invalidated plan caches after creating new plan")
         except Exception as cache_error:
             logger.warning(f"Failed to invalidate plan cache after creation: {cache_error}")
-        
+
+        try:
+            await audit_publisher.publish(
+                action_type="plan.created",
+                tier="data",
+                source_service="billing-service",
+                tenant_id=claims.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="plan",
+                resource_id=plan.id,
+                after_state={
+                    "name": plan.name,
+                    "monthly_plan_cost": str(plan.monthly_plan_cost),
+                    "yearly_plan_cost": str(plan.yearly_plan_cost),
+                },
+            )
+        except Exception:
+            pass
+
         return {
             "message": "Plan created successfully",
             "plan": {
@@ -406,7 +426,25 @@ async def update_plan(
             logger.info(f"Invalidated plan caches after updating plan: {plan_id}")
         except Exception as cache_error:
             logger.warning(f"Failed to invalidate plan cache after update: {cache_error}")
-        
+
+        try:
+            await audit_publisher.publish(
+                action_type="plan.updated",
+                tier="data",
+                source_service="billing-service",
+                tenant_id=claims.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="plan",
+                resource_id=plan.id,
+                after_state={
+                    "name": plan.name,
+                    "updated_fields": list(update_data.keys()),
+                },
+            )
+        except Exception:
+            pass
+
         return {
             "message": "Plan updated successfully",
             "plan": {

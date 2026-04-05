@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.logging_config import setup_logging, get_logger
+from app.core.telemetry import setup_telemetry
+from app.services.audit_publisher import audit_publisher
 from app.api import health, feedback, quality, admin, alerts
 from app.services.rabbitmq_consumer import rabbitmq_consumer
 from app.services.scheduler import background_scheduler
@@ -52,9 +54,22 @@ async def lifespan(app: FastAPI):
         logger.exception(f"Failed to start background scheduler: {e}")
         logger.warning("Service will continue without background scheduler")
 
+    # Connect audit publisher
+    try:
+        await audit_publisher.connect()
+        logger.info("Audit publisher connected")
+    except Exception as e:
+        logger.warning(f"Audit publisher connection failed (non-critical): {e}")
+
     yield
 
     # Shutdown
+    # Close audit publisher
+    try:
+        await audit_publisher.close()
+    except Exception:
+        pass
+
     logger.info(f"Shutting down {settings.SERVICE_NAME}")
 
     # Stop background scheduler
@@ -82,6 +97,9 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+
+# OpenTelemetry instrumentation
+setup_telemetry(app, service_name="answer-quality-service")
 
 # CORS is handled by the Spring Cloud Gateway - no need to configure here
 # app.add_middleware(

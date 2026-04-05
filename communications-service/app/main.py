@@ -13,6 +13,8 @@ load_dotenv()
 
 from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
+from .core.telemetry import setup_telemetry
+from .services.audit_publisher import audit_publisher
 from .api import email, sms
 from .services.rabbitmq_consumer import RabbitMQConsumer
 
@@ -32,7 +34,20 @@ async def lifespan(app: FastAPI):
         logger.exception(f"Failed to start RabbitMQ consumer: {e}")
         logger.warning("Service will continue without RabbitMQ consumer")
 
+    # Connect audit publisher
+    try:
+        await audit_publisher.connect()
+        logger.info("Audit publisher connected")
+    except Exception as e:
+        logger.warning(f"Audit publisher connection failed (non-critical): {e}")
+
     yield
+
+    # Close audit publisher
+    try:
+        await audit_publisher.close()
+    except Exception:
+        pass
 
     logger.info("Shutting down Communications Service")
 
@@ -57,6 +72,9 @@ def create_app() -> FastAPI:
         redoc_url=f"{settings.API_V1_STR}/redoc",
         lifespan=lifespan
     )
+
+    # OpenTelemetry instrumentation
+    setup_telemetry(app, service_name="communications-service")
 
     # CORS is now handled by the Spring Cloud Gateway
     # No need for CORS middleware in the backend service

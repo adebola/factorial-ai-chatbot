@@ -14,6 +14,7 @@ from ..services.dependencies import get_current_tenant, TokenClaims, validate_to
 from ..models.tenant import IngestionStatus, WebsitePage, WebsiteIngestion
 from ..core.logging_config import get_logger
 from ..services.billing_client import BillingClient
+from ..services.audit_publisher import audit_publisher
 from ..services.usage_publisher import usage_publisher
 
 router = APIRouter()
@@ -108,6 +109,22 @@ async def ingest_website(
                 max_pages=effective_max_pages
             )
         )
+
+        # Audit: website ingestion started
+        try:
+            await audit_publisher.publish(
+                action_type="website.ingestion.started",
+                tier="data",
+                source_service="onboarding-service",
+                tenant_id=claims.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="website_ingestion",
+                resource_id=ingestion.id,
+                after_state={"website_url": website_url, "max_pages": effective_max_pages},
+            )
+        except Exception:
+            pass  # Never break business logic
 
         # Get tenant details if needed
         tenant_details = await get_full_tenant_details(claims.tenant_id, claims.access_token)

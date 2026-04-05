@@ -10,6 +10,8 @@ load_dotenv()
 
 from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
+from .core.telemetry import setup_telemetry
+from .services.audit_publisher import audit_publisher
 from .api import workflows, executions, triggers
 
 
@@ -87,6 +89,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception(f"Startup cleanup failed: {e}")
 
+    # Connect audit publisher
+    try:
+        await audit_publisher.connect()
+        logger.info("Audit publisher connected")
+    except Exception as e:
+        logger.warning(f"Audit publisher connection failed (non-critical): {e}")
+
     # Start background cleanup task
     cleanup_task = asyncio.create_task(periodic_cleanup())
     logger.info("Background cleanup task started")
@@ -107,6 +116,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception(f"Error closing RabbitMQ publisher: {e}")
 
+    # Close audit publisher
+    try:
+        await audit_publisher.close()
+    except Exception:
+        pass
+
     logger.info("Shutting down Workflow Service")
 
 
@@ -124,6 +139,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
         redirect_slashes=True  # Enable automatic 307 redirects for trailing slashes
     )
+
+    # OpenTelemetry instrumentation
+    setup_telemetry(app, service_name="workflow-service")
 
     # CORS is now handled by the Spring Cloud Gateway
     # No need for CORS middleware in the backend service

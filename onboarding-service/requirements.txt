@@ -37,3 +37,12 @@ pyjwt>=2.8.0,<3.0.0
 httpx>=0.25.2,<1.0.0
 playwright>=1.55.0
 jsmin>=3.0.1
+# OpenTelemetry distributed tracing
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-otlp>=1.25.0
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-instrumentation-sqlalchemy>=0.46b0
+opentelemetry-instrumentation-aio-pika>=0.46b0
+opentelemetry-instrumentation-redis>=0.46b0
+opentelemetry-instrumentation-httpx>=0.46b0

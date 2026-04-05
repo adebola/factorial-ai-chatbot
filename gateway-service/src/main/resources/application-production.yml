@@ -212,6 +212,14 @@ spring:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
             # Communications Service Routes
+            # Audit Service Routes
+            - id: audit-api
+              uri: http://audit-service:8000
+              predicates:
+                - Path=/api/v1/audit/**
+              filters:
+                - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
             - id: communications-email
               uri: http://communications-service:8000
               predicates:

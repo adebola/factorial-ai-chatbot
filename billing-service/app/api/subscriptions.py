@@ -15,6 +15,7 @@ from ..models.subscription import (
 from ..services.dependencies import TokenClaims, validate_token
 from ..services.plan_service import PlanService
 from ..services.subscription_service import SubscriptionService
+from ..services.audit_publisher import audit_publisher
 from ..services.rabbitmq_service import rabbitmq_service
 from ..services.dependencies import get_full_tenant_details
 from ..middleware.feature_flags import get_tenant_features
@@ -494,7 +495,26 @@ async def create_subscription(
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to publish plan update message: {e}")
-        
+
+        try:
+            await audit_publisher.publish(
+                action_type="subscription.created",
+                tier="data",
+                source_service="billing-service",
+                tenant_id=claims.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="subscription",
+                resource_id=subscription.id,
+                after_state={
+                    "plan_id": subscription.plan_id,
+                    "status": subscription.status,
+                    "billing_cycle": subscription.billing_cycle,
+                },
+            )
+        except Exception:
+            pass
+
         return {
             "success": True,
             "message": "Subscription created successfully",
@@ -682,7 +702,25 @@ async def cancel_subscription(
             cancel_at_period_end=cancel_data.cancel_at_period_end,
             reason=cancel_data.reason
         )
-        
+
+        try:
+            await audit_publisher.publish(
+                action_type="subscription.cancelled",
+                tier="data",
+                source_service="billing-service",
+                tenant_id=claims.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="subscription",
+                resource_id=subscription.id,
+                after_state={
+                    "cancel_at_period_end": cancel_data.cancel_at_period_end,
+                    "reason": cancel_data.reason,
+                },
+            )
+        except Exception:
+            pass
+
         return {
             "success": True,
             "message": "Subscription cancelled successfully",

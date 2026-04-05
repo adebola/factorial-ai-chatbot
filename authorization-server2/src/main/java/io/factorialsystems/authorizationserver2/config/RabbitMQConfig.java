@@ -52,6 +52,12 @@ public class RabbitMQConfig {
         return new TopicExchange(exchange);
     }
 
+    // Audit events exchange (used by AuditEventPublisher)
+    @Bean
+    public TopicExchange auditExchange() {
+        return new TopicExchange("audit.events");
+    }
+
     @Bean
     public Binding widgettBinding(TopicExchange exchange) {
         return BindingBuilder

@@ -26,6 +26,8 @@ from .core.logging_config import (
     log_api_request,
     log_api_response
 )
+from .core.telemetry import setup_telemetry
+from .services.audit_publisher import audit_publisher
 from .services.jwt_validator import jwt_validator
 from .services.usage_publisher import usage_publisher
 from .services.rabbitmq_service import rabbitmq_service
@@ -71,6 +73,13 @@ async def lifespan(app: FastAPI):
             f"Failed to connect RabbitMQ service: {e}. "
             f"Service will continue but plan/logo events may fail to publish.")
 
+    # Connect audit publisher
+    try:
+        await audit_publisher.connect()
+        logger.info("Audit publisher connected")
+    except Exception as e:
+        logger.warning(f"Audit publisher connection failed (non-critical): {e}")
+
     logger.info("Onboarding Service startup completed")
 
     yield
@@ -91,6 +100,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error closing RabbitMQ service: {e}")
 
+    # Close audit publisher
+    try:
+        await audit_publisher.close()
+    except Exception:
+        pass
+
     logger.info("Onboarding Service shutdown completed")
 
 
@@ -99,6 +114,9 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+
+# OpenTelemetry instrumentation
+setup_telemetry(app, service_name="onboarding-service")
 
 
 @app.middleware("http")

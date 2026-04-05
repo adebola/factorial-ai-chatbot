@@ -4,6 +4,7 @@ import io.factorialsystems.authorizationserver2.model.Tenant;
 import io.factorialsystems.authorizationserver2.model.User;
 import io.factorialsystems.authorizationserver2.model.VerificationToken;
 import io.factorialsystems.authorizationserver2.service.EmailNotificationService;
+import io.factorialsystems.authorizationserver2.service.AuditEventPublisher;
 import io.factorialsystems.authorizationserver2.service.RedisCacheService;
 import io.factorialsystems.authorizationserver2.service.UserCreationPublisher;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class RegistrationEventListener {
     private final RedisCacheService cacheService;
     private final UserCreationPublisher userCreationPublisher;
     private final EmailNotificationService emailNotificationService;
+    private final AuditEventPublisher auditEventPublisher;
 
     @Value("${authorization.config.rabbitmq.key.widget}")
     private String widgetRoutingKey;
@@ -82,7 +84,29 @@ public class RegistrationEventListener {
             log.error("Error publishing user.created event for tenant {}: {}", tenant.getId(), e.getMessage());
         }
 
-        // 5. Send verification email
+        // 5. Publish user.created audit event
+        try {
+            String fullNameForAudit = (user.getFirstName() != null ? user.getFirstName() : "")
+                    + (user.getLastName() != null ? " " + user.getLastName() : "");
+            auditEventPublisher.publishDataEvent(
+                    "user.created",
+                    tenant.getId(),
+                    user.getId(),
+                    user.getEmail(),
+                    "user",
+                    "user",
+                    user.getId(),
+                    java.util.Map.of(
+                            "email", user.getEmail(),
+                            "full_name", fullNameForAudit.trim(),
+                            "tenant_name", tenant.getName()
+                    )
+            );
+        } catch (Exception e) {
+            log.warn("Failed to publish user.created audit event: {}", e.getMessage());
+        }
+
+        // 6. Send verification email
         if (verificationToken != null) {
             try {
                 emailNotificationService.sendEmailVerification(user, verificationToken.getToken());

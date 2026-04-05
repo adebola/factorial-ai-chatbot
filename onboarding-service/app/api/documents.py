@@ -13,6 +13,7 @@ from ..services.billing_client import BillingClient
 from ..services.dependencies import validate_token, get_full_tenant_details, TokenClaims
 from ..services.document_processor import DocumentProcessor
 from ..services.pg_vector_ingestion import PgVectorIngestionService
+from ..services.audit_publisher import audit_publisher
 from ..services.usage_publisher import usage_publisher
 
 router = APIRouter()
@@ -113,6 +114,22 @@ async def upload_document_with_categorization(
         except Exception as e:
             # Log error but don't fail the request
             print(f"Failed to publish document usage event: {e}")
+
+        # Audit: document uploaded
+        try:
+            await audit_publisher.publish(
+                action_type="document.uploaded",
+                tier="data",
+                source_service="onboarding-service",
+                tenant_id=claims.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="document",
+                resource_id=document_id,
+                after_state={"filename": file.filename, "chunks_created": len(documents)},
+            )
+        except Exception:
+            pass  # Never break business logic
 
         return {
             "message": f"Document uploaded ({'with' if categorization_enabled else 'without'} categorization)",
@@ -302,6 +319,22 @@ async def delete_document(
                 await billing_client.decrement_usage("documents")
             except Exception as fallback_err:
                 logger.error(f"HTTP fallback for document usage decrement also failed: {fallback_err}", tenant_id=claims.tenant_id)
+
+        # Audit: document deleted
+        try:
+            await audit_publisher.publish(
+                action_type="document.deleted",
+                tier="data",
+                source_service="onboarding-service",
+                tenant_id=claims.tenant_id,
+                actor_user_id=claims.user_id,
+                actor_email=claims.email,
+                resource_type="document",
+                resource_id=document_id,
+                before_state={"filename": existing_doc.original_filename},
+            )
+        except Exception:
+            pass  # Never break business logic
 
         return {
             "message": "Document deleted successfully",

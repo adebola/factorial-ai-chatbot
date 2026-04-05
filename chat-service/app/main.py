@@ -14,6 +14,8 @@ from .api.admin_token_usage import router as admin_token_usage_router
 from .api.admin_chat_monitoring import router as admin_chat_monitoring_router
 from .websockets.agent_chat import agent_websocket_endpoint, agent_chat_router
 from .api.agent_admin import router as agent_admin_router
+from .core.telemetry import setup_telemetry
+from .services.audit_publisher import audit_publisher
 from .core.config import settings
 from .core.logging_config import (
     setup_logging,
@@ -102,6 +104,13 @@ async def lifespan(app: FastAPI):
         extra=rabbitmq_status
     )
 
+    # Connect audit publisher
+    try:
+        await audit_publisher.connect()
+        logger.info("Audit publisher connected successfully")
+    except Exception as e:
+        logger.warning(f"Audit publisher connection failed (non-critical): {e}")
+
     logger.info("Chat Service startup completed")
 
     yield
@@ -154,6 +163,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.exception(f"Error closing event publisher: {e}")
 
+    # Close audit publisher
+    try:
+        await audit_publisher.close()
+        logger.info("Audit publisher closed successfully")
+    except Exception as e:
+        logger.exception(f"Error closing audit publisher: {e}")
+
     logger.info("Chat Service shutdown completed")
 
 
@@ -162,6 +178,9 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+
+# OpenTelemetry instrumentation
+setup_telemetry(app, service_name="chat-service")
 
 
 @app.middleware("http")

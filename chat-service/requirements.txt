@@ -27,3 +27,12 @@ tiktoken>=0.7.0
 python-pptx>=0.6.23
 python-docx>=1.1.0
 reportlab>=4.1.0
+# OpenTelemetry distributed tracing
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-otlp>=1.25.0
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-instrumentation-sqlalchemy>=0.46b0
+opentelemetry-instrumentation-aio-pika>=0.46b0
+opentelemetry-instrumentation-redis>=0.46b0
+opentelemetry-instrumentation-httpx>=0.46b0

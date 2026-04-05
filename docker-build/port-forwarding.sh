@@ -23,11 +23,17 @@ echo "Elasticsearch   → http://localhost:9200"
 kubectl port-forward -n $NAMESPACE svc/alertmanager 9093:9093 --context=$CONTEXT &
 echo "Alertmanager    → http://localhost:9093"
 
-kubectl port-forward -n $NAMESPACE svc/jaeger 16686:16686 --context=$CONTEXT &
-echo "Jaeger          → http://localhost:16686"
+# Jaeger and OTel use offset ports to avoid conflict with Docker containers
+# Docker Jaeger: localhost:16686 / localhost:4317
+# Minikube Jaeger: localhost:26686 / OTel gRPC: localhost:14317
+kubectl port-forward -n $NAMESPACE svc/jaeger 26686:16686 --context=$CONTEXT &
+echo "Jaeger (mk)     → http://localhost:26686  (Docker Jaeger at :16686)"
 
 kubectl port-forward -n $NAMESPACE svc/otel-collector 8888:8888 --context=$CONTEXT &
-echo "OTel Collector  → http://localhost:8888"
+echo "OTel Metrics    → http://localhost:8888"
+
+kubectl port-forward -n $NAMESPACE svc/otel-collector 14317:4317 --context=$CONTEXT &
+echo "OTel gRPC (mk)  → localhost:14317  (Docker OTel at :4317)"
 
 echo ""
 echo "All port-forwards running. Press Ctrl+C to stop all."

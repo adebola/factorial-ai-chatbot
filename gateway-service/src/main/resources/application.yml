@@ -1,6 +1,18 @@
 server:
   port: 8080
 
+otel:
+  exporter:
+    otlp:
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}
+  logs:
+    exporter: none
+  metrics:
+    exporter: none
+  resource:
+    attributes:
+      service.name: ${OTEL_SERVICE_NAME:gateway-service}
+
 logging:
   pattern:
     console: "%green(%d{yyyy-MM-dd HH:mm:ss}) %yellow([%t]) %blue(%-5level) %magenta(%logger{36}) - %msg%n"
@@ -202,6 +214,14 @@ spring:
                 uri: http://localhost:8000
                 predicates:
                     - Path=/api/v1/agent/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
+              # Audit Service Routes
+              - id: audit-api
+                uri: http://localhost:8007
+                predicates:
+                    - Path=/api/v1/audit/**
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 

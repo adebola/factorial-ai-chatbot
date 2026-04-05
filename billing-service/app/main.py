@@ -24,6 +24,8 @@ from .api import plans, subscriptions, payments, usage, restrictions, plan_manag
 from .services.usage_consumer import usage_consumer
 from .messaging.user_consumer import user_consumer
 from .services.scheduler import start_scheduler, stop_scheduler
+from .core.telemetry import setup_telemetry
+from .services.audit_publisher import audit_publisher
 
 # Setup logging
 setup_logging()
@@ -71,10 +73,23 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to start scheduler: {e}")
         logger.warning("Service will continue but scheduled jobs will not run")
 
+    # Connect audit publisher
+    try:
+        await audit_publisher.connect()
+        logger.info("Audit publisher connected")
+    except Exception as e:
+        logger.warning(f"Audit publisher connection failed (non-critical): {e}")
+
     yield
 
     # Shutdown
     logger.info("Shutting down Billing Service...")
+
+    # Close audit publisher
+    try:
+        await audit_publisher.close()
+    except Exception:
+        pass
 
     # Stop background job scheduler
     try:
@@ -105,6 +120,9 @@ app = FastAPI(
     description="Billing and subscription management service for ChatCraft",
     lifespan=lifespan
 )
+
+# OpenTelemetry instrumentation
+setup_telemetry(app, service_name="billing-service")
 
 # CORS is handled by the gateway service - no need to configure it here
 

@@ -1,9 +1,11 @@
 package io.factorialsystems.authorizationserver2.security;
 
 import io.factorialsystems.authorizationserver2.exception.UserNotVerifiedException;
+import io.factorialsystems.authorizationserver2.service.AuditEventPublisher;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
@@ -17,14 +19,18 @@ import org.springframework.web.util.UriComponentsBuilder;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 /**
  * Custom authentication failure handler that provides specific error messages
- * for different types of authentication failures.
+ * for different types of authentication failures and publishes login.failed audit events.
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class CustomAuthenticationFailureHandler extends SimpleUrlAuthenticationFailureHandler {
+
+    private final AuditEventPublisher auditEventPublisher;
 
     @Override
     public void onAuthenticationFailure(HttpServletRequest request, HttpServletResponse response,
@@ -70,6 +76,25 @@ public class CustomAuthenticationFailureHandler extends SimpleUrlAuthenticationF
             log.error("Unexpected authentication exception for user {}: {}", username, exception.getClass().getName(), exception);
         }
 
+        // Publish login.failed audit event
+        try {
+            String ipAddress = getClientIp(request);
+            auditEventPublisher.publishSecurityEvent(
+                    "login.failed",
+                    null,  // tenant unknown for failed logins
+                    userId,
+                    email != null ? email : username,
+                    "user",
+                    "user",
+                    userId,
+                    null,
+                    Map.of("error_type", errorType, "username_attempted", username != null ? username : ""),
+                    Map.of("ip_address", ipAddress, "user_agent", request.getHeader("User-Agent") != null ? request.getHeader("User-Agent") : "")
+            );
+        } catch (Exception e) {
+            // Never break the login flow for audit
+        }
+
         // Build redirect URL with error parameters
         String redirectUrl = buildRedirectUrl(errorMessage, errorType, userId, email, username);
 
@@ -102,5 +127,17 @@ public class CustomAuthenticationFailureHandler extends SimpleUrlAuthenticationF
         }
 
         return builder.build().toUriString();
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String xForwardedFor = request.getHeader("X-Forwarded-For");
+        if (xForwardedFor != null && !xForwardedFor.isEmpty()) {
+            return xForwardedFor.split(",")[0].trim();
+        }
+        String xRealIp = request.getHeader("X-Real-IP");
+        if (xRealIp != null && !xRealIp.isEmpty()) {
+            return xRealIp;
+        }
+        return request.getRemoteAddr();
     }
 }
