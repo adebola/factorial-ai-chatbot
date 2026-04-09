@@ -35,6 +35,19 @@ echo "OTel Metrics    → http://localhost:8888"
 kubectl port-forward -n $NAMESPACE svc/otel-collector 14317:4317 --context=$CONTEXT &
 echo "OTel gRPC (mk)  → localhost:14317  (Docker OTel at :4317)"
 
+# Kafka — broker on 9092. We forward the headless service because that is the
+# hostname the broker advertises in its metadata response
+# (KAFKA_ADVERTISED_LISTENERS = kafka-0.kafka-headless.chatcraft.svc.cluster.local:9092).
+# The host running observability-service MUST also have an /etc/hosts entry:
+#
+#   127.0.0.1   kafka-0.kafka-headless.chatcraft.svc.cluster.local
+#
+# Without that shim, kafka-python's bootstrap returns metadata pointing at the
+# in-cluster DNS name and the client cannot dial it back. Add once per machine:
+#   echo '127.0.0.1   kafka-0.kafka-headless.chatcraft.svc.cluster.local' | sudo tee -a /etc/hosts
+kubectl port-forward -n $NAMESPACE svc/kafka-headless 9092:9092 --context=$CONTEXT &
+echo "Kafka broker    → kafka-0.kafka-headless.chatcraft.svc.cluster.local:9092 (requires /etc/hosts shim)"
+
 echo ""
 echo "All port-forwards running. Press Ctrl+C to stop all."
 echo "========================================"

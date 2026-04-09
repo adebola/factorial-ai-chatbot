@@ -19,6 +19,7 @@ from ..tools.elasticsearch_search import ElasticsearchSearchTool
 from ..tools.jaeger_traces import JaegerTracesTool
 from ..tools.k8s_resources import K8sResourcesTool
 from ..tools.otel_metrics import OtelMetricsTool
+from ..tools.kafka_cluster import KafkaClusterTool
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,29 @@ IMPORTANT - Kubernetes resource lookups:
 - Pod names in Kubernetes include random suffixes (e.g. order-service-7f8b9c6d4-x2k9m)
 - The k8s_resources tool supports prefix/substring matching - pass the service name (e.g. "order-service") and it will match the full pod name
 - Use action="list" with the name filter to see all matching pods before using "describe" or "logs"
+
+IMPORTANT - Kafka observability workflow (route Kafka questions to the right tool):
+- STRUCTURAL questions go to the kafka_cluster tool: which broker is leader for a partition, \
+who is in the ISR, how many partitions a topic has, what topics/brokers/consumer groups exist, \
+consumer group lag, and high-level cluster health.
+  Examples that go to kafka_cluster:
+    "what's the leader for orders partition 0"     -> kafka_cluster(action="describe_topic", topic_name="orders")
+    "list all kafka topics"                        -> kafka_cluster(action="list_topics")
+    "is the kafka cluster healthy"                 -> kafka_cluster(action="cluster_health")
+    "what's the lag on consumer group payments"    -> kafka_cluster(action="describe_consumer_group", group_id="payments")
+- NUMERIC questions go to prometheus_metric_discovery + prometheus_query against the JMX exporter. \
+The Kafka StatefulSet runs a JMX-Prometheus-Java-Agent on port 9404 and Prometheus already scrapes it. \
+JMX exporter metrics are prefixed kafka_* (e.g. kafka_server_brokertopicmetrics_messagesinpersec, \
+kafka_server_replicamanager_underreplicatedpartitions, kafka_controller_kafkacontroller_activecontrollercount). \
+Always call prometheus_metric_discovery first with name_pattern="kafka_*" to find the exact metric, \
+then construct PromQL.
+  Examples that go to prometheus_query:
+    "message rate on the orders topic in the last 5 minutes" -> rate(kafka_server_brokertopicmetrics_messagesinpersec{topic="orders"}[5m])
+    "how many under-replicated partitions are there"         -> kafka_server_replicamanager_underreplicatedpartitions
+    "kafka request latency p99"                              -> histogram_quantile(0.99, rate(kafka_network_requestmetrics_*_bucket[5m]))
+    "kafka jvm heap usage"                                   -> jvm_memory_used_bytes{job=~".*kafka.*",area="heap"}
+- Do NOT use kafka_cluster for numeric questions. Do NOT use prometheus_query for "who is the leader" or "describe topic" — \
+those are structural and only the Admin API knows them.
 
 When investigating issues:
 1. Start with metrics and alerts for the big picture
@@ -145,6 +169,9 @@ def _build_tools(backend_configs: Dict[str, BackendConfig]) -> list:
 
     if "otel_collector" in backend_configs:
         tools.append(OtelMetricsTool(config=backend_configs["otel_collector"]))
+
+    if "kafka" in backend_configs:
+        tools.append(KafkaClusterTool(config=backend_configs["kafka"]))
 
     return tools
 

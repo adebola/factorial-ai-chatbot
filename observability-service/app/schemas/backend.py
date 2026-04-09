@@ -6,7 +6,7 @@ from datetime import datetime
 class BackendCreateRequest(BaseModel):
     """Request to create a backend configuration."""
     tenant_id: str
-    backend_type: str = Field(..., pattern="^(prometheus|alertmanager|elasticsearch|jaeger|kubernetes|otel_collector|llm)$")
+    backend_type: str = Field(..., pattern="^(prometheus|alertmanager|elasticsearch|jaeger|kubernetes|otel_collector|llm|kafka)$")
     url: Optional[str] = None
     auth_type: str = Field(default="none", pattern="^(none|basic|bearer|service_account)$")
     credentials: Optional[Dict[str, Any]] = None  # Will be encrypted before storage

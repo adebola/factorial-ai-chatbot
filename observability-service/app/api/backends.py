@@ -22,6 +22,140 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _test_kafka_connectivity(backend) -> BackendTestResult:
+    """Test Kafka connectivity by constructing an AdminClient and calling describe_cluster.
+
+    Mirrors `_test_k8s_connectivity` in shape because Kafka, like Kubernetes, isn't
+    HTTP and can't reuse the generic httpx test branch in `test_backend`.
+    Uses a short request_timeout (5s) regardless of `backend.timeout_seconds` so a
+    misconfigured broker doesn't tie up the API.
+
+    Defensively strips an http:// or https:// scheme prefix from each bootstrap
+    server entry — the URL field in the admin form is labelled "URL" so users
+    intuitively type http://, but kafka-python parses bootstrap_servers as plain
+    host:port and would otherwise blow up with an opaque error.
+    """
+    logger.info("Testing Kafka connectivity to %s", backend.url)
+    start_time = time.time()
+    try:
+        from kafka.admin import KafkaAdminClient
+        from kafka.errors import NoBrokersAvailable, NodeNotReadyError, KafkaConnectionError
+
+        if not backend.url:
+            return BackendTestResult(
+                backend_type="kafka",
+                url=None,
+                reachable=False,
+                error="No bootstrap servers configured (url is empty)",
+            )
+
+        bootstrap_servers = []
+        for raw in backend.url.split(","):
+            s = raw.strip()
+            if not s:
+                continue
+            # Tolerate http:// and https:// scheme prefixes that users may type
+            # out of habit; kafka-python expects plain host:port.
+            for prefix in ("http://", "https://"):
+                if s.lower().startswith(prefix):
+                    s = s[len(prefix):]
+                    break
+            # Trim any trailing path component (e.g. localhost:9092/ → localhost:9092)
+            if "/" in s:
+                s = s.split("/", 1)[0]
+            bootstrap_servers.append(s)
+
+        # Both timeouts matter. kafka-python's bootstrap handshake includes an
+        # API-version negotiation gated by `api_version_auto_timeout_ms`
+        # (default 2000ms), and a 2s default is too short against several
+        # broker images — the bootstrap aborts with NoBrokersAvailable before
+        # it ever returns metadata. We bump BOTH to 10s for the test endpoint;
+        # the API stays bounded because the test never hangs longer than that.
+        admin = KafkaAdminClient(
+            bootstrap_servers=bootstrap_servers,
+            client_id="chatcraft-observability-test",
+            request_timeout_ms=10000,
+            api_version_auto_timeout_ms=10000,
+        )
+        try:
+            cluster = admin.describe_cluster()
+        finally:
+            try:
+                admin.close()
+            except Exception:
+                pass
+
+        response_time_ms = (time.time() - start_time) * 1000
+        brokers = cluster.get("brokers", []) or []
+        return BackendTestResult(
+            backend_type="kafka",
+            url=backend.url,
+            reachable=True,
+            response_time_ms=round(response_time_ms, 1),
+            details={
+                "broker_count": len(brokers),
+                "controller_id": cluster.get("controller_id"),
+                "cluster_id": cluster.get("cluster_id"),
+                "bootstrap_servers": bootstrap_servers,
+            },
+        )
+    except NodeNotReadyError as e:
+        # Bootstrap connection succeeded but the client could not reach a broker
+        # by the hostname Kafka returned in metadata — almost always the
+        # advertised.listeners hostname being unresolvable from the client side
+        # (e.g. an in-cluster DNS name when running outside the cluster, or a
+        # port-forward + advertised.listeners mismatch).
+        response_time_ms = (time.time() - start_time) * 1000
+        return BackendTestResult(
+            backend_type="kafka",
+            url=backend.url,
+            reachable=False,
+            response_time_ms=round(response_time_ms, 1),
+            error=(
+                f"{e}. The bootstrap server is reachable but Kafka advertised a "
+                "broker hostname that this client cannot resolve. This is the "
+                "advertised.listeners problem: check the broker's "
+                "KAFKA_ADVERTISED_LISTENERS env var. If you are running "
+                "observability-service outside the cluster and port-forwarding, "
+                "either add a /etc/hosts entry mapping the advertised hostname "
+                "to 127.0.0.1, or expose an EXTERNAL listener on the broker "
+                "advertising localhost (or the host this service runs on)."
+            ),
+        )
+    except NoBrokersAvailable as e:
+        response_time_ms = (time.time() - start_time) * 1000
+        return BackendTestResult(
+            backend_type="kafka",
+            url=backend.url,
+            reachable=False,
+            response_time_ms=round(response_time_ms, 1),
+            error=(
+                f"No brokers available at {bootstrap_servers}. "
+                "Check that the host:port is reachable from this service "
+                "(port-forward up? security group / network policy open?) and "
+                "that the value is plain host:port (no http:// scheme)."
+            ),
+        )
+    except KafkaConnectionError as e:
+        response_time_ms = (time.time() - start_time) * 1000
+        return BackendTestResult(
+            backend_type="kafka",
+            url=backend.url,
+            reachable=False,
+            response_time_ms=round(response_time_ms, 1),
+            error=f"Kafka connection error: {e}",
+        )
+    except Exception as e:
+        response_time_ms = (time.time() - start_time) * 1000
+        return BackendTestResult(
+            backend_type="kafka",
+            url=backend.url,
+            reachable=False,
+            response_time_ms=round(response_time_ms, 1),
+            error=str(e),
+        )
+
+
 def _test_k8s_connectivity(backend) -> BackendTestResult:
     """Test Kubernetes cluster connectivity using the Python client.
 
@@ -232,6 +366,10 @@ async def test_backend(
     # K8s backend — test via Kubernetes Python client, not HTTP
     if backend_type == "kubernetes":
         return _test_k8s_connectivity(backend)
+
+    # Kafka backend — test via the Kafka Admin API, not HTTP
+    if backend_type == "kafka":
+        return _test_kafka_connectivity(backend)
 
     if not backend.url:
         return BackendTestResult(
