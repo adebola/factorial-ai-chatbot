@@ -63,17 +63,25 @@ consumer group lag, and high-level cluster health.
     "what's the lag on consumer group payments"    -> kafka_cluster(action="describe_consumer_group", group_id="payments")
 - NUMERIC questions go to prometheus_metric_discovery + prometheus_query against the JMX exporter. \
 The Kafka StatefulSet runs a JMX-Prometheus-Java-Agent on port 9404 and Prometheus already scrapes it. \
-JMX exporter metrics are prefixed kafka_* (e.g. kafka_server_brokertopicmetrics_messagesinpersec, \
-kafka_server_replicamanager_underreplicatedpartitions, kafka_controller_kafkacontroller_activecontrollercount). \
-Always call prometheus_metric_discovery first with name_pattern="kafka_*" to find the exact metric, \
-then construct PromQL.
-  Examples that go to prometheus_query:
-    "message rate on the orders topic in the last 5 minutes" -> rate(kafka_server_brokertopicmetrics_messagesinpersec{topic="orders"}[5m])
+JMX exporter v1.0.1+ metrics are prefixed kafka_server_, kafka_controller_, kafka_network_, kafka_log_ \
+and counters end with _total. Common families include: \
+kafka_server_brokertopicmetrics_*_total (messages in/out, bytes in/out, failed requests), \
+kafka_server_replicamanager_* (underreplicatedpartitions, leadercount, partitioncount, underminisr, atminisr), \
+kafka_controller_kafkacontroller_* (globalpartitioncount, globaltopiccount, offlinepartitionscount, activecontrollercount), \
+kafka_network_requestmetrics_* (latency, request bytes, throttle time). \
+ALWAYS call prometheus_metric_discovery first with name_pattern="kafka" (or a more specific glob like \
+"kafka_server_*" or "kafka_controller_*") to enumerate the exact metric names available in THIS deployment \
+before constructing PromQL. The discovery tool accepts both substring and glob (* / ?) syntax.
+  Examples that go to prometheus_query (after discovery confirms the exact name):
+    "message rate on the orders topic in the last 5 minutes" -> rate(kafka_server_brokertopicmetrics_messagesinpersec_total{topic="orders"}[5m])
     "how many under-replicated partitions are there"         -> kafka_server_replicamanager_underreplicatedpartitions
-    "kafka request latency p99"                              -> histogram_quantile(0.99, rate(kafka_network_requestmetrics_*_bucket[5m]))
+    "how many partitions exist in the cluster"               -> kafka_controller_kafkacontroller_globalpartitioncount
+    "how many topics exist"                                  -> kafka_controller_kafkacontroller_globaltopiccount
+    "how many partitions are offline"                        -> kafka_controller_kafkacontroller_offlinepartitionscount
+    "kafka request latency p99"                              -> histogram_quantile(0.99, rate(kafka_network_requestmetrics_totaltimems_bucket[5m]))
     "kafka jvm heap usage"                                   -> jvm_memory_used_bytes{job=~".*kafka.*",area="heap"}
-- Do NOT use kafka_cluster for numeric questions. Do NOT use prometheus_query for "who is the leader" or "describe topic" — \
-those are structural and only the Admin API knows them.
+- Do NOT use kafka_cluster for numeric questions. Do NOT use prometheus_query for "who is the leader for partition X" or "describe topic" — \
+those are structural and only the Admin API (kafka_cluster) knows them.
 
 When investigating issues:
 1. Start with metrics and alerts for the big picture

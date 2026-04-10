@@ -1,6 +1,7 @@
 """
 Prometheus metric discovery tool - discovers available metrics and their metadata.
 """
+import fnmatch
 import time
 import logging
 from typing import Type, Optional, Dict, Any, Tuple
@@ -44,7 +45,13 @@ class PrometheusDiscoveryInput(BaseModel):
     )
     name_pattern: Optional[str] = Field(
         default=None,
-        description="Optional substring to filter metric names, e.g. 'jvm_memory' or 'process_cpu'"
+        description=(
+            "Optional filter on metric names. Accepts either a plain substring "
+            "(e.g. 'jvm_memory', 'kafka', 'process_cpu') OR a glob pattern with "
+            "* / ? wildcards (e.g. 'kafka_*', 'jvm_memory_*_bytes', 'http_*_duration_*'). "
+            "When the value contains * or ?, fnmatch glob is used; otherwise it is "
+            "a case-insensitive substring match."
+        )
     )
     metric_name: Optional[str] = Field(
         default=None,
@@ -114,10 +121,21 @@ class PrometheusMetricDiscoveryTool(BaseTool):
                 metric_names, metadata = self._fetch_discovery_data()
                 _set_cache(self.config.url, metric_names, metadata)
 
-            # Apply name_pattern filter
+            # Apply name_pattern filter. Tolerate both substring and glob input —
+            # LLMs naturally produce glob patterns like 'kafka_*' or 'jvm_*_bytes'
+            # because they have seen them in countless examples. Substring-only
+            # matching would silently return no results for those, masking the
+            # fact that the metrics actually exist. If the pattern contains a
+            # wildcard char, we use fnmatch glob; otherwise case-insensitive
+            # substring (preserving the historical behavior).
             if name_pattern:
                 pattern_lower = name_pattern.lower()
-                metric_names = [n for n in metric_names if pattern_lower in n.lower()]
+                if "*" in pattern_lower or "?" in pattern_lower:
+                    metric_names = [
+                        n for n in metric_names if fnmatch.fnmatch(n.lower(), pattern_lower)
+                    ]
+                else:
+                    metric_names = [n for n in metric_names if pattern_lower in n.lower()]
 
             # Group by category
             grouped: Dict[str, list] = {}

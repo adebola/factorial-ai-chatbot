@@ -143,10 +143,44 @@ class AgentChatHandler:
                 },
             }
 
-            # Include history if resuming
+            # Include history if resuming. The welcome payload must fit inside
+            # the gateway's WebSocket max-frame-payload-length (Spring Cloud
+            # Gateway default is 64 KB). The gateway itself has been bumped to
+            # 1 MiB, but we keep this defensive trim so the chat-service never
+            # generates a frame larger than ~50 KB even if a future deployment
+            # forgets to override the gateway limit.
+            #
+            # Strategy: walk newest → oldest, stop when we'd exceed the byte
+            # budget. Strip the heavy `structured_blocks` and `tool_calls`
+            # fields from the welcome view — those can be 10s of KB each for
+            # tool-call-heavy assistant messages and the chat panel only needs
+            # role+content+id+metadata for the initial render. The full
+            # structured payload is still available via the REST endpoint if
+            # the frontend wants to lazy-load it.
             if not is_new:
-                history = await agent_session_service.get_conversation_history(self.db, session.id)
-                welcome["history"] = history
+                full_history = await agent_session_service.get_conversation_history(self.db, session.id)
+                WELCOME_HISTORY_BUDGET_BYTES = 48 * 1024  # 48 KB
+                trimmed_reverse: List[dict] = []
+                running_size = 0
+                for msg in reversed(full_history):
+                    light_msg = {
+                        "id": msg.get("id"),
+                        "role": msg.get("role"),
+                        "content": msg.get("content"),
+                        "token_count": msg.get("token_count"),
+                        "created_at": msg.get("created_at"),
+                    }
+                    # Approximate size by serializing just this message.
+                    msg_size = len(json.dumps(light_msg, default=str))
+                    if running_size + msg_size > WELCOME_HISTORY_BUDGET_BYTES and trimmed_reverse:
+                        break
+                    trimmed_reverse.append(light_msg)
+                    running_size += msg_size
+                trimmed = list(reversed(trimmed_reverse))
+                welcome["history"] = trimmed
+                if len(trimmed) < len(full_history):
+                    welcome["history_truncated"] = True
+                    welcome["total_messages"] = len(full_history)
 
             await websocket.send_text(json.dumps(welcome, default=str))
 
