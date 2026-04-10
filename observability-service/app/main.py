@@ -9,7 +9,7 @@ from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
 from .core.telemetry import setup_telemetry
 from .services.audit_publisher import audit_publisher
-from .api import observe, sessions, backends, llm_config, health
+from .api import observe, sessions, backends, llm_config, health, manifest
 
 
 @asynccontextmanager
@@ -80,6 +80,13 @@ def create_app() -> FastAPI:
     app.include_router(
         health.router,
         tags=["health"]
+    )
+
+    # Plugin manifest — unauthenticated, mounted at root so the catalog can
+    # discover this service via GET {base_url}/manifest.
+    app.include_router(
+        manifest.router,
+        tags=["manifest"]
     )
 
     @app.get("/")

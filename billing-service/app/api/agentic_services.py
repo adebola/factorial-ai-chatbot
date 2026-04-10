@@ -22,6 +22,9 @@ from ..schemas.agentic_service import (
     AssignmentUpdateRequest,
     AssignmentResponse,
     TenantServiceResponse,
+    PluginManifest,
+    RegisterByUrlRequest,
+    UiExtensionEntry,
 )
 from ..services.audit_publisher import audit_publisher
 from ..services.dependencies import TokenClaims, require_system_admin
@@ -48,11 +51,58 @@ def _service_to_response(service: AgenticService, db: Session) -> ServiceRespons
         icon_url=service.icon_url,
         capabilities=service.capabilities,
         ui_hints=service.ui_hints,
+        ui_extensions=service.ui_extensions,
+        health_status=service.health_status,
+        last_manifest_fetch_at=service.last_manifest_fetch_at,
+        last_health_at=service.last_health_at,
         is_active=service.is_active,
         tenant_count=tenant_count,
         created_at=service.created_at,
         updated_at=service.updated_at,
     )
+
+
+async def _fetch_manifest(base_url: str, manifest_path: str = "/manifest") -> PluginManifest:
+    """Call the plugin's manifest endpoint and validate the response.
+
+    Raises HTTPException(502) on any failure — the catalog cannot register a
+    plugin whose manifest cannot be fetched and parsed.
+    """
+    url = base_url.rstrip("/") + "/" + manifest_path.lstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not reach plugin manifest at {url}: {e}",
+        )
+    if resp.status_code >= 400:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Plugin manifest at {url} returned HTTP {resp.status_code}",
+        )
+    try:
+        return PluginManifest(**resp.json())
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Plugin manifest at {url} is invalid: {e}",
+        )
+
+
+def _apply_manifest(service: AgenticService, manifest: PluginManifest) -> None:
+    """Persist a freshly-fetched manifest onto a catalog row."""
+    service.manifest = manifest.dict()
+    service.ui_extensions = [ext.dict() for ext in manifest.ui_extensions]
+    service.capabilities = manifest.capabilities
+    service.last_manifest_fetch_at = datetime.now(timezone.utc)
+    # Manifest fields override stale catalog metadata.
+    service.name = manifest.name
+    service.service_key = manifest.service_key
+    service.category = manifest.category
+    if manifest.description:
+        service.description = manifest.description
 
 
 def _get_active_service(service_id: str, db: Session) -> AgenticService:
@@ -136,6 +186,103 @@ async def list_services(
     return [_service_to_response(s, db) for s in services]
 
 
+# NOTE: literal-segment routes (`/services/ui-extensions`, `/services/register-by-url`)
+# MUST be declared before any `/services/{service_id}` routes — FastAPI matches in
+# declaration order, so a parametrized route would otherwise swallow the literal.
+@router.get("/services/ui-extensions", response_model=List[UiExtensionEntry])
+async def list_ui_extensions(
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    """Flat list of UI extensions contributed by all installed, active plugins.
+
+    The superadmin shell calls this on bootstrap to render dynamic menu entries.
+    Filters: `is_active=true`, `is_deleted=false`. Health status is included so
+    the UI can grey out menu items for unhealthy plugins (we don't hide them
+    here — that's a UI policy decision).
+
+    Role filtering: entries whose `required_role` is more restrictive than the
+    caller's role are dropped. Currently this endpoint requires SYSTEM_ADMIN
+    via the dependency, so all role buckets are visible.
+    """
+    services = db.query(AgenticService).filter(
+        AgenticService.is_active == True,
+        AgenticService.is_deleted == False,
+    ).all()
+
+    entries: List[UiExtensionEntry] = []
+    for svc in services:
+        if not svc.ui_extensions:
+            continue
+        for ext in svc.ui_extensions:
+            try:
+                entries.append(UiExtensionEntry(
+                    service_id=svc.id,
+                    service_key=svc.service_key,
+                    service_name=svc.name,
+                    menu_label=ext.get("menu_label"),
+                    icon=ext.get("icon"),
+                    route=ext.get("route"),
+                    required_role=ext.get("required_role", "SUPER_ADMIN"),
+                    api_prefix=ext.get("api_prefix"),
+                    health_status=svc.health_status,
+                ))
+            except Exception as e:
+                logger.warning(
+                    f"Skipping malformed ui_extension on service "
+                    f"'{svc.service_key}': {e}"
+                )
+    return entries
+
+
+@router.post(
+    "/services/register-by-url",
+    response_model=ServiceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def register_service_by_url(
+    request: RegisterByUrlRequest,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    """Convenience: provide a base_url, the catalog fetches /manifest and registers.
+
+    If a service with the manifest's `service_key` already exists, the existing
+    row is updated in place (idempotent re-registration).
+    """
+    manifest = await _fetch_manifest(request.base_url, request.manifest_path)
+
+    existing = db.query(AgenticService).filter(
+        AgenticService.service_key == manifest.service_key,
+        AgenticService.is_deleted == False,
+    ).first()
+
+    if existing:
+        existing.base_url = request.base_url
+        if request.health_check_url:
+            existing.health_check_url = request.health_check_url
+        _apply_manifest(existing, manifest)
+        db.commit()
+        db.refresh(existing)
+        logger.info(f"Service '{existing.service_key}' re-registered by {claims.email}")
+        return _service_to_response(existing, db)
+
+    service = AgenticService(
+        name=manifest.name,
+        service_key=manifest.service_key,
+        description=manifest.description,
+        base_url=request.base_url,
+        health_check_url=request.health_check_url,
+        category=manifest.category,
+    )
+    _apply_manifest(service, manifest)
+    db.add(service)
+    db.commit()
+    db.refresh(service)
+    logger.info(f"Service '{service.service_key}' registered by {claims.email} via manifest")
+    return _service_to_response(service, db)
+
+
 @router.get("/services/{service_id}", response_model=ServiceResponse)
 async def get_service(
     service_id: str,
@@ -188,7 +335,11 @@ async def health_check_service(
     claims: TokenClaims = Depends(require_system_admin),
     db: Session = Depends(get_db),
 ):
-    """Perform a health check on a service."""
+    """Perform a health check on a service.
+
+    Persists the result onto the catalog row (`health_status` + `last_health_at`)
+    so the dynamic UI-extensions endpoint can filter on it without re-probing.
+    """
     service = _get_active_service(service_id, db)
 
     url = service.health_check_url or (service.base_url.rstrip("/") + "/health" if service.base_url else None)
@@ -198,24 +349,57 @@ async def health_check_service(
             detail="Service has no health check URL or base URL configured",
         )
 
+    now = datetime.now(timezone.utc)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             import time
             start = time.time()
             resp = await client.get(url)
             latency_ms = round((time.time() - start) * 1000, 2)
+        new_status = "healthy" if resp.status_code < 400 else "unhealthy"
+        service.health_status = new_status
+        service.last_health_at = now
+        db.commit()
         return {
-            "status": "healthy" if resp.status_code < 400 else "unhealthy",
+            "status": new_status,
             "status_code": resp.status_code,
             "latency_ms": latency_ms,
             "url": url,
         }
     except httpx.RequestError as e:
+        service.health_status = "unhealthy"
+        service.last_health_at = now
+        db.commit()
         return {
             "status": "unreachable",
             "error": str(e),
             "url": url,
         }
+
+
+# `refresh-manifest` is parametrized so it can live alongside the other
+# `/services/{service_id}/...` routes below — it does not collide with the
+# literal endpoints because the discriminator is the trailing literal segment.
+@router.post("/services/{service_id}/refresh-manifest", response_model=ServiceResponse)
+async def refresh_service_manifest(
+    service_id: str,
+    claims: TokenClaims = Depends(require_system_admin),
+    db: Session = Depends(get_db),
+):
+    """Re-fetch the plugin's GET /manifest and persist it onto the catalog row."""
+    service = _get_active_service(service_id, db)
+    if not service.base_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Service has no base_url configured",
+        )
+
+    manifest = await _fetch_manifest(service.base_url)
+    _apply_manifest(service, manifest)
+    db.commit()
+    db.refresh(service)
+    logger.info(f"Manifest refreshed for service '{service.service_key}' by {claims.email}")
+    return _service_to_response(service, db)
 
 
 # ═══════════════════════════════════════════════════════════

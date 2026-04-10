@@ -283,16 +283,11 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
-              # Observability Service Routes (extended timeout for agentic LLM queries)
-              - id: observability-api
-                uri: http://localhost:8006
-                predicates:
-                    - Path=/api/v1/observe/**
-                filters:
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-                metadata:
-                  response-timeout: 120000
-                  connect-timeout: 5000
+              # NOTE: Observability service routes have moved to the
+              #       plugins/ObservabilityPluginRoutes.java class, gated by the
+              #       Spring profile `plugin-observability`. Activate via
+              #       SPRING_PROFILES_ACTIVE for environments where the
+              #       observability service is deployed (typically on-prem).
 
               # Answer Quality Service Routes
               - id: quality-feedback
@@ -472,39 +467,10 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
-              # Observability Service - Backend Management Admin
-              - id: admin-observability-root
-                uri: http://localhost:8006
-                predicates:
-                    - Path=/api/v1/admin/observability
-                filters:
-                  - RewritePath=/api/v1/admin/observability,/api/v1/observe/backends
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-
-              - id: admin-observability
-                uri: http://localhost:8006
-                predicates:
-                    - Path=/api/v1/admin/observability/**
-                filters:
-                  - RewritePath=/api/v1/admin/observability/(?<segment>.*),/api/v1/observe/backends/$\{segment}
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-
-              # Observability Service - LLM Provider Catalog Admin
-              - id: admin-llm-providers-root
-                uri: http://localhost:8006
-                predicates:
-                    - Path=/api/v1/admin/llm-providers
-                filters:
-                  - RewritePath=/api/v1/admin/llm-providers,/api/v1/observe/llm-providers
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-
-              - id: admin-llm-providers
-                uri: http://localhost:8006
-                predicates:
-                    - Path=/api/v1/admin/llm-providers/**
-                filters:
-                  - RewritePath=/api/v1/admin/llm-providers/(?<segment>.*),/api/v1/observe/llm-providers/$\{segment}
-                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+              # NOTE: admin-observability and admin-llm-providers routes have
+              #       moved to plugins/ObservabilityPluginRoutes.java (Spring
+              #       profile `plugin-observability`). See the note above the
+              #       observability-api removal earlier in this file.
 
               - id: quality-alerts
                 uri: http://localhost:8005
@@ -571,12 +537,9 @@ spring:
                 filters:
                     - RewritePath=/health/quality,/api/v1/health
 
-              - id: observability-health
-                uri: http://localhost:8006
-                predicates:
-                    - Path=/health/observability
-                filters:
-                    - RewritePath=/health/observability,/health
+              # NOTE: observability-health probe moved to
+              #       plugins/ObservabilityPluginRoutes.java (profile
+              #       `plugin-observability`).
 
               - id: auth-health
                 uri: http://localhost:8000
