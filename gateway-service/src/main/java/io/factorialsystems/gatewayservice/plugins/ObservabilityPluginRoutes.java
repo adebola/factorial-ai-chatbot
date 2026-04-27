@@ -67,9 +67,9 @@ public class ObservabilityPluginRoutes {
                         .metadata("connect-timeout", 5_000)
                         .uri(observabilityUri))
 
-                // ── Admin: backends CRUD ──
-                // /api/v1/admin/observability         -> /api/v1/observe/backends
-                // /api/v1/admin/observability/{seg..} -> /api/v1/observe/backends/{seg..}
+                // ── Admin: backend CRUD ──
+                // /api/v1/admin/observability -> /api/v1/observe/backends
+                // /api/v1/admin/observability/{seg.} -> /api/v1/observe/backends/{seg..}
                 .route("admin-observability-root", r -> r
                         .path("/api/v1/admin/observability")
                         .filters(f -> f
@@ -89,8 +89,8 @@ public class ObservabilityPluginRoutes {
                         .uri(observabilityUri))
 
                 // ── Admin: LLM provider catalog ──
-                // /api/v1/admin/llm-providers         -> /api/v1/observe/llm-providers
-                // /api/v1/admin/llm-providers/{seg..} -> /api/v1/observe/llm-providers/{seg..}
+                // /api/v1/admin/llm-providers -> /api/v1/observe/llm-providers
+                // /api/v1/admin/llm-providers/{seg.} -> /api/v1/observe/llm-providers/{seg..}
                 .route("admin-llm-providers-root", r -> r
                         .path("/api/v1/admin/llm-providers")
                         .filters(f -> f

@@ -24,13 +24,30 @@ spring:
         webflux:
           globalcors:
             cors-configurations:
+              # Widget-public routes — embedded on arbitrary customer sites.
+              # Tenant API key in Authorization header is the auth boundary, not Origin.
+              # NOTE: allowCredentials must be false when allowedOriginPatterns is "*".
+              # Bearer tokens in Authorization are NOT "credentials" per CORS spec, so this is fine.
+              # More specific paths listed first so Spring matches them before the catch-all below.
+              '[/api/v1/widget/**]':
+                allowedOriginPatterns: "*"
+                allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+                allowedHeaders: "*"
+                exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
+                allowCredentials: false
+              # Tenant branding (logo) — fetched by the widget when rendering on a customer site.
+              '[/api/v1/settings-logo/**]':
+                allowedOriginPatterns: "*"
+                allowedMethods: "GET, OPTIONS"
+                allowedHeaders: "*"
+                exposedHeaders: "Content-Type, Cache-Control, Content-Disposition"
+                allowCredentials: false
+              # All other routes — admin and user UIs only. Add new UI origins here, never customer sites.
               '[/**]':
                 allowedOriginPatterns:
                   - https://app.chatcraft.cc
-                  - https://factorai-370af.web.app
                   - https://chatcraft-admin.web.app
                   - https://chatcraft-admin.firebaseapp.com
-                  - https://www.emobilespecialisthospital.health
                 allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
                 allowedHeaders: "*"
                 exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"

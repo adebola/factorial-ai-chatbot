@@ -17,6 +17,7 @@ target/
 .idea/**/uiDesigner.xml
 .idea/**/gradle.xml
 .idea/**/libraries
+.idea/queries
 
 # Docker Compose Files (may contain sensitive information)
 docker-build/docker-compose*.yml

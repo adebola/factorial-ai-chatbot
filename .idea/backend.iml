@@ -6,6 +6,8 @@
       <sourceFolder url="file://$MODULE_DIR$/observability-service" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/observability-service/app" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/observability-service/venv/lib/python3.12/site-packages" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/chat-service" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/legal-service/venv/lib/python3.11/site-packages" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/venv" />
       <excludeFolder url="file://$MODULE_DIR$/chat-service/venv" />

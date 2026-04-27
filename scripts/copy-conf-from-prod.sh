@@ -1,0 +1,1 @@
+scp -i ../../../devops/LightsailDefaultKey-eu-west-2.pem bitnami@3.11.231.243:/opt/bitnami/nginx/conf/server_blocks/api.chatcraft.cc.conf /Users/adebola/Documents/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/docker-build

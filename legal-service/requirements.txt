@@ -1,0 +1,65 @@
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+python-multipart>=0.0.6
+
+# Database
+sqlalchemy>=2.0.35
+alembic>=1.14.0
+psycopg2-binary>=2.9.5
+pgvector>=0.3.0
+
+# Configuration
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# Authentication
+pyjwt>=2.8.0,<3.0.0
+cryptography>=41.0.0
+
+# HTTP client
+httpx>=0.28.0
+
+# Redis
+redis>=5.2.0
+
+# File storage
+minio>=7.2.0
+
+# Document processing
+pypdf>=4.0.0
+docx2txt>=0.8
+python-magic>=0.4.27
+
+# LangChain (agentic)
+langchain>=0.3.0
+langchain-openai>=0.3.0
+langchain-anthropic>=0.3.0
+langchain-community>=0.3.0
+langgraph>=0.2.0
+tiktoken>=0.7.0
+
+# Embeddings
+openai>=1.0.0
+
+# Text splitting
+langchain-text-splitters>=0.3.0
+
+# Logging
+loguru>=0.7.0
+structlog>=24.0.0
+
+# Audit
+aio-pika>=9.0.0
+
+# OpenTelemetry
+opentelemetry-api>=1.25.0
+opentelemetry-sdk>=1.25.0
+opentelemetry-exporter-otlp>=1.25.0
+opentelemetry-instrumentation-fastapi>=0.46b0
+opentelemetry-instrumentation-sqlalchemy>=0.46b0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
