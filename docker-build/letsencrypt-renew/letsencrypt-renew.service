@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew Let's Encrypt cert for api.chatcraft.cc
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/letsencrypt-renew/renew.sh
+TimeoutStartSec=300
+# Don't restart on failure — the timer will retry on the next tick
+Restart=no

@@ -25,10 +25,10 @@ spring:
           globalcors:
             cors-configurations:
               # Widget-public routes — embedded on arbitrary customer sites.
-              # Tenant API key in Authorization header is the auth boundary, not Origin.
+              # Tenant API key in the Authorization header is the auth boundary, not Origin.
               # NOTE: allowCredentials must be false when allowedOriginPatterns is "*".
               # Bearer tokens in Authorization are NOT "credentials" per CORS spec, so this is fine.
-              # More specific paths listed first so Spring matches them before the catch-all below.
+              # More specific paths listed first, so Spring matches them before the catch-all below.
               '[/api/v1/widget/**]':
                 allowedOriginPatterns: "*"
                 allowedMethods: "GET, POST, PUT, DELETE, OPTIONS, PATCH"
@@ -41,6 +41,14 @@ spring:
                 allowedMethods: "GET, OPTIONS"
                 allowedHeaders: "*"
                 exposedHeaders: "Content-Type, Cache-Control, Content-Disposition"
+                allowCredentials: false
+              # Widget feedback (thumbs up/down) — submitted from the chat widget on customer sites.
+              # Uses X-API-Key header (not cookies), so allowCredentials must be false.
+              '[/api/v1/feedback/widget/**]':
+                allowedOriginPatterns: "*"
+                allowedMethods: "POST, OPTIONS"
+                allowedHeaders: "*"
+                exposedHeaders: "Content-Type, Cache-Control, x-request-id"
                 allowCredentials: false
               # All other routes — admin and user UIs only. Add new UI origins here, never customer sites.
               '[/**]':
@@ -105,8 +113,6 @@ spring:
                 - Path=/api/v1/ingestions/**
               filters:
                 - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
-
-
 
             # Billing Service Routes (extracted from onboarding)
             - id: billing-plans

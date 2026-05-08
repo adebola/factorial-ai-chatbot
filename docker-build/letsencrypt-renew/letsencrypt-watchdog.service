@@ -1,0 +1,9 @@
+[Unit]
+Description=Let's Encrypt cert expiry watchdog for api.chatcraft.cc
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/letsencrypt-renew/watchdog.sh
+TimeoutStartSec=60
+Restart=no

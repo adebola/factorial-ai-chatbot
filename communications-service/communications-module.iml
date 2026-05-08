@@ -5,6 +5,7 @@
     <content url="file://$MODULE_DIR$">
       <sourceFolder url="file://$MODULE_DIR$/venv.backup.old/lib/python3.13/site-packages" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/venv.backup.old/lib/python3.13/site-packages/twilio" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/app" isTestSource="false" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.11 virtualenv at ~/Dropbox/ProjectsMacBook/FactorialSystems/Projects/factorialbot/dev/backend/billing-service/venv" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

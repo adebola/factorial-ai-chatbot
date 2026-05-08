@@ -1,0 +1,12 @@
+[Unit]
+Description=Run letsencrypt-renew every 12h
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=12h
+RandomizedDelaySec=30min
+Persistent=true
+Unit=letsencrypt-renew.service
+
+[Install]
+WantedBy=timers.target

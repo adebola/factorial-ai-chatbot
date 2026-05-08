@@ -38,7 +38,7 @@ class AuditPublisher:
 
         host = os.environ.get("RABBITMQ_HOST", "localhost")
         port = int(os.environ.get("RABBITMQ_PORT", "5672"))
-        user = os.environ.get("RABBITMQ_USER", "admin")
+        user = os.environ.get("RABBITMQ_USERNAME", "admin")
         password = os.environ.get("RABBITMQ_PASSWORD", "admin")
         vhost = os.environ.get("RABBITMQ_VHOST", "/")
 
