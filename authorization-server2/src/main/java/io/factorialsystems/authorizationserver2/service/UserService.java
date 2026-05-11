@@ -5,6 +5,8 @@ import io.factorialsystems.authorizationserver2.model.User;
 import io.factorialsystems.authorizationserver2.model.VerificationToken;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -75,20 +77,31 @@ public class UserService {
      */
     public User insertUser(String tenantId, String username, String email, String password,
                            String firstName, String lastName) {
-        // Check if user already exists
-        if (userMapper.findByUsername(username) != null) {
+        // Normalize FIRST so the duplicate check uses the same values that will be stored.
+        // Otherwise a check for "Admin@X.com" can pass while the insert of "admin@x.com" trips the unique constraint.
+        String normalizedUsername = username == null ? null : username.toLowerCase().trim();
+        String normalizedEmail = email == null ? null : email.toLowerCase().trim();
+
+        if (normalizedUsername == null || normalizedUsername.isEmpty()) {
+            throw new IllegalArgumentException("Username is required");
+        }
+        if (normalizedEmail == null || normalizedEmail.isEmpty()) {
+            throw new IllegalArgumentException("Email is required");
+        }
+
+        if (userMapper.findByUsername(normalizedUsername) != null) {
             throw new IllegalArgumentException("A user with this username already exists");
         }
 
-        if (userMapper.findByEmail(email) != null) {
+        if (userMapper.findByEmail(normalizedEmail) != null) {
             throw new IllegalArgumentException("A user with this email already exists");
         }
 
         User user = User.builder()
                 .id(UUID.randomUUID().toString())
                 .tenantId(tenantId)
-                .username(username.toLowerCase().trim())
-                .email(email.toLowerCase().trim())
+                .username(normalizedUsername)
+                .email(normalizedEmail)
                 .password(password != null ? passwordEncoder.encode(password) : null)
                 .firstName(firstName != null ? firstName.trim() : null)
                 .lastName(lastName != null ? lastName.trim() : null)
@@ -98,7 +111,21 @@ public class UserService {
                 .updatedAt(OffsetDateTime.now())
                 .build();
 
-        int result = userMapper.insert(user);
+        int result;
+        try {
+            result = userMapper.insert(user);
+        } catch (DuplicateKeyException e) {
+            // Race condition: another request inserted a row with the same username/email
+            // between our check and our insert. Translate to a friendly error.
+            log.warn("Duplicate key on user insert (race condition) for username={}, email={}: {}",
+                    normalizedUsername, normalizedEmail, e.getMostSpecificCause().getMessage());
+            throw new IllegalArgumentException("A user with this username or email already exists");
+        } catch (DataIntegrityViolationException e) {
+            log.warn("Data integrity violation on user insert for username={}, email={}: {}",
+                    normalizedUsername, normalizedEmail, e.getMostSpecificCause().getMessage());
+            throw new IllegalArgumentException("A user with this username or email already exists");
+        }
+
         if (result <= 0) {
             throw new RuntimeException("Failed to create user");
         }

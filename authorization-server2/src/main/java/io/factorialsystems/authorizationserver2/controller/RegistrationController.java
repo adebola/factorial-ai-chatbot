@@ -71,11 +71,39 @@ public class RegistrationController {
 
             return "register/registration-success";
 
-        } catch (Exception e) {
-            log.error("Registration failed for organization: {}", request.getName(), e);
-            model.addAttribute("errorMessage",
-                "Registration failed: " + e.getMessage() + ". Please try again.");
+        } catch (IllegalArgumentException e) {
+            // Known validation failure (duplicate username/email/name/domain, etc.)
+            // Surface the message but never expose stack traces or SQL details.
+            log.warn("Registration rejected for organization {}: {}", request.getName(), e.getMessage());
+            mapValidationErrorToField(e.getMessage(), bindingResult);
+            model.addAttribute("errorMessage", e.getMessage());
             return "register/tenant-registration";
+        } catch (Exception e) {
+            // Unexpected failure: log the details, but show the user a generic message.
+            log.error("Registration failed unexpectedly for organization: {}", request.getName(), e);
+            model.addAttribute("errorMessage",
+                "We could not complete your registration due to an unexpected error. Please try again later.");
+            return "register/tenant-registration";
+        }
+    }
+
+    /**
+     * Map a known IllegalArgumentException message to the matching form field so the user
+     * sees the error inline next to the offending input instead of just a top-level banner.
+     */
+    private void mapValidationErrorToField(String message, BindingResult bindingResult) {
+        if (message == null) {
+            return;
+        }
+        String lower = message.toLowerCase();
+        if (lower.contains("username")) {
+            bindingResult.rejectValue("adminUsername", "username.taken", message);
+        } else if (lower.contains("email")) {
+            bindingResult.rejectValue("adminEmail", "email.taken", message);
+        } else if (lower.contains("domain")) {
+            bindingResult.rejectValue("domain", "domain.taken", message);
+        } else if (lower.contains("tenant") || lower.contains("organization") || lower.contains("name")) {
+            bindingResult.rejectValue("name", "name.taken", message);
         }
     }
 

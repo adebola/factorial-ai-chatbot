@@ -6,6 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -92,12 +94,22 @@ public class TenantService {
      * Designed to participate in an outer transaction managed by RegistrationService.
      */
     public Tenant insertTenant(String name, String domain) {
-        // Check if tenant already exists (only if domain is provided)
-        if (domain != null && tenantMapper.findByDomain(domain) != null) {
+        // Normalize FIRST so the duplicate check uses the same values that will be stored.
+        String normalizedName = name == null ? null : name.trim();
+        String normalizedDomain = domain == null ? null : domain.toLowerCase().trim();
+        if (normalizedDomain != null && normalizedDomain.isEmpty()) {
+            normalizedDomain = null;
+        }
+
+        if (normalizedName == null || normalizedName.isEmpty()) {
+            throw new IllegalArgumentException("Organization name is required");
+        }
+
+        if (normalizedDomain != null && tenantMapper.findByDomain(normalizedDomain) != null) {
             throw new IllegalArgumentException("A tenant with this domain already exists");
         }
 
-        if (tenantMapper.findByName(name) != null) {
+        if (tenantMapper.findByName(normalizedName) != null) {
             throw new IllegalArgumentException("A tenant with this name already exists");
         }
 
@@ -119,8 +131,8 @@ public class TenantService {
         // Create new tenant
         Tenant tenant = Tenant.builder()
                 .id(UUID.randomUUID().toString())
-                .name(name.trim())
-                .domain(domain != null ? domain.toLowerCase().trim() : null)
+                .name(normalizedName)
+                .domain(normalizedDomain)
                 .apiKey(apiKey)
                 .planId(freePlanId)
                 .isActive(true)
@@ -128,7 +140,21 @@ public class TenantService {
                 .updatedAt(OffsetDateTime.now())
                 .build();
 
-        int result = tenantMapper.insert(tenant);
+        int result;
+        try {
+            result = tenantMapper.insert(tenant);
+        } catch (DuplicateKeyException e) {
+            // Race condition: another request inserted a row with the same name/domain
+            // between our check and our insert.
+            log.warn("Duplicate key on tenant insert (race condition) for name={}, domain={}: {}",
+                    normalizedName, normalizedDomain, e.getMostSpecificCause().getMessage());
+            throw new IllegalArgumentException("A tenant with this name or domain already exists");
+        } catch (DataIntegrityViolationException e) {
+            log.warn("Data integrity violation on tenant insert for name={}, domain={}: {}",
+                    normalizedName, normalizedDomain, e.getMostSpecificCause().getMessage());
+            throw new IllegalArgumentException("A tenant with this name or domain already exists");
+        }
+
         if (result <= 0) {
             throw new RuntimeException("Failed to create tenant");
         }
