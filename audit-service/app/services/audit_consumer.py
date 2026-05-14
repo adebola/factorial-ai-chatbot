@@ -55,7 +55,7 @@ class AuditEventConsumer:
         logger.info("Audit consumer started consuming")
 
     async def _process_message(self, message: aio_pika.IncomingMessage):
-        logger.info(f"Processing Message : {message}")
+        logger.info(f"Processing Message : {message.routing_key}")
 
         async with message.process():
             try:
