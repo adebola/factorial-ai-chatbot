@@ -25,6 +25,8 @@ from ..models.plan import Plan
 
 from ..services.audit_publisher import audit_publisher
 from ..services.dependencies import get_full_tenant_details
+from ..services.email_publisher import email_publisher
+from ..services.pdf_generator import PDFGenerator
 from ..core.logging_config import get_logger
 
 router = APIRouter(prefix="/admin/billing", tags=["Admin - Billing"])
@@ -564,6 +566,8 @@ async def create_manual_payment(
 
         # Extend subscription if requested
         invoice_number = None
+        invoice = None
+        invoice_service = None
         if payment_data.should_extend_subscription:
             # Determine new period start
             if subscription.status == "expired":
@@ -669,9 +673,50 @@ async def create_manual_payment(
         except Exception:
             pass
 
-        # TODO: Send confirmation email if requested
-        # if payment_data.send_confirmation_email:
-        #     email_publisher.publish_manual_payment_confirmation(...)
+        # Send confirmation emails (always, unconditional).
+        # Best-effort: failures are logged but never break the API response.
+        try:
+            plan = db.query(Plan).filter(Plan.id == subscription.plan_id).first()
+            plan_name = plan.name if plan else "Subscription"
+            to_email = subscription.user_email
+            to_name = subscription.user_full_name or "Valued Customer"
+
+            if to_email:
+                await email_publisher.publish_payment_successful_email(
+                    tenant_id=subscription.tenant_id,
+                    to_email=to_email,
+                    to_name=to_name,
+                    plan_name=plan_name,
+                    amount=float(payment_data.amount),
+                    currency=subscription.currency or "NGN",
+                )
+
+                if invoice is not None and invoice_service is not None:
+                    pdf_bytes, pdf_error = invoice_service.generate_invoice_pdf(invoice.id)
+                    pdf_attachment = None
+                    if pdf_bytes:
+                        pdf_attachment = PDFGenerator().generate_attachment_dict(
+                            pdf_bytes, invoice.invoice_number
+                        )
+                    else:
+                        logger.warning(
+                            "Invoice PDF generation failed; sending invoice email without attachment",
+                            extra={"invoice_id": invoice.id, "error": pdf_error},
+                        )
+
+                    await email_publisher.publish_invoice_email(
+                        tenant_id=subscription.tenant_id,
+                        to_email=to_email,
+                        to_name=to_name,
+                        invoice_number=invoice.invoice_number,
+                        total_amount=float(invoice.total_amount),
+                        currency=invoice.currency,
+                        due_date=invoice.due_date,
+                        status=invoice.status,
+                        pdf_attachment=pdf_attachment,
+                    )
+        except Exception as e:
+            logger.exception(f"Failed to send manual payment confirmation emails: {e}")
 
         return ManualPaymentResponse(
             success=True,
