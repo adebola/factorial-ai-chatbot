@@ -11,10 +11,21 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies.
+# The libpango/libcairo/libgdk-pixbuf set is required by weasyprint, which
+# pdf_generator.py uses to render invoice PDFs. Without these, weasyprint
+# crashes at import time when trying to dlopen libgobject-2.0-0 (pulled in
+# transitively by libpango). shared-mime-info is needed for image-type
+# detection during PDF rendering.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     postgresql-client \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf-2.0-0 \
+    libffi8 \
+    shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies

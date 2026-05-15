@@ -26,7 +26,11 @@ from ..models.plan import Plan
 from ..services.audit_publisher import audit_publisher
 from ..services.dependencies import get_full_tenant_details
 from ..services.email_publisher import email_publisher
-from ..services.pdf_generator import PDFGenerator
+# NOTE: PDFGenerator is imported lazily inside create_manual_payment() because
+# weasyprint loads native libraries (libgobject/pango/cairo) at import time.
+# Some deployment images don't ship those libs; a module-level import would
+# crash the whole service at startup. Match the lazy-import pattern used by
+# subscription_service.verify_subscription_payment().
 from ..core.logging_config import get_logger
 
 router = APIRouter(prefix="/admin/billing", tags=["Admin - Billing"])
@@ -692,6 +696,8 @@ async def create_manual_payment(
                 )
 
                 if invoice is not None and invoice_service is not None:
+                    # Lazy import — see note at top of file.
+                    from ..services.pdf_generator import PDFGenerator
                     pdf_bytes, pdf_error = invoice_service.generate_invoice_pdf(invoice.id)
                     pdf_attachment = None
                     if pdf_bytes:
