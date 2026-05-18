@@ -419,6 +419,14 @@ spring:
                 filters:
                   - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
 
+              # Chat Service - RAG Diagnostic Admin
+              - id: admin-rag-debug
+                uri: http://localhost:8000
+                predicates:
+                    - Path=/api/v1/admin/rag/**
+                filters:
+                  - RewriteLocationResponseHeader=AS_IN_REQUEST, Location, ,
+
               # Chat Service - Agent Session Admin
               - id: admin-agent-sessions
                 uri: http://localhost:8000

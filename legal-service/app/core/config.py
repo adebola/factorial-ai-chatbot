@@ -1,3 +1,4 @@
+import os
 from pydantic_settings import BaseSettings
 
 
@@ -21,7 +22,10 @@ class Settings(BaseSettings):
     # Document processing
     CHUNK_SIZE: int = 1500
     CHUNK_OVERLAP: int = 300
-    EMBEDDING_MODEL: str = "text-embedding-ada-002"
+    # Env-driven model name so legal-service stays in sync with the other
+    # services once OPENAI_EMBEDDING_MODEL=text-embedding-3-small is rolled
+    # out post re-embed.
+    EMBEDDING_MODEL: str = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
     EMBEDDING_DIMENSIONS: int = 1536
 
     # MinIO storage prefix
