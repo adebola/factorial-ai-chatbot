@@ -9,6 +9,13 @@ from openai import OpenAI
 from ..core.logging_config import get_logger, log_vector_operation, log_document_processing
 
 
+# Embedding model — env-driven so all services flip in lockstep after a
+# re-embed. Default stays on ada-002 for safe rollout; set
+# OPENAI_EMBEDDING_MODEL=text-embedding-3-small after running
+# scripts/reembed_chunks.py.
+EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
+
+
 class PgVectorIngestionService:
     """PostgresSQL-based vector ingestion service using pgvector"""
     
@@ -47,7 +54,7 @@ class PgVectorIngestionService:
         try:
             self.logger.info(f"Generating embeddings for {len(texts)} text chunks")
             response = self.openai_client.embeddings.create(
-                model="text-embedding-ada-002",
+                model=EMBEDDING_MODEL,
                 input=texts
             )
             embeddings = [item.embedding for item in response.data]
@@ -59,7 +66,7 @@ class PgVectorIngestionService:
                     from .token_usage_service import token_usage_service
                     token_usage_service.record_usage(
                         tenant_id=tenant_id,
-                        model="text-embedding-ada-002",
+                        model=EMBEDDING_MODEL,
                         usage_type="embedding",
                         prompt_tokens=response.usage.prompt_tokens,
                         completion_tokens=0,
@@ -107,8 +114,16 @@ class PgVectorIngestionService:
             for i in range(0, len(documents), batch_size):
                 batch = documents[i:i + batch_size]
                 
-                # Generate embeddings for this batch
-                texts = [doc.page_content for doc in batch]
+                # Generate embeddings for this batch.
+                # If a chunk supplies an `embed_text` metadata override (e.g.
+                # section-heading-prefixed content from the HTML-aware chunker),
+                # use that for the embedding while still storing the raw
+                # `page_content` in the DB. This boosts semantic recall for
+                # thematic queries without polluting the source-of-truth text.
+                texts = [
+                    (doc.metadata.get('embed_text') if doc.metadata else None) or doc.page_content
+                    for doc in batch
+                ]
                 embeddings = self._generate_embeddings(texts, tenant_id=tenant_id, source_id=document_id or ingestion_id)
                 
                 # Prepare batch insert data
@@ -133,7 +148,8 @@ class PgVectorIngestionService:
                     source_type = metadata.get('source_type', 'document')
                     source_name = self._sanitize_content(metadata.get('source_name', ''))
                     page_number = metadata.get('page', None)
-                    section_title = self._sanitize_content(metadata.get('section_title', '') if metadata.get('section_title') else None)
+                    raw_section_title = metadata.get('section_title')
+                    section_title = self._sanitize_content(raw_section_title) if raw_section_title else None
 
                     # Extract categorization data from metadata
                     category_ids = metadata.get('category_ids', [])

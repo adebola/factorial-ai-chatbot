@@ -12,6 +12,7 @@ from .api.admin_chat import router as admin_chat_router
 from .api.auth import router as auth_router
 from .api.admin_token_usage import router as admin_token_usage_router
 from .api.admin_chat_monitoring import router as admin_chat_monitoring_router
+from .api.admin_rag_debug import router as admin_rag_debug_router
 from .websockets.agent_chat import agent_websocket_endpoint, agent_chat_router
 from .api.agent_admin import router as agent_admin_router
 from .core.telemetry import setup_telemetry
@@ -264,6 +265,7 @@ app.include_router(admin_chat_router, prefix=f"{settings.API_V1_STR}/chat", tags
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["auth"])
 app.include_router(admin_token_usage_router, prefix=f"{settings.API_V1_STR}/chat", tags=["admin", "token-usage"])
 app.include_router(admin_chat_monitoring_router, prefix=f"{settings.API_V1_STR}/admin/chat-monitoring", tags=["admin", "chat-monitoring"])
+app.include_router(admin_rag_debug_router, prefix=f"{settings.API_V1_STR}/admin/rag", tags=["admin", "rag-debug"])
 
 # Also include WebSocket route at root level for easier client access
 app.include_router(chat_router)

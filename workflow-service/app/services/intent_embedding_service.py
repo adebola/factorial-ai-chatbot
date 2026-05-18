@@ -19,7 +19,11 @@ from .redis_auth_cache import redis_token_cache
 
 logger = get_logger("intent_embedding")
 
-EMBEDDING_MODEL = "text-embedding-ada-002"
+# Env-driven so all services flip in lockstep after re-embedding stored intent
+# vectors. Default ada-002 for safe rollout; set
+# OPENAI_EMBEDDING_MODEL=text-embedding-3-small after re-embedding both
+# vectors.document_chunks AND vectors.workflow_intent_embeddings.
+EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
 EMBEDDING_CACHE_TTL = 3600  # 1 hour
 
 

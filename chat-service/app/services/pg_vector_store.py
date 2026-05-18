@@ -27,6 +27,12 @@ class PgVectorStore:
     # Embedding cache TTL in seconds (1 hour)
     EMBEDDING_CACHE_TTL = 3600
 
+    # Embedding model — read from env so all services can be flipped in
+    # lockstep after a re-embed. Default stays on ada-002 for safe rollout;
+    # set OPENAI_EMBEDDING_MODEL=text-embedding-3-small after running
+    # scripts/reembed_chunks.py.
+    EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
+
     def __init__(self):
         self.logger = get_logger("pg_vector_store")
 
@@ -100,7 +106,7 @@ class PgVectorStore:
         if uncached_texts:
             try:
                 response = self.openai_client.embeddings.create(
-                    model="text-embedding-ada-002",
+                    model=self.EMBEDDING_MODEL,
                     input=uncached_texts,
                     timeout=15.0
                 )
@@ -115,7 +121,7 @@ class PgVectorStore:
                         from .token_usage_service import token_usage_service
                         token_usage_service.record_usage(
                             tenant_id=tenant_id,
-                            model="text-embedding-ada-002",
+                            model=self.EMBEDDING_MODEL,
                             usage_type="embedding",
                             prompt_tokens=response.usage.prompt_tokens,
                             completion_tokens=0,
@@ -135,6 +141,10 @@ class PgVectorStore:
 
         return results
 
+    # RRF constant. 60 is the canonical default from the original RRF paper
+    # (Cormack et al., 2009) and works well without tuning.
+    RRF_K = 60
+
     def search_similar(
         self,
         tenant_id: str,
@@ -145,18 +155,24 @@ class PgVectorStore:
         content_types: List[str] = None
     ) -> List[Document]:
         """
-        Search for similar documents using vector similarity with optional filtering.
+        Hybrid retrieval: vector similarity + lexical full-text search fused
+        via Reciprocal Rank Fusion (RRF).
+
+        Vector search catches semantic matches even when wording differs;
+        lexical search rescues literal keyword queries (e.g. "careers",
+        "embryologist") when relevant content is in a chunk whose prevailing
+        topic doesn't dominate the embedding. Returning the fused top-K means
+        either signal can surface a chunk.
 
         Args:
             tenant_id: The tenant ID to search within
             query: The search query text
-            k: Number of similar documents to return (default: 4)
-            category_ids: Optional list of category IDs to filter by
-            tag_ids: Optional list of tag IDs to filter by
-            content_types: Optional list of content types to filter by
+            k: Number of fused results to return
+            category_ids/tag_ids/content_types: Optional filters applied to
+                both legs.
 
         Returns:
-            List of similar documents with metadata including categorization
+            List of Document objects, ordered by combined RRF score.
         """
         try:
             # Generate embedding for query
@@ -165,69 +181,21 @@ class PgVectorStore:
 
             session = self.SessionLocal()
             try:
-                # Build dynamic WHERE clause for filters (includes distance threshold)
-                where_clauses = [
-                    "tenant_id = :tenant_id",
-                    "(embedding <=> :query_embedding) < :max_distance"
-                ]
-                params = {
-                    "tenant_id": tenant_id,
-                    "query_embedding": str(query_embedding),
-                    "k": k,
-                    "max_distance": self.MAX_DISTANCE
-                }
+                # Fetch a larger pool from each leg than the final k so the
+                # fusion has room to combine signals. 4x k bounded to a
+                # reasonable ceiling is plenty for typical k=4..10.
+                pool_size = max(k * 4, 20)
 
-                # Add category filter if provided
-                if category_ids:
-                    where_clauses.append("category_ids && :category_ids")
-                    # Convert Python list to PostgreSQL array format
-                    params["category_ids"] = '{' + ','.join(category_ids) + '}'
+                vec_rows = self._vector_search(
+                    session, tenant_id, query_embedding, pool_size,
+                    category_ids, tag_ids, content_types
+                )
+                lex_rows = self._lexical_search(
+                    session, tenant_id, query, pool_size,
+                    category_ids, tag_ids, content_types
+                )
 
-                # Add tag filter if provided
-                if tag_ids:
-                    where_clauses.append("tag_ids && :tag_ids")
-                    params["tag_ids"] = '{' + ','.join(tag_ids) + '}'
-
-                # Add content_type filter if provided
-                if content_types:
-                    where_clauses.append("content_type = ANY(:content_types)")
-                    params["content_types"] = content_types
-
-                where_clause = " AND ".join(where_clauses)
-
-                # Perform vector similarity search with filters
-                query_sql = f"""
-                    SELECT content, source_type, source_name, page_number, section_title,
-                           category_ids, tag_ids, content_type,
-                           (embedding <=> :query_embedding) as distance
-                    FROM vectors.document_chunks
-                    WHERE {where_clause}
-                    ORDER BY embedding <=> :query_embedding
-                    LIMIT :k
-                """
-
-                results = session.execute(text(query_sql), params).fetchall()
-
-                # Convert to Document objects
-                documents = []
-                for row in results:
-                    metadata = {
-                        'source_type': row.source_type,
-                        'source_name': row.source_name,
-                        'page': row.page_number,
-                        'section_title': row.section_title,
-                        'category_ids': list(row.category_ids) if row.category_ids else [],
-                        'tag_ids': list(row.tag_ids) if row.tag_ids else [],
-                        'content_type': row.content_type,
-                        'distance': float(row.distance)
-                    }
-                    # Remove None values
-                    metadata = {k: v for k, v in metadata.items() if v is not None}
-
-                    documents.append(Document(
-                        page_content=row.content,
-                        metadata=metadata
-                    ))
+                documents = self._rrf_fuse(vec_rows, lex_rows, k=k)
 
                 filter_info = []
                 if category_ids:
@@ -236,17 +204,168 @@ class PgVectorStore:
                     filter_info.append(f"tags={len(tag_ids)}")
                 if content_types:
                     filter_info.append(f"types={','.join(content_types)}")
-
                 filter_str = f" with filters: {', '.join(filter_info)}" if filter_info else ""
-                self.logger.info(f"Vector search returned {len(documents)} documents for tenant {tenant_id}{filter_str}")
+
+                self.logger.info(
+                    f"Hybrid search returned {len(documents)} docs "
+                    f"(vector={len(vec_rows)}, lexical={len(lex_rows)}) "
+                    f"for tenant {tenant_id}{filter_str}"
+                )
                 return documents
 
             finally:
                 session.close()
 
         except Exception as e:
-            self.logger.error(f"Vector search failed for tenant {tenant_id}: {e}")
+            self.logger.error(f"Hybrid search failed for tenant {tenant_id}: {e}")
             return []
+
+    # ------------------------------------------------------------- vector leg
+    def _vector_search(
+        self,
+        session: Session,
+        tenant_id: str,
+        query_embedding: List[float],
+        k: int,
+        category_ids: Optional[List[str]],
+        tag_ids: Optional[List[str]],
+        content_types: Optional[List[str]],
+    ):
+        """Vector similarity leg of the hybrid retrieval. Applies the cosine
+        distance threshold so off-topic chunks don't pollute the pool."""
+        where_clauses = [
+            "tenant_id = :tenant_id",
+            "(embedding <=> :query_embedding) < :max_distance",
+        ]
+        params = {
+            "tenant_id": tenant_id,
+            "query_embedding": str(query_embedding),
+            "k": k,
+            "max_distance": self.MAX_DISTANCE,
+        }
+        if category_ids:
+            where_clauses.append("category_ids && :category_ids")
+            params["category_ids"] = '{' + ','.join(category_ids) + '}'
+        if tag_ids:
+            where_clauses.append("tag_ids && :tag_ids")
+            params["tag_ids"] = '{' + ','.join(tag_ids) + '}'
+        if content_types:
+            where_clauses.append("content_type = ANY(:content_types)")
+            params["content_types"] = content_types
+
+        where_clause = " AND ".join(where_clauses)
+        query_sql = f"""
+            SELECT id, content, source_type, source_name, page_number, section_title,
+                   category_ids, tag_ids, content_type,
+                   (embedding <=> :query_embedding) AS distance
+            FROM vectors.document_chunks
+            WHERE {where_clause}
+            ORDER BY embedding <=> :query_embedding
+            LIMIT :k
+        """
+        return session.execute(text(query_sql), params).fetchall()
+
+    # ------------------------------------------------------------ lexical leg
+    def _lexical_search(
+        self,
+        session: Session,
+        tenant_id: str,
+        query: str,
+        k: int,
+        category_ids: Optional[List[str]],
+        tag_ids: Optional[List[str]],
+        content_types: Optional[List[str]],
+    ):
+        """Full-text leg of the hybrid retrieval. No distance threshold —
+        either a keyword matches or it doesn't. Returns empty if the query
+        has no useful tokens (e.g. all stopwords)."""
+        if not query or not query.strip():
+            return []
+
+        where_clauses = [
+            "tenant_id = :tenant_id",
+            "content_tsv @@ plainto_tsquery('english', :q)",
+        ]
+        params = {
+            "tenant_id": tenant_id,
+            "q": query,
+            "k": k,
+        }
+        if category_ids:
+            where_clauses.append("category_ids && :category_ids")
+            params["category_ids"] = '{' + ','.join(category_ids) + '}'
+        if tag_ids:
+            where_clauses.append("tag_ids && :tag_ids")
+            params["tag_ids"] = '{' + ','.join(tag_ids) + '}'
+        if content_types:
+            where_clauses.append("content_type = ANY(:content_types)")
+            params["content_types"] = content_types
+
+        where_clause = " AND ".join(where_clauses)
+        query_sql = f"""
+            SELECT id, content, source_type, source_name, page_number, section_title,
+                   category_ids, tag_ids, content_type,
+                   ts_rank_cd(content_tsv, plainto_tsquery('english', :q)) AS lex_score
+            FROM vectors.document_chunks
+            WHERE {where_clause}
+            ORDER BY lex_score DESC
+            LIMIT :k
+        """
+        try:
+            return session.execute(text(query_sql), params).fetchall()
+        except Exception as e:
+            # If the migration hasn't been applied yet (no content_tsv column)
+            # the lexical leg degrades gracefully — vector results still flow.
+            self.logger.warning(
+                f"Lexical search unavailable for tenant {tenant_id} "
+                f"(migration not applied?): {e}"
+            )
+            return []
+
+    # ------------------------------------------------------------- RRF fusion
+    def _rrf_fuse(self, vec_rows, lex_rows, k: int) -> List[Document]:
+        """
+        Reciprocal Rank Fusion: score(chunk) = sum(1 / (RRF_K + rank_in_list))
+        across both lists. Chunks ranked highly by either method bubble up;
+        chunks in BOTH lists rank highest.
+        """
+        scores: Dict[str, float] = {}
+        rows_by_id: Dict[str, Any] = {}
+
+        for rank, row in enumerate(vec_rows, start=1):
+            cid = row.id
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (self.RRF_K + rank)
+            rows_by_id.setdefault(cid, row)
+
+        for rank, row in enumerate(lex_rows, start=1):
+            cid = row.id
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (self.RRF_K + rank)
+            rows_by_id.setdefault(cid, row)
+
+        ordered_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)[:k]
+        return [
+            self._row_to_document(rows_by_id[cid], scores[cid])
+            for cid in ordered_ids
+        ]
+
+    @staticmethod
+    def _row_to_document(row, rrf_score: float) -> Document:
+        metadata = {
+            'source_type': getattr(row, 'source_type', None),
+            'source_name': getattr(row, 'source_name', None),
+            'page': getattr(row, 'page_number', None),
+            'section_title': getattr(row, 'section_title', None),
+            'category_ids': list(row.category_ids) if getattr(row, 'category_ids', None) else [],
+            'tag_ids': list(row.tag_ids) if getattr(row, 'tag_ids', None) else [],
+            'content_type': getattr(row, 'content_type', None),
+            'rrf_score': float(rrf_score),
+        }
+        # `distance` only present on vector-leg rows
+        if hasattr(row, 'distance') and row.distance is not None:
+            metadata['distance'] = float(row.distance)
+        # Strip None entries (chat_service.py displays metadata)
+        metadata = {k: v for k, v in metadata.items() if v is not None}
+        return Document(page_content=row.content, metadata=metadata)
 
     def search_with_score(
         self,

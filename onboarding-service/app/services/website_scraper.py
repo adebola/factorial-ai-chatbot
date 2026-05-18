@@ -1,8 +1,8 @@
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from urllib.parse import urljoin, urlparse
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, HTMLHeaderTextSplitter
 from sqlalchemy.orm import Session
 from typing import List, Set, Optional, Dict
 import time
@@ -20,6 +20,47 @@ from ..core.logging_config import get_logger
 
 # Initialize logger
 logger = get_logger("website_scraper")
+
+
+_HIDDEN_SELECTORS = (
+    "[hidden]",
+    "[aria-hidden='true']",
+    ".sr-only",
+    ".visually-hidden",
+    ".visuallyhidden",
+    ".screen-reader-text",
+    ".d-none",
+    "[style*='display:none']",
+    "[style*='display: none']",
+    "[style*='display :none']",
+    "[style*='display : none']",
+    "[style*='DISPLAY:NONE']",
+    "[style*='DISPLAY: NONE']",
+    "[style*='visibility:hidden']",
+    "[style*='visibility: hidden']",
+    "[style*='VISIBILITY:HIDDEN']",
+    "[style*='VISIBILITY: HIDDEN']",
+)
+
+
+def _decompose_hidden_elements(content_source) -> None:
+    """Remove elements hidden from sighted users (inline style or hidden attr/class).
+
+    BeautifulSoup doesn't evaluate CSS, so display:none fallback blocks like
+    `<div id="noJobsMessage" style="display:none">No Current Openings</div>`
+    would otherwise be indexed and directly contradict the visible content.
+    """
+    for sel in _HIDDEN_SELECTORS:
+        for el in content_source.select(sel):
+            el.decompose()
+
+
+def _strip_html_comments(content_source) -> None:
+    """Remove HTML comments. langchain's HTMLHeaderTextSplitter emits comment
+    text into chunks; developer markers like `<!-- Job Card 1: Nurses -->`
+    end up as embed-time content and degrade similarity scores."""
+    for c in content_source.find_all(string=lambda t: isinstance(t, Comment)):
+        c.extract()
 
 
 class ScrapingStrategy(str, Enum):
@@ -65,6 +106,139 @@ class WebsiteScraper:
             chunk_size=1000,
             chunk_overlap=200,
             length_function=len)
+        # Split on h1/h2/h3 boundaries so each chunk carries its nearest heading
+        # as metadata. The "Join Our Team" / "Current Opportunities" style
+        # sections on long About pages get their own chunk family this way.
+        self.header_splitter = HTMLHeaderTextSplitter(
+            headers_to_split_on=[("h1", "h1"), ("h2", "h2"), ("h3", "h3")]
+        )
+        # When a single section exceeds this many characters, sub-split it with
+        # the character splitter so embeddings stay focused.
+        self.section_split_threshold = 1200
+
+    # ---------------------------------------------------------------- chunking
+    def _chunk_html_with_sections(
+        self,
+        page_doc: Document,
+        page_html,
+        url: str,
+    ) -> List[Document]:
+        """
+        Produce section-aware chunks from a scraped HTML page.
+
+        Strategy:
+          1. Pick the main content region (mirror the same selector logic the
+             page extractors use) and decompose unwanted elements.
+          2. Run HTMLHeaderTextSplitter so each text fragment carries the
+             nearest h1/h2/h3 in its metadata.
+          3. Regroup fragments by (h1, h2, h3) so a section ends up as a
+             single body of text instead of many tiny per-paragraph chunks.
+          4. If a section is too large, sub-split it with the character
+             splitter.
+          5. Set `section_title` (most specific available) and an
+             `embed_text` override that prepends the heading to the chunk
+             content so embedding semantics reflect the section topic.
+
+        Falls back to plain-text chunking of `page_doc.page_content` if the
+        HTML has no headings or anything goes wrong.
+        """
+        chunks: List[Document] = []
+        try:
+            if page_html is None:
+                raise ValueError("page_html is None")
+            html_str = page_html.decode("utf-8", errors="ignore") if isinstance(page_html, bytes) else page_html
+            soup = BeautifulSoup(html_str, "html.parser")
+
+            content_selectors = [
+                "main", "article", "[role=\"main\"]",
+                ".content", ".main-content", "#content", "#main", "body",
+            ]
+            main_content = None
+            for selector in content_selectors:
+                main_content = soup.select_one(selector)
+                if main_content:
+                    break
+            content_source = main_content if main_content else soup
+
+            unwanted_elements = [
+                "script", "style", "noscript", "iframe", "object", "embed",
+                "img", "svg", "canvas", "video", "audio",
+                "link", "meta", "base",
+                "[class*='advertisement']", "[class*='banner']",
+                "[class*='cookie-banner']", "[class*='cookie-consent']",
+                "[class*='popup']", "[class*='modal']",
+            ]
+            for sel in unwanted_elements:
+                for el in content_source.select(sel):
+                    el.decompose()
+            _decompose_hidden_elements(content_source)
+            _strip_html_comments(content_source)
+
+            cleaned_html = str(content_source)
+            section_docs = self.header_splitter.split_text(cleaned_html)
+
+            # Group fragments by their (h1, h2, h3) header tuple
+            grouped: Dict[tuple, List[str]] = {}
+            grouped_order: List[tuple] = []
+            for sec in section_docs:
+                meta = sec.metadata or {}
+                h1 = meta.get("h1")
+                h2 = meta.get("h2")
+                h3 = meta.get("h3")
+                content = (sec.page_content or "").strip()
+                if not content:
+                    continue
+                # Skip pure heading-text fragments (the splitter emits these too)
+                if content in (h1, h2, h3):
+                    continue
+                key = (h1, h2, h3)
+                if key not in grouped:
+                    grouped[key] = []
+                    grouped_order.append(key)
+                grouped[key].append(content)
+
+            for key in grouped_order:
+                h1, h2, h3 = key
+                section_title = h3 or h2 or h1
+                section_text = "\n\n".join(grouped[key]).strip()
+                if not section_text:
+                    continue
+                if len(section_text) > self.section_split_threshold:
+                    pieces = self.text_splitter.split_text(section_text)
+                else:
+                    pieces = [section_text]
+                for piece in pieces:
+                    piece = piece.strip()
+                    if not piece:
+                        continue
+                    embed_text = f"{section_title}\n\n{piece}" if section_title else piece
+                    metadata = dict(page_doc.metadata or {})
+                    metadata.update({
+                        "source_type": "website",
+                        "source_name": url,
+                        "section_title": section_title,
+                        "embed_text": embed_text,
+                    })
+                    chunks.append(Document(page_content=piece, metadata=metadata))
+        except Exception as e:
+            logger.warning(
+                "HTML-aware chunking failed; falling back to plain-text chunker",
+                url=url,
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            chunks = []
+
+        if chunks:
+            return chunks
+
+        # Fallback: chunk the already-extracted plain text. No section_title,
+        # but at least we still index the page.
+        fallback_chunks = self.text_splitter.split_documents([page_doc])
+        for c in fallback_chunks:
+            c.metadata.setdefault("source_type", "website")
+            c.metadata.setdefault("source_name", url)
+        return fallback_chunks
 
     def should_skip_url(self, url: str) -> bool:
         """
@@ -298,10 +472,13 @@ class WebsiteScraper:
                     page_duration = time.time() - page_start_time
 
                     if page_doc:
-                        # Split into chunks
-                        chunks = self.text_splitter.split_documents([page_doc])
+                        # Split into chunks — HTML-aware when raw HTML is
+                        # available, falling back to plain-text chunks if not.
+                        chunks = self._chunk_html_with_sections(
+                            page_doc, page_html, current_url
+                        )
 
-                        # Add metadata
+                        # Add ingestion-level metadata to every chunk
                         for chunk in chunks:
                             chunk.metadata.update({
                                 "tenant_id": tenant_id,
@@ -772,7 +949,9 @@ class WebsiteScraper:
             for element_selector in unwanted_elements:
                 for element in content_source.select(element_selector):
                     element.decompose()
-            
+            _decompose_hidden_elements(content_source)
+            _strip_html_comments(content_source)
+
             # Get text content
             content = content_source.get_text()
             
@@ -1029,6 +1208,8 @@ class WebsiteScraper:
                     for element_selector in unwanted_elements:
                         for element in content_source.select(element_selector):
                             element.decompose()
+                    _decompose_hidden_elements(content_source)
+                    _strip_html_comments(content_source)
 
                     # Get text content
                     content = content_source.get_text()

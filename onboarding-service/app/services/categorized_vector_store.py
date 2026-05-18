@@ -2,6 +2,7 @@
 Enhanced vector store with category-based filtering for improved search performance.
 """
 import json
+import os
 import time
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
@@ -16,6 +17,10 @@ from app.core.logging_config import get_logger
 from app.models.categorization import DocumentCategory, DocumentTag
 
 logger = get_logger("categorized_vector_store")
+
+# Embedding model — env-driven, default ada-002 for safe rollout. See
+# scripts/reembed_chunks.py before flipping to text-embedding-3-small.
+EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-ada-002")
 
 
 class CategorizedVectorStore:
@@ -165,7 +170,7 @@ class CategorizedVectorStore:
         """Generate OpenAI embedding for the query text."""
         try:
             response = self.openai_client.embeddings.create(
-                model="text-embedding-ada-002",
+                model=EMBEDDING_MODEL,
                 input=text
             )
             return response.data[0].embedding
