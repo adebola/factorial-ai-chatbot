@@ -4,6 +4,7 @@ Billing Service - Main Application Entry Point
 Manages subscription plans, billing, and payment processing for ChatCraft tenants.
 """
 
+import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -26,6 +27,22 @@ from .messaging.user_consumer import user_consumer
 from .services.scheduler import start_scheduler, stop_scheduler
 from .core.telemetry import setup_telemetry
 from .services.audit_publisher import audit_publisher
+
+
+class _UpgradeWarningFilter(logging.Filter):
+    """Drop uvicorn's 'Unsupported upgrade request.' warning.
+
+    Load balancers / CDNs speculatively send `Upgrade: h2c` to probe for HTTP/2.
+    Uvicorn warns and falls back to HTTP/1.1; the request still completes. The
+    warning is harmless noise that drowns real signal in prod logs.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Unsupported upgrade request" not in record.getMessage()
+
+
+for _logger_name in ("uvicorn.error", "uvicorn"):
+    logging.getLogger(_logger_name).addFilter(_UpgradeWarningFilter())
 
 # Setup logging
 setup_logging()

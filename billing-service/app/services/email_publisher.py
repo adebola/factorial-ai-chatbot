@@ -3,6 +3,7 @@ Email publisher for communications-service integration.
 
 MIGRATED TO AIO-PIKA: Now uses async-native RabbitMQ operations with automatic reconnection.
 """
+import asyncio
 import logging
 import json
 import os
@@ -34,13 +35,44 @@ class EmailPublisher:
         self.email_routing_key = "email.send"
 
         self.connection: Optional[AbstractRobustConnection] = None
+        # The event loop that owns `self.connection`. aio_pika connections are
+        # bound to the loop they were created in; reusing one across a
+        # different loop crashes inside add_done_callback. Scheduled jobs
+        # invoked via asyncio.run() (BackgroundScheduler) create a fresh loop
+        # per tick, so we must detect a loop change and reconnect.
+        self._connection_loop: Optional[asyncio.AbstractEventLoop] = None
 
         logger.info("Email publisher initialized (aio-pika)")
 
     async def connect(self):
-        """Establish robust connection with automatic reconnection."""
-        if self.connection and not self.connection.is_closed:
-            return
+        """Establish (or re-establish) a robust connection bound to the
+        current running event loop. If a cached connection exists but was
+        created in a different loop (e.g. from a previous scheduled-job
+        tick), discard it and reconnect."""
+        current_loop = asyncio.get_running_loop()
+
+        if self.connection is not None:
+            same_loop = self._connection_loop is current_loop
+            loop_alive = (
+                self._connection_loop is not None
+                and not self._connection_loop.is_closed()
+            )
+            if same_loop and loop_alive and not self.connection.is_closed:
+                return
+            # Stale: either loop changed, loop closed, or connection closed.
+            # Drop the reference; we cannot safely .close() across loops.
+            if not same_loop or not loop_alive:
+                logger.info(
+                    "Discarding email publisher connection from a stale event loop"
+                )
+            else:
+                try:
+                    if not self.connection.is_closed:
+                        await self.connection.close()
+                except Exception as e:
+                    logger.warning(f"Best-effort close of stale connection failed: {e}")
+            self.connection = None
+            self._connection_loop = None
 
         self.connection = await connect_robust(
             host=self.rabbitmq_host,
@@ -49,6 +81,7 @@ class EmailPublisher:
             password=self.rabbitmq_password,
             virtualhost=self.rabbitmq_vhost,
             reconnect_interval=1.0)
+        self._connection_loop = current_loop
 
         logger.info(f"Connected to RabbitMQ at {self.rabbitmq_host}:{self.rabbitmq_port}")
 
@@ -106,10 +139,15 @@ class EmailPublisher:
             return False
 
     async def close(self):
-        """Close connection gracefully."""
+        """Close connection gracefully and clear the cached loop reference."""
         if self.connection and not self.connection.is_closed:
-            await self.connection.close()
+            try:
+                await self.connection.close()
+            except Exception as e:
+                logger.warning(f"Email publisher close failed: {e}")
             logger.info("Email publisher closed")
+        self.connection = None
+        self._connection_loop = None
 
     async def publish_trial_expiring_email(
         self,
