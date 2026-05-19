@@ -35,13 +35,48 @@ spring:
                 allowedHeaders: "*"
                 exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
                 allowCredentials: false
-              # Tenant branding (logo) — fetched by the widget when rendering on a customer site.
-              '[/api/v1/settings-logo/**]':
-                allowedOriginPatterns: "*"
+              # Tenant logo — authenticated management endpoints (upload/delete/info/download).
+              # Used by tenant users in the user app (app.chatcraft.cc) to manage their own
+              # logo; super-admin UIs may also call these. Restricted to first-party UI
+              # origins with credentials. Listed BEFORE the widget catch-all so Spring
+              # matches these exact paths first.
+              '[/api/v1/settings-logo]':
+                allowedOriginPatterns:
+                  - https://app.chatcraft.cc
+                  - https://chatcraft-admin.web.app
+                  - https://chatcraft-admin.firebaseapp.com
+                allowedMethods: "GET, DELETE, OPTIONS"
+                allowedHeaders: "*"
+                exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
+                allowCredentials: true
+              '[/api/v1/settings-logo/upload]':
+                allowedOriginPatterns:
+                  - https://app.chatcraft.cc
+                  - https://chatcraft-admin.web.app
+                  - https://chatcraft-admin.firebaseapp.com
+                allowedMethods: "POST, OPTIONS"
+                allowedHeaders: "*"
+                exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
+                allowCredentials: true
+              '[/api/v1/settings-logo/download]':
+                allowedOriginPatterns:
+                  - https://app.chatcraft.cc
+                  - https://chatcraft-admin.web.app
+                  - https://chatcraft-admin.firebaseapp.com
                 allowedMethods: "GET, OPTIONS"
                 allowedHeaders: "*"
-                exposedHeaders: "Content-Type, Cache-Control, Content-Disposition"
-                allowCredentials: false
+                exposedHeaders: "Authorization, Content-Type, Cache-Control, X-Requested-With, x-request-id, Location, Content-Disposition"
+                allowCredentials: true
+              # NOTE: An earlier wildcard CORS rule '[/api/v1/settings-logo/**]' was
+              # added in commit 71a7376 for "the chat widget on customer sites", but the
+              # widget actually loads logos from the authorization-server path
+              # /api/v1/tenants/public/logos/{tenant_id} (see widget_service.py:170),
+              # never from /api/v1/settings-logo/*. The wildcard rule was therefore
+              # unused for the widget and conflicted with the admin POST/upload rules
+              # above — Spring's CORS path matching picked the wildcard rule first and
+              # rejected POST preflights with 403. Removed. Customer-site widgets that
+              # render the logo via <img> tags do not trigger CORS, so no rule is needed
+              # for cross-origin GET of the public logo endpoint.
               # Widget feedback (thumbs up/down) — submitted from the chat widget on customer sites.
               # Uses X-API-Key header (not cookies), so allowCredentials must be false.
               '[/api/v1/feedback/widget/**]':
