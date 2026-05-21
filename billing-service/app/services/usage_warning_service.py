@@ -102,7 +102,7 @@ class UsageWarningService:
         Args:
             tenant_id: Tenant ID
             subscription_id: Subscription ID
-            usage_type: Type of usage (documents, websites, monthly_chats)
+            usage_type: Type of usage (documents, monthly_chats)
             threshold_level: Threshold level ("80", "90", "100")
 
         Returns:
@@ -143,7 +143,7 @@ class UsageWarningService:
         Args:
             subscription: Subscription object
             plan: Plan object
-            usage_type: Type of usage (documents, websites, monthly_chats)
+            usage_type: Type of usage (documents, monthly_chats)
             current_usage: Current usage count
             limit: Maximum limit
             threshold_level: Threshold level ("80", "90", "100")
@@ -174,7 +174,6 @@ class UsageWarningService:
         # Format usage type for display
         usage_display = {
             "documents": "document uploads",
-            "websites": "website ingestions",
             "monthly_chats": "monthly chat messages"
         }.get(usage_type, usage_type)
 
@@ -256,7 +255,6 @@ class UsageWarningService:
         """
         warnings_sent = {
             "documents": 0,
-            "websites": 0,
             "monthly_chats": 0,
             "total": 0
         }
@@ -280,7 +278,6 @@ class UsageWarningService:
             # Check each usage type
             usage_checks = [
                 ("documents", usage.documents_used, plan.document_limit),
-                ("websites", usage.websites_used, plan.website_limit),
                 ("monthly_chats", usage.monthly_chats_used, plan.monthly_chat_limit)
             ]
 
@@ -345,7 +342,6 @@ class UsageWarningService:
 
             total_warnings = {
                 "documents": 0,
-                "websites": 0,
                 "monthly_chats": 0,
                 "total": 0
             }
@@ -364,7 +360,6 @@ class UsageWarningService:
                 if warnings["total"] > 0:
                     subscriptions_warned += 1
                     total_warnings["documents"] += warnings["documents"]
-                    total_warnings["websites"] += warnings["websites"]
                     total_warnings["monthly_chats"] += warnings["monthly_chats"]
                     total_warnings["total"] += warnings["total"]
 
@@ -389,6 +384,6 @@ class UsageWarningService:
             return {
                 "subscriptions_checked": 0,
                 "subscriptions_warned": 0,
-                "warnings_sent": {"documents": 0, "websites": 0, "monthly_chats": 0, "total": 0},
+                "warnings_sent": {"documents": 0, "monthly_chats": 0, "total": 0},
                 "error": str(e)
             }
