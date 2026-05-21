@@ -41,7 +41,7 @@ async def upload_logo(
             }
         )
 
-        # Publish logo uploaded event to RabbitMQ with permanent URL
+        # Publish logo-uploaded event to RabbitMQ with permanent URL
         try:
             await rabbitmq_service.publish_logo_uploaded(
                 tenant_id=tenant_id,
@@ -68,11 +68,13 @@ async def upload_logo(
         }
         
     except ValueError as e:
+        logger.error(f"Invalid logo upload request: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
     except Exception as e:
+        logger.error(f"Failed to upload company logo: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload company logo: {str(e)}"
@@ -104,9 +106,11 @@ async def get_logo_info(
             # "uploaded_at": settings.updated_at.isoformat() if settings.updated_at else settings.created_at.isoformat(),
         }
         
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(f"Failed to retrieve company logo information HTTPException: {e}")
         raise
     except Exception as e:
+        logger.error(f"Failed to retrieve company logo information: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve company logo information: {str(e)}"
@@ -127,6 +131,7 @@ async def delete_logo(
         success = settings_service.remove_company_logo(tenant_id)
         
         if not success:
+            logger.warning(f"No company logo found to remove for tenant {tenant_id}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No company logo found to remove"
@@ -145,13 +150,16 @@ async def delete_logo(
         }
         
     except ValueError as e:
+        logger.error(f"Invalid logo removal request ValueError : {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
         )
-    except HTTPException:
+    except HTTPException as e:
+        logger.error(f"Failed to remove company logo HTTPException : {e}")
         raise
     except Exception as e:
+        logger.error(f"Failed to remove company logo Exception : {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to remove company logo: {str(e)}"
@@ -191,10 +199,12 @@ async def download_logo(
                 logo_data = storage_service.download_file(object_name)
                 found_extension = ext
                 break
-            except Exception:
+            except Exception as e:
+                logger.warning(f"Failed to download logo with extension for tenant {tenant_id} with extension {ext}: {e}")
                 continue
 
         if logo_data is None:
+            logger.error(f"Logo not found for tenant {tenant_id} with object name {object_name}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Logo not found"
@@ -213,8 +223,10 @@ async def download_logo(
         )
 
     except HTTPException:
+        logger.error(f"Failed to download logo file for tenant {tenant_id}")
         raise
     except Exception as e:
+        logger.error(f"Failed to download logo file for tenant {tenant_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to download logo file: {str(e)}"
