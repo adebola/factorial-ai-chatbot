@@ -21,6 +21,7 @@ class MessageStatus(str, enum.Enum):
 class MessageType(str, enum.Enum):
     EMAIL = "email"
     SMS = "sms"
+    WHATSAPP = "whatsapp"
 
 
 class TemplateType(str, enum.Enum):
@@ -106,6 +107,59 @@ class SmsMessage(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
 
+class WhatsAppMessage(Base):
+    """WhatsApp message records (Twilio WhatsApp Business API)"""
+    __tablename__ = "whatsapp_messages"
+
+    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String(36), nullable=False, index=True)
+
+    # Direction and routing
+    direction = Column(String(10), nullable=False)  # "inbound" | "outbound"
+    wa_id = Column(String(64), nullable=True, index=True)  # sender's WhatsApp ID (E.164 without "whatsapp:" prefix)
+    chat_session_id = Column(String(36), nullable=True, index=True)  # loose ref to chat-service ChatSession
+
+    # Message details
+    to_phone = Column(String(20), nullable=False)
+    from_phone = Column(String(20), nullable=False)
+    message = Column(Text, nullable=False)
+
+    # Delivery tracking
+    status = Column(String(20), default=MessageStatus.PENDING.value, nullable=False)
+    # UNIQUE index on provider_message_id enforces idempotency for inbound webhooks
+    provider_message_id = Column(String(255), nullable=True, unique=True)
+
+    # Tracking
+    sent_at = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Error handling
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0)
+    last_retry_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class WhatsAppPhoneMapping(Base):
+    """Maps a tenant's WhatsApp Business phone number to its tenant_id.
+
+    Single source of truth for routing inbound webhooks to the correct tenant.
+    Every row is tenant-owned — there are no shared rows in this scope.
+    """
+    __tablename__ = "whatsapp_phone_mappings"
+
+    id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(String(36), nullable=False, index=True)
+    business_phone_number = Column(String(20), nullable=False, unique=True, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
 class MessageTemplate(Base):
     """Reusable message templates"""
     __tablename__ = "message_templates"
@@ -177,11 +231,19 @@ class TenantSettings(Base):
     # SMS settings
     default_from_phone = Column(String(20), nullable=True)
 
+    # WhatsApp settings (per-tenant Twilio credentials; required when whatsapp_enabled=True)
+    whatsapp_enabled = Column(Boolean, default=False, nullable=False)
+    whatsapp_twilio_sid = Column(String(255), nullable=True)
+    whatsapp_twilio_token = Column(String(255), nullable=True)
+    whatsapp_phone_number = Column(String(20), nullable=True)
+
     # Rate limiting
     daily_email_limit = Column(Integer, default=1000)
     daily_sms_limit = Column(Integer, default=100)
+    daily_whatsapp_limit = Column(Integer, default=1000)
     emails_sent_today = Column(Integer, default=0)
     sms_sent_today = Column(Integer, default=0)
+    whatsapp_sent_today = Column(Integer, default=0)
     limit_reset_date = Column(DateTime(timezone=True), server_default=func.now())
 
     # Preferences

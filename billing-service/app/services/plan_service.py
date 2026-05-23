@@ -24,7 +24,8 @@ class PlanService:
         monthly_chat_limit: int = 1500,
         monthly_plan_cost: Decimal = Decimal('0.00'),
         yearly_plan_cost: Decimal = Decimal('0.00'),
-        features: Optional[Dict[str, Any]] = None
+        features: Optional[Dict[str, Any]] = None,
+        has_whatsapp: Optional[bool] = None,
     ) -> Plan:
         """Create a new plan"""
 
@@ -45,6 +46,7 @@ class PlanService:
             monthly_plan_cost=monthly_plan_cost,
             yearly_plan_cost=yearly_plan_cost,
             features=features or {},
+            has_whatsapp=bool(has_whatsapp),
             is_active=True,
             is_deleted=False
         )
@@ -97,7 +99,8 @@ class PlanService:
         monthly_plan_cost: Optional[Decimal] = None,
         yearly_plan_cost: Optional[Decimal] = None,
         features: Optional[Dict[str, Any]] = None,
-        is_active: Optional[bool] = None
+        is_active: Optional[bool] = None,
+        has_whatsapp: Optional[bool] = None,
     ) -> Optional[Plan]:
         """Update an existing plan"""
 
@@ -132,6 +135,8 @@ class PlanService:
             plan.features = features
         if is_active is not None:
             plan.is_active = is_active
+        if has_whatsapp is not None:
+            plan.has_whatsapp = has_whatsapp
 
         plan.updated_at = datetime.now(timezone.utc)
 

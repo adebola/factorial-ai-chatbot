@@ -211,44 +211,44 @@ async def get_tenant_features(tenant_id: str, db: Session) -> dict:
         # Get tenant's current subscription
         subscription = subscription_service.get_subscription_by_tenant(tenant_id)
         if not subscription:
-            return {
-                "has_sentiment_analysis": False,
-                "has_conversational_workflow": False,
-                "has_api_access": False,
-                "has_custom_integrations": False,
-                "has_on_premise": False,
-                "analytics_level": "basic"
-            }
+            return _empty_features()
 
         # Get plan details
         plan = plan_service.get_plan_by_id(subscription.plan_id)
         if not plan:
-            return {
-                "has_sentiment_analysis": False,
-                "has_conversational_workflow": False,
-                "has_api_access": False,
-                "has_custom_integrations": False,
-                "has_on_premise": False,
-                "analytics_level": "basic"
-            }
+            return _empty_features()
 
         return {
+            # has_* convention (existing callers)
             "has_sentiment_analysis": plan.has_sentiment_analysis,
             "has_conversational_workflow": plan.has_conversational_workflow,
             "has_api_access": plan.has_api_access,
             "has_custom_integrations": plan.has_custom_integrations,
             "has_on_premise": plan.has_on_premise,
+            "has_whatsapp": plan.has_whatsapp,
             "analytics_level": plan.analytics_level,
-            "support_channels": plan.support_channels
+            "support_channels": plan.support_channels,
+            # Friendlier aliases (match format_plan_features in api/plans.py)
+            "whatsapp": plan.has_whatsapp,
         }
 
     except Exception:
         # Default to basic features if there's an error
-        return {
-            "has_sentiment_analysis": False,
-            "has_conversational_workflow": False,
-            "has_api_access": False,
-            "has_custom_integrations": False,
-            "has_on_premise": False,
-            "analytics_level": "basic"
-        }
+        return _empty_features()
+
+
+def _empty_features() -> dict:
+    """Default feature payload — used when the tenant has no subscription, no
+    plan, or an exception occurs. Keep keys in sync with the success path so
+    consumers can rely on a stable shape.
+    """
+    return {
+        "has_sentiment_analysis": False,
+        "has_conversational_workflow": False,
+        "has_api_access": False,
+        "has_custom_integrations": False,
+        "has_on_premise": False,
+        "has_whatsapp": False,
+        "analytics_level": "basic",
+        "whatsapp": False,
+    }

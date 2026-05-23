@@ -170,12 +170,15 @@ async def validate_token(
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
-        # Extract authorities and determine role
-        # Current role: ROLE_TENANT_ADMIN (tenant/organization admin)
-        # Future role: ROLE_SYSTEM_ADMIN (system-wide admin, not yet implemented)
+        # Extract authorities and determine role.
+        # ROLE_SYSTEM_ADMIN takes precedence — a system admin may also carry
+        # ROLE_TENANT_ADMIN for their own tenant but should be exposed as
+        # super_admin so super-admin-gated endpoints recognise them.
         authorities = token_info.get("authorities", [])
         role = "user"
-        if "ROLE_TENANT_ADMIN" in authorities:
+        if "ROLE_SYSTEM_ADMIN" in authorities:
+            role = "super_admin"
+        elif "ROLE_TENANT_ADMIN" in authorities:
             role = "admin"
 
         claims = TokenClaims(

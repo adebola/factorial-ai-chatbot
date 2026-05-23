@@ -1,6 +1,6 @@
 from decimal import Decimal
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional
+from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -37,6 +37,7 @@ def format_plan_features(plan: Plan) -> Dict[str, Any]:
         "api_access": plan.has_api_access,
         "custom_integrations": plan.has_custom_integrations,
         "on_premise": plan.has_on_premise,
+        "whatsapp": plan.has_whatsapp,
         "analytics_level": plan.analytics_level,
         "support_channels": support_channels
     }
@@ -52,7 +53,10 @@ class PlanCreateRequest(BaseModel):
     monthly_chat_limit: int = Field(default=1500, ge=0)
     monthly_plan_cost: Decimal = Field(default=Decimal('0.00'), ge=0)
     yearly_plan_cost: Decimal = Field(default=Decimal('0.00'), ge=0)
-    features: Optional[Dict[str, Any]] = None
+    # JSON column on the model — UI sends a list of free-text feature strings
+    # from its FormArray; other callers may send a dict. Accept both shapes.
+    features: Optional[Union[Dict[str, Any], List[Any]]] = None
+    has_whatsapp: Optional[bool] = None
 
 
 class PlanUpdateRequest(BaseModel):
@@ -64,8 +68,11 @@ class PlanUpdateRequest(BaseModel):
     monthly_chat_limit: Optional[int] = Field(None, ge=0)
     monthly_plan_cost: Optional[Decimal] = Field(None, ge=0)
     yearly_plan_cost: Optional[Decimal] = Field(None, ge=0)
-    features: Optional[Dict[str, Any]] = None
+    # JSON column on the model — UI sends a list of free-text feature strings
+    # from its FormArray; other callers may send a dict. Accept both shapes.
+    features: Optional[Union[Dict[str, Any], List[Any]]] = None
     is_active: Optional[bool] = None
+    has_whatsapp: Optional[bool] = None
 
 
 class PlanResponse(BaseModel):
@@ -107,7 +114,8 @@ async def create_plan(
             monthly_chat_limit=plan_data.monthly_chat_limit,
             monthly_plan_cost=plan_data.monthly_plan_cost,
             yearly_plan_cost=plan_data.yearly_plan_cost,
-            features=plan_data.features or {}
+            features=plan_data.features or {},
+            has_whatsapp=plan_data.has_whatsapp,
         )
 
         # Invalidate plan caches after creation
@@ -151,6 +159,7 @@ async def create_plan(
                 "monthly_plan_cost": str(plan.monthly_plan_cost),
                 "yearly_plan_cost": str(plan.yearly_plan_cost),
                 "features": plan.features,
+                "has_whatsapp": plan.has_whatsapp,
                 "is_active": plan.is_active,
                 "created_at": plan.created_at.isoformat()
             },
@@ -243,6 +252,7 @@ async def list_plans(
                     "monthly_plan_cost": str(plan.monthly_plan_cost),
                     "yearly_plan_cost": str(plan.yearly_plan_cost),
                     "features": plan.features,
+                    "has_whatsapp": plan.has_whatsapp,
                     "is_active": plan.is_active,
                     "is_deleted": plan.is_deleted,
                     "created_at": plan.created_at.isoformat(),
@@ -368,13 +378,14 @@ async def get_plan(
                 "monthly_plan_cost": str(plan.monthly_plan_cost),
                 "yearly_plan_cost": str(plan.yearly_plan_cost),
                 "features": plan.features,
+                "has_whatsapp": plan.has_whatsapp,
                 "is_active": plan.is_active,
                 "is_deleted": plan.is_deleted,
                 "created_at": plan.created_at.isoformat(),
                 "updated_at": plan.updated_at.isoformat() if plan.updated_at else None
             }
         }
-        
+
         if usage_stats:
             response["usage_stats"] = usage_stats
         
@@ -458,6 +469,7 @@ async def update_plan(
                 "monthly_plan_cost": str(plan.monthly_plan_cost),
                 "yearly_plan_cost": str(plan.yearly_plan_cost),
                 "features": plan.features,
+                "has_whatsapp": plan.has_whatsapp,
                 "is_active": plan.is_active,
                 "created_at": plan.created_at.isoformat(),
                 "updated_at": plan.updated_at.isoformat() if plan.updated_at else None

@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -153,6 +153,30 @@ async def require_system_admin(
 
     logger.info(f"System admin access granted - user_id: {claims.user_id}")
     return claims
+
+
+async def validate_internal_service(
+    x_internal_service_token: Optional[str] = Header(default=None, alias="X-Internal-Service-Token"),
+) -> None:
+    """Authenticate trusted backend-to-backend calls (e.g. communications-service
+    invoking the internal chat-generate endpoint) via a shared static token.
+
+    Raises:
+        HTTPException 500: server is misconfigured (no INTERNAL_SERVICE_TOKEN env)
+        HTTPException 401: token missing or does not match
+    """
+    expected = os.environ.get("INTERNAL_SERVICE_TOKEN")
+    if not expected:
+        logger.error("INTERNAL_SERVICE_TOKEN env var is not configured")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal service authentication is not configured",
+        )
+    if not x_internal_service_token or x_internal_service_token != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing internal service token",
+        )
 
 
 async def validate_jwt_locally(token: str) -> Dict[str, Any]:

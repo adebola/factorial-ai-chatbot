@@ -15,8 +15,10 @@ from .core.config import settings
 from .core.logging_config import setup_logging, get_logger
 from .core.telemetry import setup_telemetry
 from .services.audit_publisher import audit_publisher
-from .api import email, sms
+from .api import email, sms, whatsapp
 from .services.rabbitmq_consumer import RabbitMQConsumer
+from .services.whatsapp_consumer import whatsapp_consumer
+from .services.whatsapp_publisher import whatsapp_publisher
 
 
 @asynccontextmanager
@@ -41,11 +43,34 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Audit publisher connection failed (non-critical): {e}")
 
+    # Connect WhatsApp publisher and start WhatsApp consumer
+    try:
+        await whatsapp_publisher.connect()
+        logger.info("WhatsApp publisher connected")
+    except Exception as e:
+        logger.warning(f"WhatsApp publisher connection failed (non-critical): {e}")
+
+    try:
+        await whatsapp_consumer.start_consuming()
+        logger.info("WhatsApp consumer started")
+    except Exception as e:
+        logger.warning(f"WhatsApp consumer failed to start (non-critical): {e}")
+
     yield
 
     # Close audit publisher
     try:
         await audit_publisher.close()
+    except Exception:
+        pass
+
+    # Close WhatsApp resources
+    try:
+        await whatsapp_publisher.close()
+    except Exception:
+        pass
+    try:
+        await whatsapp_consumer.stop()
     except Exception:
         pass
 
@@ -90,6 +115,12 @@ def create_app() -> FastAPI:
         sms.router,
         prefix=f"{settings.API_V1_STR}/sms",
         tags=["sms"]
+    )
+
+    app.include_router(
+        whatsapp.router,
+        prefix=f"{settings.API_V1_STR}/whatsapp",
+        tags=["whatsapp"]
     )
 
     @app.get("/")
