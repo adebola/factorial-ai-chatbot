@@ -35,12 +35,77 @@ from .whatsapp_provider import (
 
 WHATSAPP_PREFIX = "whatsapp:"
 
+# Twilio rejects WhatsApp message bodies > 1600 chars (error 21617). This is
+# the hard ceiling we must never cross; bodies sent must be <= this.
+WHATSAPP_TWILIO_LIMIT = 1600
+# Per-chunk size budget — leaves ~100 chars headroom for the "(i/N) "
+# counter prefix and any future provider-side overhead.
+WHATSAPP_MAX_BODY = 1500
+# Hard cap on chunks so a runaway model output can't fan out 50 messages.
+WHATSAPP_MAX_CHUNKS = 5
+
 
 def _strip_whatsapp_prefix(phone: str) -> str:
     """Normalise a 'whatsapp:+E164' value back to '+E164' for storage / lookup."""
     if phone and phone.startswith(WHATSAPP_PREFIX):
         return phone[len(WHATSAPP_PREFIX):]
     return phone
+
+
+def _chunk_for_whatsapp(
+    text: str,
+    max_len: int = WHATSAPP_MAX_BODY,
+    max_chunks: int = WHATSAPP_MAX_CHUNKS,
+) -> list:
+    """Split `text` into ≤ max_chunks pieces, each ≤ max_len chars, breaking
+    at safe boundaries: paragraph (\\n\\n), then line (\\n), then sentence
+    ('. '), then space, falling back to a hard cut.
+
+    If the text would need more than `max_chunks` chunks, the last chunk is
+    a hard truncation and an ellipsis is appended so the recipient sees that
+    the reply was cut off.
+    """
+    if not text:
+        return [""]
+    if len(text) <= max_len:
+        return [text]
+
+    chunks: list = []
+    remaining = text.strip()
+    while remaining and len(chunks) < max_chunks:
+        if len(remaining) <= max_len:
+            chunks.append(remaining)
+            remaining = ""
+            break
+
+        window = remaining[:max_len]
+        # Try increasingly-loose breakpoints; require at least max_len/2 of
+        # content to avoid producing tiny dribbles.
+        floor = max_len // 2
+        cut = window.rfind("\n\n")
+        if cut < floor:
+            cut = window.rfind("\n")
+        if cut < floor:
+            sent = window.rfind(". ")
+            cut = sent + 1 if sent >= floor else -1
+        if cut < floor:
+            cut = window.rfind(" ")
+        if cut <= 0:
+            cut = max_len  # hard cut
+
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip()
+
+    if remaining:
+        # We hit max_chunks but still have text left — truncate the last
+        # chunk to signal there's more.
+        last = chunks[-1].rstrip()
+        suffix = " …(message truncated)"
+        if len(last) + len(suffix) > max_len:
+            last = last[: max_len - len(suffix)].rstrip()
+        chunks[-1] = last + suffix
+
+    return chunks
 
 
 class WhatsAppServiceError(Exception):
@@ -339,34 +404,64 @@ class WhatsAppService:
         reply_text = reply.get("content") or "I'm not able to respond right now."
         session_id = reply.get("session_id")
 
-        try:
-            outbound_id, success = self.send_whatsapp_message(
-                tenant_id=inbound.tenant_id,
-                to_phone=inbound.from_phone,
-                message=reply_text,
-                chat_session_id=session_id,
-                wa_id=inbound.wa_id,
-            )
-        except WhatsAppRateLimitExceeded:
-            # Drop the reply rather than requeue — the limit only resets on the
-            # next UTC day, so retrying immediately would just loop.
-            self.logger.warning(
-                "Skipping reply: daily WhatsApp limit exceeded",
-                extra={"tenant_id": inbound.tenant_id, "inbound_message_id": inbound_message_id},
-            )
-            return None
-        except TenantNotConfiguredError as exc:
-            self.logger.warning(
-                f"Cannot reply — tenant misconfigured: {exc}",
-                extra={"tenant_id": inbound.tenant_id, "inbound_message_id": inbound_message_id},
-            )
-            return None
+        chunks = _chunk_for_whatsapp(reply_text)
+        total = len(chunks)
+        first_outbound_id: Optional[str] = None
+        any_success = False
 
-        if success:
-            # Link the inbound row to the resolved chat-session for traceability
-            inbound.chat_session_id = session_id
-            self.db.commit()
-        return outbound_id if success else None
+        for index, chunk in enumerate(chunks):
+            body = chunk if total == 1 else f"({index + 1}/{total}) {chunk}"
+            try:
+                outbound_id, success = self.send_whatsapp_message(
+                    tenant_id=inbound.tenant_id,
+                    to_phone=inbound.from_phone,
+                    message=body,
+                    chat_session_id=session_id,
+                    wa_id=inbound.wa_id,
+                )
+            except WhatsAppRateLimitExceeded:
+                self.logger.warning(
+                    "Stopping multi-chunk reply: daily WhatsApp limit exceeded",
+                    extra={
+                        "tenant_id": inbound.tenant_id,
+                        "inbound_message_id": inbound_message_id,
+                        "chunks_sent": index,
+                        "chunks_total": total,
+                    },
+                )
+                break
+            except TenantNotConfiguredError as exc:
+                self.logger.warning(
+                    f"Cannot reply — tenant misconfigured: {exc}",
+                    extra={"tenant_id": inbound.tenant_id, "inbound_message_id": inbound_message_id},
+                )
+                return None
+
+            if success:
+                any_success = True
+                if first_outbound_id is None:
+                    first_outbound_id = outbound_id
+                # After the first successful send, mark the inbound row so a
+                # requeue (e.g. RabbitMQ redelivery) doesn't replay chunks
+                # and produce duplicate replies.
+                if inbound.chat_session_id is None:
+                    inbound.chat_session_id = session_id
+                    self.db.commit()
+            else:
+                # Stop sending subsequent chunks if one fails — sending part 3
+                # without part 2 is worse than just stopping.
+                self.logger.warning(
+                    "Stopping multi-chunk reply: chunk failed at provider",
+                    extra={
+                        "tenant_id": inbound.tenant_id,
+                        "inbound_message_id": inbound_message_id,
+                        "failed_chunk": index + 1,
+                        "chunks_total": total,
+                    },
+                )
+                break
+
+        return first_outbound_id if any_success else None
 
     def _call_chat_service(
         self,

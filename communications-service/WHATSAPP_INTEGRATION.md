@@ -163,7 +163,7 @@ billing-service/app/
 | `INTERNAL_SERVICE_TOKEN` | yes | — | Shared static secret. **Must match `chat-service/.env`**. |
 | `BILLING_SERVICE_URL` | yes | `http://localhost:8004` | Used by `/admin/whatsapp/setup` to verify the tenant's plan has the `whatsapp` feature. Must match where billing-service is actually listening. |
 | `WHATSAPP_STATUS_CALLBACK_URL` | no | — | Full URL Twilio will POST delivery-status updates to for outbound messages. E.g. `https://api.chatcraft.cc/api/v1/whatsapp/webhooks/twilio/status`. If unset, falls back to `${PUBLIC_BASE_URL}/api/v1/whatsapp/webhooks/twilio/status`. If neither env var is set, no `status_callback` is sent to Twilio and only whatever default the tenant has configured on the number in the Twilio Console will fire. |
-| `PUBLIC_BASE_URL` | no | — | Optional base URL of the public gateway (used to derive the status callback URL when `WHATSAPP_STATUS_CALLBACK_URL` is not explicitly set). |
+| `PUBLIC_BASE_URL` | **yes in any non-local deployment** | — | Public base URL of the gateway (e.g. `https://api.chatcraft.cc`). Used for **two** things: (1) reconstructing the URL Twilio signed when verifying incoming webhooks — without this, multi-proxy deployments will rebuild the URL using the internal service name and HMAC verification will fail with 403; (2) deriving the status-callback URL when `WHATSAPP_STATUS_CALLBACK_URL` is not explicitly set. |
 
 Twilio credentials are **not** stored in `.env` — they live in the database
 per tenant. The existing `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` env vars

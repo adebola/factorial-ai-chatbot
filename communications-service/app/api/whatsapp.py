@@ -442,11 +442,30 @@ def _verify_twilio_signature(url: str, form: Dict[str, str], signature: str, aut
 def _public_webhook_url(request: Request) -> str:
     """Build the URL Twilio used when signing the request.
 
-    Honors X-Forwarded-Proto / X-Forwarded-Host (set by the gateway) so
-    behind-proxy deployments validate correctly.
+    Twilio signs against the URL Twilio itself was configured to POST to —
+    i.e. the public-facing URL (e.g. `https://api.chatcraft.cc/...`). The
+    request arriving at this FastAPI app, however, has typically been
+    proxied through a load-balancer and a gateway, so `request.url` and
+    even the `Host` header have been rewritten to internal hostnames
+    (e.g. `communications-service:8000`).
+
+    Resolution order (highest priority wins):
+      1. `PUBLIC_BASE_URL` env var — explicit, robust against any proxy
+         chain. Recommended in any non-local deployment.
+      2. `X-Forwarded-Proto` + `X-Forwarded-Host` headers — when the
+         gateway forwards them faithfully.
+      3. Raw request URL — the local dev case where there's no proxy.
     """
+    public_base = os.environ.get("PUBLIC_BASE_URL")
+    if public_base:
+        return f"{public_base.rstrip('/')}{request.url.path}"
+
     scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
-    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    host = (
+        request.headers.get("x-forwarded-host")
+        or request.headers.get("host")
+        or request.url.netloc
+    )
     return f"{scheme}://{host}{request.url.path}"
 
 

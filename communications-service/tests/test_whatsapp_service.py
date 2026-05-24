@@ -18,8 +18,12 @@ from app.models.communications import (
 )
 from app.services.whatsapp_service import (
     TenantNotConfiguredError,
+    WHATSAPP_MAX_BODY,
+    WHATSAPP_MAX_CHUNKS,
+    WHATSAPP_TWILIO_LIMIT,
     WhatsAppRateLimitExceeded,
     WhatsAppService,
+    _chunk_for_whatsapp,
     _strip_whatsapp_prefix,
 )
 
@@ -264,6 +268,151 @@ class TestHandleIncomingMessage:
             outbound_id = service.handle_incoming_message(inbound_id)
             assert outbound_id is None
             mock_client_cls.assert_not_called()
+
+
+class TestChunkForWhatsApp:
+    """The chunker prevents Twilio error 21617 (>1600-char WhatsApp body)."""
+
+    def test_short_text_returns_single_chunk(self):
+        chunks = _chunk_for_whatsapp("hi there")
+        assert chunks == ["hi there"]
+
+    def test_at_limit_returns_single_chunk(self):
+        text = "a" * WHATSAPP_MAX_BODY
+        chunks = _chunk_for_whatsapp(text)
+        assert chunks == [text]
+        assert len(chunks[0]) == WHATSAPP_MAX_BODY
+
+    def test_over_limit_is_split_at_paragraph_break(self):
+        para1 = "x" * 1400
+        para2 = "y" * 1200
+        text = f"{para1}\n\n{para2}"
+        chunks = _chunk_for_whatsapp(text)
+        assert len(chunks) == 2
+        assert chunks[0] == para1
+        assert chunks[1] == para2
+        assert all(len(c) <= WHATSAPP_MAX_BODY for c in chunks)
+
+    def test_over_limit_no_paragraph_falls_back_to_sentence(self):
+        # Two sentences each long enough that neither alone hits max_len but
+        # together exceed it. The boundary should land at the ". " between them.
+        s1 = "A" * 1200 + "."
+        s2 = "B" * 1000 + "."
+        text = f"{s1} {s2}"
+        chunks = _chunk_for_whatsapp(text)
+        assert len(chunks) >= 2
+        # The first chunk ends with the period of sentence 1
+        assert chunks[0].endswith(".")
+        assert all(len(c) <= WHATSAPP_MAX_BODY for c in chunks)
+
+    def test_hard_cut_when_no_boundaries(self):
+        # Pathological case: one long line, no spaces, no punctuation
+        text = "z" * (WHATSAPP_MAX_BODY * 2 + 50)
+        chunks = _chunk_for_whatsapp(text)
+        assert len(chunks) >= 2
+        assert all(len(c) <= WHATSAPP_MAX_BODY for c in chunks)
+
+    def test_exceeding_max_chunks_truncates_last_chunk(self):
+        text = ("paragraph " * 200 + "\n\n") * (WHATSAPP_MAX_CHUNKS + 2)
+        chunks = _chunk_for_whatsapp(text)
+        assert len(chunks) == WHATSAPP_MAX_CHUNKS
+        assert chunks[-1].endswith("…(message truncated)")
+        assert all(len(c) <= WHATSAPP_MAX_BODY for c in chunks)
+
+    def test_empty_text(self):
+        assert _chunk_for_whatsapp("") == [""]
+        assert _chunk_for_whatsapp(None) == [""]  # type: ignore[arg-type]
+
+
+class TestHandleIncomingMessageChunking:
+    """End-to-end: when chat-service returns a long reply, the consumer sends
+    multiple WhatsApp messages with numbered prefixes."""
+
+    @pytest.fixture(autouse=True)
+    def _setup_env(self, monkeypatch):
+        monkeypatch.setenv("WHATSAPP_PROVIDER", "mock")
+        monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "test-internal-token")
+        yield
+
+    def test_long_reply_sent_as_multiple_chunks(self, db_session):
+        _configure_tenant(db_session, TENANT_A, PHONE_A)
+        service = WhatsAppService(db_session)
+        record, _ = service.record_inbound(
+            tenant_id=TENANT_A,
+            provider_message_id="SM_long_inbound",
+            from_phone=PHONE_B, to_phone=PHONE_A,
+            message_body="Tell me everything",
+        )
+
+        long_reply = "paragraph " * 250 + "\n\n" + "more " * 300 + "\n\n" + "final " * 200
+        fake_response = MagicMock()
+        fake_response.json.return_value = {
+            "content": long_reply,
+            "sources": [],
+            "session_id": "session-long",
+            "metadata": {},
+        }
+        fake_response.raise_for_status = MagicMock()
+
+        with patch("app.services.whatsapp_service.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__.return_value = mock_client
+            mock_client.__exit__.return_value = False
+            mock_client.post.return_value = fake_response
+            mock_client_cls.return_value = mock_client
+
+            first_outbound_id = service.handle_incoming_message(record.id)
+
+        assert first_outbound_id is not None
+        outbound_rows = (
+            db_session.query(WhatsAppMessage)
+            .filter_by(tenant_id=TENANT_A, direction="outbound")
+            .order_by(WhatsAppMessage.created_at.asc())
+            .all()
+        )
+        assert len(outbound_rows) >= 2
+        # Final bodies including the "(N/M) " prefix must stay under
+        # Twilio's hard limit (which is what triggers error 21617).
+        assert all(len(r.message) <= WHATSAPP_TWILIO_LIMIT for r in outbound_rows)
+        # Each chunk is prefixed with its (i/N) counter
+        for i, row in enumerate(outbound_rows):
+            assert row.message.startswith(f"({i + 1}/{len(outbound_rows)}) ")
+
+    def test_short_reply_sent_as_single_message_no_counter(self, db_session):
+        _configure_tenant(db_session, TENANT_A, PHONE_A)
+        service = WhatsAppService(db_session)
+        record, _ = service.record_inbound(
+            tenant_id=TENANT_A,
+            provider_message_id="SM_short_inbound",
+            from_phone=PHONE_B, to_phone=PHONE_A,
+            message_body="Hi",
+        )
+
+        fake_response = MagicMock()
+        fake_response.json.return_value = {
+            "content": "Hi back!",
+            "sources": [],
+            "session_id": "session-short",
+            "metadata": {},
+        }
+        fake_response.raise_for_status = MagicMock()
+        with patch("app.services.whatsapp_service.httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client.__enter__.return_value = mock_client
+            mock_client.__exit__.return_value = False
+            mock_client.post.return_value = fake_response
+            mock_client_cls.return_value = mock_client
+
+            service.handle_incoming_message(record.id)
+
+        outbound = (
+            db_session.query(WhatsAppMessage)
+            .filter_by(tenant_id=TENANT_A, direction="outbound")
+            .all()
+        )
+        assert len(outbound) == 1
+        # No "(1/1)" prefix when it's a single chunk
+        assert outbound[0].message == "Hi back!"
 
 
 class TestStatusCallbackWiring:

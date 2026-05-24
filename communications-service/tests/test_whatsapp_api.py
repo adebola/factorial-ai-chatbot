@@ -181,6 +181,32 @@ class TestIncomingWebhookHmac:
         assert resp.status_code == 403
         assert db_session.query(WhatsAppMessage).count() == 0
 
+    def test_public_base_url_env_overrides_proxied_host(self, client, db_session, monkeypatch):
+        """When `PUBLIC_BASE_URL` is set, the HMAC URL is reconstructed
+        from it — not from request.url or the Host header. This is the
+        production-behind-multi-proxy case where Host has been rewritten
+        to the internal service name (e.g. communications-service:8000)
+        but Twilio signed against the public-facing api.chatcraft.cc.
+        """
+        monkeypatch.setenv("PUBLIC_BASE_URL", "https://api.chatcraft.cc")
+        _seed_tenant(db_session, TENANT_A, PHONE_A, SID_A, TOKEN_A)
+
+        # Sign against the public URL — what real Twilio would do
+        public_url = f"https://api.chatcraft.cc{WHATSAPP_PREFIX_PATH}/webhooks/twilio/incoming"
+        form = _incoming_form("SM_pub_1", PHONE_B, PHONE_A, "via public host")
+        sig = _twilio_sig(public_url, form, TOKEN_A)
+
+        # POST through the TestClient (which sends Host: testserver)
+        resp = client.post(
+            f"{WHATSAPP_PREFIX_PATH}/webhooks/twilio/incoming",
+            data=form,
+            headers={"X-Twilio-Signature": sig},
+        )
+        assert resp.status_code == 200
+        # And the inbound row is persisted
+        rows = db_session.query(WhatsAppMessage).filter_by(provider_message_id="SM_pub_1").all()
+        assert len(rows) == 1
+
     def test_idempotent_on_duplicate_MessageSid(self, client, db_session):
         _seed_tenant(db_session, TENANT_A, PHONE_A, SID_A, TOKEN_A)
 
