@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.ProviderManager;
@@ -78,6 +79,7 @@ public class SecurityConfig {
 			.authorizeHttpRequests((authorize) -> authorize
 				.requestMatchers("/api/v1/tenants/lookup-by-api-key").permitAll() // Public tenant lookup for chat widget
 				.requestMatchers("/api/v1/tenants/{id}").permitAll() // Public tenant lookup by ID for inter-service calls
+				.requestMatchers(HttpMethod.GET, "/api/v1/tenants/{id}/settings").permitAll() // Public tenant settings read for inter-service calls (chat-service fallback behaviour); mutations (PUT/POST/DELETE) still require auth
 				.anyRequest().authenticated() // All other API endpoints require authentication
 			)
 			.oauth2ResourceServer((resourceServer) -> resourceServer
