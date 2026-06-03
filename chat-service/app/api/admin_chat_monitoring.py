@@ -1,3 +1,4 @@
+import asyncio
 import json
 import math
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -154,17 +155,30 @@ async def list_monitoring_sessions(
     total_pages = math.ceil(total / size) if total > 0 else 0
 
     rows = (
-        query.order_by(desc(ChatSession.last_activity))
+        query.order_by(desc(ChatSession.created_at))
         .offset(page * size)
         .limit(size)
         .all()
     )
+
+    # Resolve tenant names once per distinct tenant on this page (Redis-cached lookups).
+    tenant_client = TenantClient()
+    distinct_tenant_ids = {session.tenant_id for session, _ in rows if session.tenant_id}
+    tenant_ids = list(distinct_tenant_ids)
+    tenants = await asyncio.gather(
+        *(tenant_client.get_tenant_by_id(tid) for tid in tenant_ids)
+    )
+    tenant_names = {
+        tid: (tenant.get("name") if tenant else None)
+        for tid, tenant in zip(tenant_ids, tenants)
+    }
 
     content = []
     for session, msg_count in rows:
         content.append(ChatMonitoringSession(
             id=session.session_id,
             tenant_id=session.tenant_id,
+            tenant_name=tenant_names.get(session.tenant_id),
             user_id=session.user_identifier,
             user_email=session.auth_user_email,
             status=_derive_status(session.is_active, session.last_activity),
@@ -202,9 +216,13 @@ async def get_monitoring_session(
         ChatMessage.session_id == session_id
     ).scalar()
 
+    tenant = await TenantClient().get_tenant_by_id(session.tenant_id)
+    tenant_name = tenant.get("name") if tenant else None
+
     return ChatMonitoringSession(
         id=session.session_id,
         tenant_id=session.tenant_id,
+        tenant_name=tenant_name,
         user_id=session.user_identifier,
         user_email=session.auth_user_email,
         status=_derive_status(session.is_active, session.last_activity),
